@@ -18,12 +18,20 @@ class ToolMissing(RuntimeError):
 async def check_tools(tools: list[str]) -> None:
     """Verify every tool in *tools* exists on PATH.
 
-    Raises :class:`ToolMissing` listing all missing tools.
+    Attempts auto-install for missing tools before raising.
+    Raises :class:`ToolMissing` if tools are still missing after install.
     """
     missing = [t for t in tools if shutil.which(t) is None]
-    if missing:
+    if not missing:
+        return
+
+    # Try auto-install
+    from wireghost.utils.installer import install_missing_tools
+    still_missing = install_missing_tools(missing)
+
+    if still_missing:
         raise ToolMissing(
-            f"Required tool(s) not found: {', '.join(missing)}"
+            f"Required tool(s) not found: {', '.join(still_missing)}"
         )
 
 
