@@ -9,13 +9,48 @@ from typing import TYPE_CHECKING
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
     from wireghost.models.finding import Finding
     from wireghost.models.report import ScanReport
     from wireghost.models.scan import Host
+
+# Brand color from reference document
+_GREEN = RGBColor(0x00, 0x6D, 0x38)
+_RED = RGBColor(0xFF, 0x00, 0x00)
+_BLACK = RGBColor(0x00, 0x00, 0x00)
+
+
+def _apply_styles(doc: Document) -> None:
+    """Set document-wide font and heading styles to match reference."""
+    # Normal: Calibri 11pt black
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    normal.font.size = Pt(11)
+    normal.font.color.rgb = _BLACK
+
+    # Heading 1: 14pt bold #006D38
+    h1 = doc.styles["Heading 1"]
+    h1.font.name = "Calibri"
+    h1.font.size = Pt(14)
+    h1.font.bold = True
+    h1.font.color.rgb = _GREEN
+
+    # Heading 2: 13pt bold #006D38
+    h2 = doc.styles["Heading 2"]
+    h2.font.name = "Calibri"
+    h2.font.size = Pt(13)
+    h2.font.bold = True
+    h2.font.color.rgb = _GREEN
+
+    # Heading 3: 12pt bold #006D38
+    h3 = doc.styles["Heading 3"]
+    h3.font.name = "Calibri"
+    h3.font.size = Pt(12)
+    h3.font.bold = True
+    h3.font.color.rgb = _GREEN
 
 
 _DISCLAIMER = (
@@ -59,6 +94,7 @@ class DocxRenderer:
         reports_dir: Path,
     ) -> Path:
         doc = Document()
+        _apply_styles(doc)
 
         self._cover_page(doc, config, report)
         self._executive_summary(doc, config, report)
@@ -84,20 +120,23 @@ class DocxRenderer:
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = title.add_run(report.target)
         run.bold = True
-        run.font.size = Pt(28)
+        run.font.size = Pt(22)
 
         subtitle = doc.add_paragraph()
         subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = subtitle.add_run("Vulnerability Assessment Report")
         run.bold = True
-        run.font.size = Pt(18)
+        run.font.size = Pt(22)
 
         doc.add_paragraph()
 
         # Disclaimer
         doc.add_paragraph()
         disc_title = doc.add_paragraph()
-        disc_title.add_run("DISCLAIMER").bold = True
+        disc_run = disc_title.add_run("DISCLAIMER")
+        disc_run.bold = True
+        disc_run.font.size = Pt(14)
+        disc_run.font.color.rgb = _RED
         doc.add_paragraph(_DISCLAIMER)
 
         doc.add_paragraph()
