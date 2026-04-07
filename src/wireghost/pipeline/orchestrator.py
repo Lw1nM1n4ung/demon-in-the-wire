@@ -69,24 +69,46 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         )
         return report
 
-    # --- Phase 3: Port scanning ---
-    log.info("Phase 3: Port scanning %d host(s)", len(live_ips))
+    # --- Per-host pipeline (1 host = 1 full pipeline, all in parallel) ---
+    log.info(
+        "Launching per-host pipelines: %d host(s), parallelism=%d",
+        len(live_ips), config.parallelism,
+    )
     sem = asyncio.Semaphore(config.parallelism)
-    host_tasks = [scan_host(ip, config, tree, sem) for ip in live_ips]
-    hosts: list[Host] = await asyncio.gather(*host_tasks)
 
-    # --- Phase 4: Web detection ---
-    log.info("Phase 4: Web detection")
-    web_tasks = [probe_host(h, config, tree, sem) for h in hosts]
-    await asyncio.gather(*web_tasks)
+    async def _host_pipeline(ip: str) -> tuple[Host, list[Finding]]:
+        """Run the full scan pipeline for a single host."""
+        # Phase 3: Port scan (with fallback chain)
+        host = await scan_host(ip, config, tree, sem)
+        if not host.open_ports:
+            log.info("[%s] No open ports — skipping web/vuln phases", ip)
+            return host, []
 
-    # --- Phase 5: Vulnerability scanning ---
-    log.info("Phase 5: Vulnerability scanning")
-    vuln_tasks = [scan_host_vulns(h, config, tree, sem) for h in hosts]
-    all_findings_lists: list[list[Finding]] = await asyncio.gather(*vuln_tasks)
+        # Phase 4: Web detection
+        await probe_host(host, config, tree, sem)
 
+        # Phase 5: Vulnerability scanning (nuclei + nmap concurrent)
+        findings = await scan_host_vulns(host, config, tree, sem)
+
+        log.info(
+            "[%s] Pipeline done: %d port(s), %d endpoint(s), %d finding(s)",
+            ip, len(host.open_ports), len(host.web_endpoints), len(findings),
+        )
+        return host, findings
+
+    results = await asyncio.gather(
+        *[_host_pipeline(ip) for ip in live_ips],
+        return_exceptions=True,
+    )
+
+    hosts: list[Host] = []
     all_findings: list[Finding] = []
-    for findings in all_findings_lists:
+    for r in results:
+        if isinstance(r, Exception):
+            log.error("Host pipeline failed: %s", r)
+            continue
+        host, findings = r
+        hosts.append(host)
         all_findings.extend(findings)
 
     scan_end = datetime.now()
