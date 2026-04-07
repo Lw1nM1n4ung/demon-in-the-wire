@@ -209,24 +209,24 @@ class DocxRenderer:
         header.is_linked_to_previous = False
         hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
 
-        # Left logo (logo_header): anchored at margin left
-        if header_logo:
-            anchor = _make_anchor_image(
-                header.part, str(header_logo),
-                width=Emu(945515), height=Emu(531495),     # 1.03 x 0.58 in
-                pos_h_from="margin", pos_h_offset=-695960,  # left side
-                pos_v_from="paragraph", pos_v_offset=-296545,
-            )
-            run = hp.add_run()
-            run._element.append(anchor)
-
-        # Right logo (main logo): anchored at column right
+        # LEFT: main logo (logo.png, 0.92x0.52in) at margin left
         if logo:
             anchor = _make_anchor_image(
                 header.part, str(logo),
                 width=Emu(838200), height=Emu(472440),      # 0.92 x 0.52 in
-                pos_h_from="column", pos_h_offset=5763260,   # right side
+                pos_h_from="margin", pos_h_offset=-695960,   # left side
                 pos_v_from="paragraph", pos_v_offset=-291465,
+            )
+            run = hp.add_run()
+            run._element.append(anchor)
+
+        # RIGHT: secondary logo (logo_header.png, 1.03x0.58in) at column right
+        if header_logo:
+            anchor = _make_anchor_image(
+                header.part, str(header_logo),
+                width=Emu(945515), height=Emu(531495),     # 1.03 x 0.58 in
+                pos_h_from="column", pos_h_offset=5763260,  # right side
+                pos_v_from="paragraph", pos_v_offset=-296545,
             )
             run = hp.add_run()
             run._element.append(anchor)
@@ -243,7 +243,7 @@ class DocxRenderer:
             anchor = _make_anchor_image(
                 doc.part, str(logo),
                 width=Emu(2286000), height=Emu(1288415),  # 2.50 x 1.41 in
-                pos_h_from="margin", pos_h_offset=1600000,  # centered approx
+                pos_h_from="margin", pos_h_offset=1840230,  # centered (exact from reference)
                 pos_v_from="margin", pos_v_offset=0,
             )
             run = logo_para.add_run()
