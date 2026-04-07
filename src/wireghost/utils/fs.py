@@ -50,7 +50,7 @@ def build_output_tree(output_dir: str | Path, target_name: str) -> OutputTree:
                 reports/
                 ips/
     """
-    base = Path(output_dir) / target_name
+    base = Path(output_dir).resolve() / target_name
     live_host_dir = base / "live_hosts"
     web_dir = base / "web"
     reports_dir = base / "reports"

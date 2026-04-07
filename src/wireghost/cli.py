@@ -89,6 +89,7 @@ def scan(
         **overrides,
     )
 
+    cfg.output_dir = cfg.output_dir.resolve()
     console.print(f"[bold green]Wire_Ghost v{__version__}[/]")
     console.print(f"Target: [bold]{cfg.target}[/]")
     console.print(f"Output: {cfg.output_dir}")
