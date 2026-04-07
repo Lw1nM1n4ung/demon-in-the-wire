@@ -37,13 +37,20 @@ def setup_logging(
 
     if output_dir is not None:
         log_path = Path(output_dir) / "wireghost.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(str(log_path))
-        file_handler.setLevel(logging.DEBUG)
-        fmt = logging.Formatter(
-            "%(asctime)s %(levelname)-8s %(name)s - %(message)s"
-        )
-        file_handler.setFormatter(fmt)
-        logger.addHandler(file_handler)
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(str(log_path))
+            file_handler.setLevel(logging.DEBUG)
+            fmt = logging.Formatter(
+                "%(asctime)s %(levelname)-8s %(name)s - %(message)s"
+            )
+            file_handler.setFormatter(fmt)
+            logger.addHandler(file_handler)
+        except PermissionError:
+            logger.warning(
+                "Cannot write log to %s (permission denied). "
+                "Run: sudo chown -R $(whoami) %s",
+                log_path, log_path.parent,
+            )
 
     return logger

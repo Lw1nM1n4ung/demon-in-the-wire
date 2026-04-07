@@ -1,10 +1,12 @@
 services:
   wireghost:
     build: .
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./output:/data/output
     environment:
       - WIREGHOST_OUTPUT_DIR=/data/output
+      - HOME=/tmp
     network_mode: host
 
   nmap:
