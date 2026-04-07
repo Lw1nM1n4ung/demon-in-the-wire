@@ -96,7 +96,7 @@ class DocxRenderer:
         doc = Document()
         _apply_styles(doc)
 
-        logo = self._resolve_logo(config)
+        logo, header_logo = self._resolve_logos(config)
 
         self._cover_page(doc, config, report, logo)
         self._executive_summary(doc, config, report)
@@ -105,30 +105,48 @@ class DocxRenderer:
         self._open_ports(doc, report)
         self._identified_issues(doc, report)
 
-        if logo:
-            self._add_header_logo(doc, logo)
+        self._add_header_logos(doc, logo, header_logo)
 
         out = reports_dir / "security_report.docx"
         doc.save(str(out))
         return out
 
     @staticmethod
-    def _resolve_logo(config: ScanConfig) -> Path | None:
-        """Resolve logo path from config or WIREGHOST_LOGO env."""
-        logo = getattr(config, "logo_path", None)
-        if logo and Path(logo).is_file():
-            return Path(logo)
-        return None
+    def _resolve_logos(config: ScanConfig) -> tuple[Path | None, Path | None]:
+        """Resolve logo paths. Custom from config/env, or built-in defaults."""
+        assets = Path(__file__).parent / "assets"
+        default_logo = assets / "logo.png"
+        default_header = assets / "logo_header.png"
+
+        # Custom logo overrides both
+        custom = getattr(config, "logo_path", None)
+        if custom and Path(custom).is_file():
+            return Path(custom), Path(custom)
+
+        # Use built-in defaults
+        logo = default_logo if default_logo.is_file() else None
+        header = default_header if default_header.is_file() else None
+        return logo, header
 
     @staticmethod
-    def _add_header_logo(doc: Document, logo: Path) -> None:
-        """Add logo to the page header (appears on every page)."""
+    def _add_header_logos(
+        doc: Document, logo: Path | None, header_logo: Path | None,
+    ) -> None:
+        """Add logos to the page header (appears on every page)."""
+        if not logo and not header_logo:
+            return
         section = doc.sections[0]
         header = section.header
         header.is_linked_to_previous = False
         hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
-        run = hp.add_run()
-        run.add_picture(str(logo), width=Inches(1.0))
+
+        if header_logo:
+            run = hp.add_run()
+            run.add_picture(str(header_logo), width=Inches(1.0))
+        if logo:
+            hp.add_run("    ")
+            run = hp.add_run()
+            run.add_picture(str(logo), width=Inches(1.0))
 
     # ------------------------------------------------------------------ #
 
