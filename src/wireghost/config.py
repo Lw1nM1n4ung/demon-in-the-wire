@@ -31,6 +31,7 @@ class ScanConfig:
     )
     report_title: str = "Security Assessment Summary Report"
     verbose: bool = False
+    logo_path: Path | None = None
 
     @classmethod
     def load(
@@ -107,11 +108,12 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "report_formats": "report_formats",
         "report_title": "report_title",
         "verbose": "verbose",
+        "logo_path": "logo_path",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
             value = data[yaml_key]
-            if attr == "output_dir":
+            if attr in ("output_dir", "logo_path"):
                 value = Path(str(value))
             setattr(cfg, attr, value)
 
@@ -127,6 +129,7 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_TOOL_TIMEOUT": ("tool_timeout", float),
         "WIREGHOST_REPORT_TITLE": ("report_title", str),
         "WIREGHOST_VERBOSE": ("verbose", bool),
+        "WIREGHOST_LOGO": ("logo_path", Path),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

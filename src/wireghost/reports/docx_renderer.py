@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
@@ -96,24 +96,53 @@ class DocxRenderer:
         doc = Document()
         _apply_styles(doc)
 
-        self._cover_page(doc, config, report)
+        logo = self._resolve_logo(config)
+
+        self._cover_page(doc, config, report, logo)
         self._executive_summary(doc, config, report)
         self._target_subnets(doc, report)
         self._live_hosts(doc, report)
         self._open_ports(doc, report)
         self._identified_issues(doc, report)
 
+        if logo:
+            self._add_header_logo(doc, logo)
+
         out = reports_dir / "security_report.docx"
         doc.save(str(out))
         return out
 
+    @staticmethod
+    def _resolve_logo(config: ScanConfig) -> Path | None:
+        """Resolve logo path from config or WIREGHOST_LOGO env."""
+        logo = getattr(config, "logo_path", None)
+        if logo and Path(logo).is_file():
+            return Path(logo)
+        return None
+
+    @staticmethod
+    def _add_header_logo(doc: Document, logo: Path) -> None:
+        """Add logo to the page header (appears on every page)."""
+        section = doc.sections[0]
+        header = section.header
+        header.is_linked_to_previous = False
+        hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+        run = hp.add_run()
+        run.add_picture(str(logo), width=Inches(1.0))
+
     # ------------------------------------------------------------------ #
 
     def _cover_page(
-        self, doc: Document, config: ScanConfig, report: ScanReport
+        self, doc: Document, config: ScanConfig, report: ScanReport,
+        logo: Path | None = None,
     ) -> None:
-        # Title
-        doc.add_paragraph()
+        # Cover logo (centered, ~2.5 inches)
+        if logo:
+            logo_para = doc.add_paragraph()
+            logo_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = logo_para.add_run()
+            run.add_picture(str(logo), width=Inches(2.5))
+
         doc.add_paragraph()
 
         title = doc.add_paragraph()
