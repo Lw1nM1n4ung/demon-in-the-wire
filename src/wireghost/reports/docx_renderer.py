@@ -205,6 +205,7 @@ class DocxRenderer:
         if not logo and not header_logo:
             return
         section = doc.sections[0]
+        section.different_first_page_header_footer = True  # cover page: no header
         header = section.header
         header.is_linked_to_previous = False
         hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
