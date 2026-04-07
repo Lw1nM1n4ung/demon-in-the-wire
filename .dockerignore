@@ -1,7 +1,14 @@
 .git
 script/
 tests/
-*.pyc
-__pycache__
-.claude/
 docs/
+.claude/
+__pycache__
+**/__pycache__
+**/*.pyc
+*.egg-info
+**/*.egg-info
+.pytest_cache
+output/
+*.log
+wireghost.yml

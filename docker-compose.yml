@@ -3,11 +3,9 @@ services:
     build: .
     volumes:
       - scan-data:/data/output
-      - ./wireghost.yml:/app/wireghost.yml:ro
     environment:
       - WIREGHOST_OUTPUT_DIR=/data/output
     network_mode: host
-    entrypoint: ["wireghost"]
 
   nmap:
     image: instrumentisto/nmap:latest
