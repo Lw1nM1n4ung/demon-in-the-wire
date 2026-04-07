@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<nmaprun scanner="masscan" start="1700000000">
+  <host endtime="1700000010">
+    <address addr="10.0.0.1" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="22"><state state="open" reason="syn-ack"/></port>
+      <port protocol="tcp" portid="80"><state state="open" reason="syn-ack"/></port>
+      <port protocol="tcp" portid="443"><state state="open" reason="syn-ack"/></port>
+    </ports>
+  </host>
+</nmaprun>

@@ -48,6 +48,14 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
     await check_tools(required_tools)
     log.info("All required tools found")
 
+    # Log availability of optional fallback scanners
+    import shutil
+    for tool in ("naabu", "masscan"):
+        if shutil.which(tool):
+            log.info("Optional scanner available: %s", tool)
+        else:
+            log.info("Optional scanner not found: %s (fallback skipped if needed)", tool)
+
     # --- Phase 2: Discovery ---
     log.info("Phase 2: Host discovery")
     live_ips = await discover_hosts(config, tree)

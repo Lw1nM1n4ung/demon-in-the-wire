@@ -1,4 +1,4 @@
-"""Tests for wireghost.parsers — nmap + nuclei."""
+"""Tests for wireghost.parsers — nmap + nuclei + naabu + masscan."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from wireghost.parsers.nmap import (
     parse_nmap_xml,
 )
 from wireghost.parsers.nuclei import parse_nuclei_json
+from wireghost.parsers.naabu import parse_naabu_json
+from wireghost.parsers.masscan import parse_masscan_xml
 
 
 # ================================================================
@@ -153,3 +155,75 @@ class TestParseNucleiEmpty:
         empty.write_text("")
         result = parse_nuclei_json(empty)
         assert result == []
+
+
+# ================================================================
+# Naabu parser tests
+# ================================================================
+
+
+class TestParseNaabuJson:
+    def test_parses_hosts_and_ports(self):
+        fixture = Path(__file__).parent / "fixtures" / "naabu_output.json"
+        hosts = parse_naabu_json(fixture)
+        assert len(hosts) == 1
+        assert hosts[0].ip == "10.0.0.1"
+        assert len(hosts[0].open_ports) == 3
+        ports = sorted(p.number for p in hosts[0].open_ports)
+        assert ports == [22, 80, 443]
+
+    def test_all_ports_are_open(self):
+        fixture = Path(__file__).parent / "fixtures" / "naabu_output.json"
+        hosts = parse_naabu_json(fixture)
+        for port in hosts[0].ports:
+            assert port.state == "open"
+            assert port.protocol == "tcp"
+
+    def test_missing_file_returns_empty(self):
+        assert parse_naabu_json(Path("/nonexistent.json")) == []
+
+    def test_empty_file_returns_empty(self, tmp_path):
+        empty = tmp_path / "empty.json"
+        empty.write_text("")
+        assert parse_naabu_json(empty) == []
+
+    def test_multiple_hosts(self, tmp_path):
+        data = '{"ip":"10.0.0.1","port":22,"protocol":"tcp"}\n{"ip":"10.0.0.2","port":80,"protocol":"tcp"}\n'
+        f = tmp_path / "multi.json"
+        f.write_text(data)
+        hosts = parse_naabu_json(f)
+        assert len(hosts) == 2
+        ips = sorted(h.ip for h in hosts)
+        assert ips == ["10.0.0.1", "10.0.0.2"]
+
+
+# ================================================================
+# Masscan parser tests
+# ================================================================
+
+
+class TestParseMasscanXml:
+    def test_parses_hosts_and_ports(self):
+        fixture = Path(__file__).parent / "fixtures" / "masscan_output.xml"
+        hosts = parse_masscan_xml(fixture)
+        assert len(hosts) == 1
+        assert hosts[0].ip == "10.0.0.1"
+        assert len(hosts[0].open_ports) == 3
+        ports = sorted(p.number for p in hosts[0].open_ports)
+        assert ports == [22, 80, 443]
+
+    def test_all_ports_open_tcp(self):
+        fixture = Path(__file__).parent / "fixtures" / "masscan_output.xml"
+        hosts = parse_masscan_xml(fixture)
+        for port in hosts[0].ports:
+            assert port.state == "open"
+            assert port.protocol == "tcp"
+
+    def test_missing_file_returns_empty(self):
+        assert parse_masscan_xml(Path("/nonexistent.xml")) == []
+
+    def test_no_service_info(self):
+        fixture = Path(__file__).parent / "fixtures" / "masscan_output.xml"
+        hosts = parse_masscan_xml(fixture)
+        for port in hosts[0].ports:
+            assert port.service is None
