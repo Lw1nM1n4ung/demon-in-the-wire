@@ -239,20 +239,20 @@ class DocxRenderer:
         table = doc.add_table(rows=1, cols=2)
         table.style = "Light Grid Accent 1"
         table.rows[0].cells[0].text = "Subnets"
-        table.rows[0].cells[1].text = "Hosts"
+        table.rows[0].cells[1].text = "Zone"
 
         if subnets:
             for subnet, hosts in subnets.items():
                 row = table.add_row().cells
                 row[0].text = subnet
-                row[1].text = str(len(hosts))
+                row[1].text = report.target
         else:
             row = table.add_row().cells
             row[0].text = report.target
             row[1].text = "0"
 
     def _live_hosts(self, doc: Document, report: ScanReport) -> None:
-        doc.add_heading("Identified Live Hosts", level=1)
+        doc.add_heading("3. Identified Live Hosts", level=1)
         doc.add_paragraph("The following IPs are alive in the subnets.")
 
         subnets = _group_hosts_by_subnet(report.hosts)
@@ -276,7 +276,7 @@ class DocxRenderer:
             row[1].text = "No Live Host"
 
     def _open_ports(self, doc: Document, report: ScanReport) -> None:
-        doc.add_heading("Open Ports", level=1)
+        doc.add_heading("4. Open Ports", level=1)
 
         subnets = _group_hosts_by_subnet(report.hosts)
         section_num = 4
@@ -336,24 +336,28 @@ class DocxRenderer:
                     level=2,
                 )
 
-                # IP
-                doc.add_paragraph(f"IP: {finding.host}")
+                # IP (bold)
+                ip_para = doc.add_paragraph()
+                ip_para.add_run(f"IP: {finding.host}").bold = True
 
-                # Port
+                # Port (bold)
                 if finding.port:
-                    doc.add_paragraph(f"Port: {finding.port}")
+                    port_para = doc.add_paragraph()
+                    port_para.add_run(f"Port: {finding.port}").bold = True
 
-                # URL (if web endpoint)
+                # URL (bold, if web endpoint)
+                url_text = ""
                 if finding.full_url:
-                    doc.add_paragraph(f"URL: {finding.full_url}")
+                    url_text = finding.full_url
                 elif finding.matched_at:
-                    doc.add_paragraph(f"URL: {finding.matched_at}")
+                    url_text = finding.matched_at
                 elif finding.endpoint and finding.endpoint != "/":
                     protocol = finding.protocol or "http"
                     port = finding.port or "80"
-                    doc.add_paragraph(
-                        f"URL: {protocol}://{finding.host}:{port}{finding.endpoint}"
-                    )
+                    url_text = f"{protocol}://{finding.host}:{port}{finding.endpoint}"
+                if url_text:
+                    url_para = doc.add_paragraph()
+                    url_para.add_run(f"URL: {url_text}").bold = True
 
                 # Vulnerability Summary
                 doc.add_heading("Vulnerability Summary", level=3)
@@ -363,4 +367,5 @@ class DocxRenderer:
             section_num += 1
 
         doc.add_paragraph()
-        doc.add_paragraph("END OF DOCUMENT")
+        end_para = doc.add_paragraph("END OF DOCUMENT")
+        end_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
