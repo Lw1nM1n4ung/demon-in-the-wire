@@ -1,0 +1,53 @@
+[
+  {
+    "template-id": "tech-detect",
+    "template-path": "/root/nuclei-templates/technologies/tech-detect.yaml",
+    "info": {
+      "name": "Technology Detection - nginx",
+      "severity": "info",
+      "tags": ["tech", "nginx"],
+      "reference": []
+    },
+    "type": "http",
+    "host": "http://10.0.0.1:80",
+    "matched-at": "http://10.0.0.1:80",
+    "ip": "10.0.0.1",
+    "port": "80",
+    "scheme": "http",
+    "timestamp": "2023-11-14T12:05:00.000Z"
+  },
+  {
+    "template-id": "CVE-2021-41773",
+    "template-path": "/root/nuclei-templates/cves/2021/CVE-2021-41773.yaml",
+    "info": {
+      "name": "Apache HTTP Server 2.4.49 - Path Traversal",
+      "severity": "critical",
+      "tags": ["cve", "apache", "rce", "cve2021"],
+      "reference": ["https://nvd.nist.gov/vuln/detail/CVE-2021-41773"]
+    },
+    "type": "http",
+    "host": "http://10.0.0.1:80",
+    "matched-at": "http://10.0.0.1:80/cgi-bin/.%2e/.%2e/.%2e/.%2e/etc/passwd",
+    "ip": "10.0.0.1",
+    "port": "80",
+    "scheme": "http",
+    "timestamp": "2023-11-14T12:05:01.000Z"
+  },
+  {
+    "template-id": "ssl-weak-cipher",
+    "template-path": "/root/nuclei-templates/ssl/ssl-weak-cipher.yaml",
+    "info": {
+      "name": "SSL Weak Cipher Suites Detected",
+      "severity": "medium",
+      "tags": ["ssl", "cipher", "weak"],
+      "reference": ["https://owasp.org/www-project-web-security-testing-guide/"]
+    },
+    "type": "ssl",
+    "host": "https://10.0.0.1:443",
+    "matched-at": "https://10.0.0.1:443",
+    "ip": "10.0.0.1",
+    "port": "443",
+    "scheme": "https",
+    "timestamp": "2023-11-14T12:05:02.000Z"
+  }
+]
