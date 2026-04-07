@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1a1a1a; background: #fafafa; line-height: 1.6; padding: 2rem; }
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  /* Header */
+  .report-header { text-align: center; margin-bottom: 2rem; border-bottom: 2px solid #333; padding-bottom: 1.5rem; }
+  .report-header h1 { font-size: 1.8rem; margin-bottom: 0.4rem; }
+  .report-meta { color: #555; font-size: 0.9rem; }
+
+  /* Sections */
+  .section { margin-bottom: 2.5rem; }
+  .section h2 { font-size: 1.4rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-bottom: 1rem; }
+
+  /* Risk badge */
+  .risk-high   { color: #b22222; font-weight: bold; }
+  .risk-medium { color: #ff8c00; font-weight: bold; }
+  .risk-low    { color: #228b22; font-weight: bold; }
+
+  /* Stats grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .stat-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem; text-align: center; }
+  .stat-card .value { font-size: 2rem; font-weight: 700; }
+  .stat-card .label { font-size: 0.85rem; color: #666; text-transform: uppercase; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; color: #fff; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+  .badge-critical { background: #b22222; }
+  .badge-high     { background: #ff0000; }
+  .badge-medium   { background: #ff8c00; }
+  .badge-low      { background: #daa520; }
+  .badge-info     { background: #6495ed; }
+  .badge-unknown  { background: #808080; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+  th, td { padding: 0.5rem 0.75rem; border: 1px solid #ddd; text-align: left; font-size: 0.88rem; }
+  th { background: #f5f5f5; font-weight: 600; }
+  tr:nth-child(even) { background: #fafafa; }
+
+  /* Recommendations */
+  .rec-list { list-style: disc inside; }
+  .rec-list li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="report-header">
+    <h1>{{ title }}</h1>
+    <p class="report-meta">Date: {{ date }} &mdash; Target: {{ target }}</p>
+  </div>
+
+  <!-- Executive Summary -->
+  <div class="section">
+    <h2>Executive Summary</h2>
+    {% if crit_high > 0 %}
+    <p class="risk-high">HIGH RISK &mdash; {{ crit_high }} critical/high vulnerabilities found</p>
+    {% elif medium > 0 %}
+    <p class="risk-medium">MEDIUM RISK &mdash; {{ medium }} medium vulnerabilities found</p>
+    {% else %}
+    <p class="risk-low">LOW RISK &mdash; No critical or high severity vulnerabilities found</p>
+    {% endif %}
+  </div>
+
+  <!-- Stats -->
+  <div class="section">
+    <h2>Scan Statistics</h2>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="value">{{ hosts_count }}</div><div class="label">Hosts</div></div>
+      <div class="stat-card"><div class="value">{{ open_ports }}</div><div class="label">Open Ports</div></div>
+      <div class="stat-card"><div class="value">{{ total_findings }}</div><div class="label">Findings</div></div>
+      <div class="stat-card"><div class="value">{{ critical }}</div><div class="label">Critical</div></div>
+      <div class="stat-card"><div class="value">{{ high }}</div><div class="label">High</div></div>
+      <div class="stat-card"><div class="value">{{ medium }}</div><div class="label">Medium</div></div>
+    </div>
+  </div>
+
+  <!-- Findings table -->
+  {% if findings %}
+  <div class="section">
+    <h2>Vulnerability Findings</h2>
+    <table>
+      <thead>
+        <tr><th>Severity</th><th>Source</th><th>Host</th><th>Port</th><th>Title</th></tr>
+      </thead>
+      <tbody>
+        {% for f in findings %}
+        <tr>
+          <td><span class="badge badge-{{ f.severity.value }}">{{ f.severity.value }}</span></td>
+          <td>{{ f.source }}</td>
+          <td>{{ f.host }}</td>
+          <td>{{ f.port }}</td>
+          <td>{{ f.title }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Per-host port tables -->
+  {% if hosts %}
+  <div class="section">
+    <h2>Host Details</h2>
+    {% for host in hosts %}
+    <h3>{{ host.ip }}{% if host.hostname %} ({{ host.hostname }}){% endif %}</h3>
+    {% if host.open_ports %}
+    <table>
+      <thead>
+        <tr><th>Port</th><th>Protocol</th><th>Service</th><th>Product</th><th>Version</th></tr>
+      </thead>
+      <tbody>
+        {% for p in host.open_ports %}
+        <tr>
+          <td>{{ p.number }}</td>
+          <td>{{ p.protocol }}</td>
+          <td>{{ p.service.name if p.service else "" }}</td>
+          <td>{{ p.service.product if p.service else "" }}</td>
+          <td>{{ p.service.version if p.service else "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No open ports.</p>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Recommendations -->
+  <div class="section">
+    <h2>Recommendations</h2>
+    <ul class="rec-list">
+      {% for rec in recommendations %}
+      <li>{{ rec }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }} - Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>{{ css }}</style>
+</head>
+<body>
+<div class="dashboard">
+
+  <!-- Header -->
+  <div class="dash-header">
+    <h1>{{ title }}</h1>
+    <p class="meta">{{ date }} &mdash; Target: {{ target }}</p>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stats-row">
+    <div class="stat-card"><div class="value">{{ hosts_count }}</div><div class="label">Hosts</div></div>
+    <div class="stat-card"><div class="value">{{ open_ports }}</div><div class="label">Open Ports</div></div>
+    <div class="stat-card"><div class="value">{{ total_findings }}</div><div class="label">Findings</div></div>
+    <div class="stat-card"><div class="value">{{ critical }}</div><div class="label">Critical</div></div>
+    <div class="stat-card"><div class="value">{{ high }}</div><div class="label">High</div></div>
+    <div class="stat-card"><div class="value">{{ medium }}</div><div class="label">Medium</div></div>
+  </div>
+
+  <!-- Chart + findings table -->
+  <div class="main-grid">
+
+    <!-- Left column: chart -->
+    <div class="card">
+      <h2>Severity Distribution</h2>
+      <div class="chart-wrap">
+        <canvas id="sevChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Right column: findings table -->
+    <div class="card">
+      <h2>Findings</h2>
+
+      <div class="filters">
+        <button class="sev-btn" data-sev="critical">Critical</button>
+        <button class="sev-btn" data-sev="high">High</button>
+        <button class="sev-btn" data-sev="medium">Medium</button>
+        <button class="sev-btn" data-sev="low">Low</button>
+        <button class="sev-btn" data-sev="info">Info</button>
+      </div>
+
+      <div class="search-wrap">
+        <input id="searchInput" type="text" placeholder="Search findings...">
+      </div>
+
+      <table id="findingsTable">
+        <thead>
+          <tr><th>Severity</th><th>Source</th><th>Host</th><th>Port</th><th>Title</th></tr>
+        </thead>
+        <tbody>
+          {% for f in findings %}
+          <tr data-sev="{{ f.severity }}">
+            <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
+            <td>{{ f.source }}</td>
+            <td>{{ f.host }}</td>
+            <td>{{ f.port }}</td>
+            <td>{{ f.title }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Host panels -->
+  <div class="card">
+    <h2>Hosts</h2>
+    {% for host in hosts %}
+    <div class="host-panel">
+      <button class="host-toggle">{{ host.ip }}{% if host.hostname %} ({{ host.hostname }}){% endif %} &mdash; {{ host.open_ports | length }} open port(s)</button>
+      <div class="host-body">
+        {% if host.open_ports %}
+        <table>
+          <thead><tr><th>Port</th><th>Protocol</th><th>Service</th><th>Product</th><th>Version</th></tr></thead>
+          <tbody>
+            {% for p in host.open_ports %}
+            <tr>
+              <td>{{ p.number }}</td>
+              <td>{{ p.protocol }}</td>
+              <td>{{ p.service.name if p.service else "" }}</td>
+              <td>{{ p.service.product if p.service else "" }}</td>
+              <td>{{ p.service.version if p.service else "" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>No open ports.</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+
+<script>
+window.__SCAN_DATA__ = {{ scan_json }};
+</script>
+<script>{{ js }}</script>
+</body>
+</html>
