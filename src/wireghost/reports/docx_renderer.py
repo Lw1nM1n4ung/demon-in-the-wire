@@ -142,11 +142,11 @@ class DocxRenderer:
 
         if header_logo:
             run = hp.add_run()
-            run.add_picture(str(header_logo), width=Inches(1.0))
+            run.add_picture(str(header_logo), width=Inches(1.03))
         if logo:
             hp.add_run("    ")
             run = hp.add_run()
-            run.add_picture(str(logo), width=Inches(1.0))
+            run.add_picture(str(logo), width=Inches(0.92))
 
     # ------------------------------------------------------------------ #
 
