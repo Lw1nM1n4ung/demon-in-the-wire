@@ -9,13 +9,82 @@ from typing import TYPE_CHECKING
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt, RGBColor
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.shared import Emu, Inches, Pt, RGBColor
+from lxml import etree
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
     from wireghost.models.finding import Finding
     from wireghost.models.report import ScanReport
     from wireghost.models.scan import Host
+
+
+def _make_anchor_image(
+    part, image_path: str, width: int, height: int,
+    pos_h_from: str, pos_h_offset: int,
+    pos_v_from: str, pos_v_offset: int,
+) -> etree._Element:
+    """Create a wp:anchor element for a floating image, matching reference doc format."""
+    # Add image relationship
+    rel_id = part.relate_to(
+        part.package.get_or_add_image_part(image_path),
+        RT.IMAGE,
+    )
+
+    nsmap = {
+        'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+        'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+        'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture',
+    }
+
+    anchor_xml = (
+        '<wp:anchor distT="0" distB="0" distL="114300" distR="114300" '
+        'simplePos="0" relativeHeight="0" behindDoc="0" locked="0" '
+        'layoutInCell="1" allowOverlap="1" '
+        'xmlns:wp="{wp}" xmlns:r="{r}" xmlns:a="{a}" xmlns:pic="{pic}">'
+        '  <wp:simplePos x="0" y="0"/>'
+        '  <wp:positionH relativeFrom="{pos_h_from}">'
+        '    <wp:posOffset>{pos_h_offset}</wp:posOffset>'
+        '  </wp:positionH>'
+        '  <wp:positionV relativeFrom="{pos_v_from}">'
+        '    <wp:posOffset>{pos_v_offset}</wp:posOffset>'
+        '  </wp:positionV>'
+        '  <wp:extent cx="{cx}" cy="{cy}"/>'
+        '  <wp:wrapNone/>'
+        '  <wp:docPr id="1" name="Picture"/>'
+        '  <a:graphic>'
+        '    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        '      <pic:pic>'
+        '        <pic:nvPicPr>'
+        '          <pic:cNvPr id="0" name="Picture"/>'
+        '          <pic:cNvPicPr/>'
+        '        </pic:nvPicPr>'
+        '        <pic:blipFill>'
+        '          <a:blip r:embed="{rel_id}"/>'
+        '          <a:stretch><a:fillRect/></a:stretch>'
+        '        </pic:blipFill>'
+        '        <pic:spPr>'
+        '          <a:xfrm>'
+        '            <a:off x="0" y="0"/>'
+        '            <a:ext cx="{cx}" cy="{cy}"/>'
+        '          </a:xfrm>'
+        '          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+        '        </pic:spPr>'
+        '      </pic:pic>'
+        '    </a:graphicData>'
+        '  </a:graphic>'
+        '</wp:anchor>'
+    ).format(
+        cx=width, cy=height,
+        pos_h_from=pos_h_from, pos_h_offset=pos_h_offset,
+        pos_v_from=pos_v_from, pos_v_offset=pos_v_offset,
+        rel_id=rel_id,
+        **nsmap,
+    )
+
+    return etree.fromstring(anchor_xml)
 
 # Brand color from reference document
 _GREEN = RGBColor(0x00, 0x6D, 0x38)
@@ -132,7 +201,7 @@ class DocxRenderer:
     def _add_header_logos(
         doc: Document, logo: Path | None, header_logo: Path | None,
     ) -> None:
-        """Add logos to the page header (appears on every page)."""
+        """Add floating logos to page header matching reference positioning."""
         if not logo and not header_logo:
             return
         section = doc.sections[0]
@@ -140,13 +209,27 @@ class DocxRenderer:
         header.is_linked_to_previous = False
         hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
 
+        # Left logo (logo_header): anchored at margin left
         if header_logo:
+            anchor = _make_anchor_image(
+                header.part, str(header_logo),
+                width=Emu(945515), height=Emu(531495),     # 1.03 x 0.58 in
+                pos_h_from="margin", pos_h_offset=-695960,  # left side
+                pos_v_from="paragraph", pos_v_offset=-296545,
+            )
             run = hp.add_run()
-            run.add_picture(str(header_logo), width=Inches(1.03))
+            run._element.append(anchor)
+
+        # Right logo (main logo): anchored at column right
         if logo:
-            hp.add_run("    ")
+            anchor = _make_anchor_image(
+                header.part, str(logo),
+                width=Emu(838200), height=Emu(472440),      # 0.92 x 0.52 in
+                pos_h_from="column", pos_h_offset=5763260,   # right side
+                pos_v_from="paragraph", pos_v_offset=-291465,
+            )
             run = hp.add_run()
-            run.add_picture(str(logo), width=Inches(0.92))
+            run._element.append(anchor)
 
     # ------------------------------------------------------------------ #
 
@@ -154,12 +237,17 @@ class DocxRenderer:
         self, doc: Document, config: ScanConfig, report: ScanReport,
         logo: Path | None = None,
     ) -> None:
-        # Cover logo (centered, ~2.5 inches)
+        # Cover logo (floating, ~2.5 x 1.41 inches, centered on margin)
         if logo:
             logo_para = doc.add_paragraph()
-            logo_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            anchor = _make_anchor_image(
+                doc.part, str(logo),
+                width=Emu(2286000), height=Emu(1288415),  # 2.50 x 1.41 in
+                pos_h_from="margin", pos_h_offset=1600000,  # centered approx
+                pos_v_from="margin", pos_v_offset=0,
+            )
             run = logo_para.add_run()
-            run.add_picture(str(logo), width=Inches(2.5))
+            run._element.append(anchor)
 
         doc.add_paragraph()
 
