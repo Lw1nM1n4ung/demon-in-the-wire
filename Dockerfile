@@ -1,21 +1,20 @@
 FROM python:3.12-slim
 
+# System tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nmap fping curl unzip && rm -rf /var/lib/apt/lists/*
+    nmap fping curl wget git masscan && rm -rf /var/lib/apt/lists/*
 
-# Install nuclei
-RUN NUCLEI_VERSION=$(curl -s https://api.github.com/repos/projectdiscovery/nuclei/releases/latest | grep tag_name | cut -d '"' -f 4 | tr -d 'v') \
-    && curl -sL "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_amd64.zip" -o /tmp/nuclei.zip \
-    && unzip /tmp/nuclei.zip -d /usr/local/bin/ nuclei \
-    && chmod +x /usr/local/bin/nuclei \
-    && rm /tmp/nuclei.zip
+# Install Go (for ProjectDiscovery tools)
+ENV GO_VERSION=1.22.4
+RUN wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
 
-# Install httpx
-RUN HTTPX_VERSION=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d '"' -f 4 | tr -d 'v') \
-    && curl -sL "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_amd64.zip" -o /tmp/httpx.zip \
-    && unzip /tmp/httpx.zip -d /usr/local/bin/ httpx \
-    && chmod +x /usr/local/bin/httpx \
-    && rm /tmp/httpx.zip
+# Install ProjectDiscovery tools via go install
+RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
 
 WORKDIR /app
 COPY pyproject.toml .
