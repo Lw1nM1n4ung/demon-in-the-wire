@@ -12,9 +12,11 @@ RUN wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.ta
 ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
 
 # Install ProjectDiscovery tools via go install
-RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+ENV GONOSUMCHECK=* GONOSUMDB=* GOFLAGS="-buildvcs=false" GOPATH=/root/go
+RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
+    && go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest \
+    && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest \
+    && rm -rf /root/go/pkg /usr/local/go
 
 WORKDIR /app
 COPY pyproject.toml .
