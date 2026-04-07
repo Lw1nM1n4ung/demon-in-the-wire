@@ -1,0 +1,34 @@
+# Wire_Ghost configuration
+# Copy to wireghost.yml and customise.
+# Values here override defaults; env vars (WIREGHOST_*) and CLI flags
+# override this file.
+
+# Target specification — IP, CIDR, or hostname
+# target: "192.168.1.0/24"
+
+# Where to write output files
+output_dir: "./output"
+
+# Max concurrent host scans
+parallelism: 10
+
+# Skip nuclei web vulnerability scanner
+skip_nuclei: false
+
+# Skip nmap --script=vuln phase
+skip_vuln: false
+
+# Per-tool timeout in seconds
+tool_timeout: 3600
+
+# Report output formats (html, docx, xlsx)
+report_formats:
+  - html
+  - docx
+  - xlsx
+
+# Title used in generated reports
+report_title: "Security Assessment Summary Report"
+
+# Enable debug-level logging
+verbose: false
