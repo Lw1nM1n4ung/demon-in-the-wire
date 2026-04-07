@@ -1,0 +1,7 @@
+.git
+script/
+tests/
+*.pyc
+__pycache__
+.claude/
+docs/
