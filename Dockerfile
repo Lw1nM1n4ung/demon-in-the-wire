@@ -51,6 +51,9 @@ COPY src/ src/
 COPY wireghost.example.yml .
 RUN pip install --no-cache-dir .
 
+# Download nuclei templates
+RUN nuclei -update-templates
+
 # Verify all tools
 RUN echo "=== Tool verification ===" \
     && nmap --version | head -1 \
@@ -58,6 +61,7 @@ RUN echo "=== Tool verification ===" \
     && nuclei -version 2>&1 | head -1 \
     && naabu -version 2>&1 | head -1 \
     && masscan --version 2>&1 | head -1 \
-    && wireghost --version
+    && wireghost --version \
+    && echo "Nuclei templates: $(ls /root/nuclei-templates/ | wc -l) dirs"
 
 ENTRYPOINT ["wireghost"]
