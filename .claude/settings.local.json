@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(grep -h \"^import\\\\|^from\" /home/demon/Tools/Wire_Ghost/script/docx/*.py)",
+      "Bash(grep -r \"^import\\\\|^from\" /home/demon/Tools/Wire_Ghost/script/docx/*.py ! -path \"*/env/*\")",
+      "Bash(sed 's/:$//')",
+      "Bash(grep -h \"^import\\\\|^from\" /home/demon/Tools/Wire_Ghost/script/docx/*.py ! -path \"*/env/*\")",
+      "Bash(grep -r \"ENVIRONMENT\\\\|env\\\\|export\\\\|wordlist\\\\|root/output\" /home/demon/Tools/Wire_Ghost/script/*.sh)",
+      "Bash(grep \"^import\\\\|^from\" /home/demon/Tools/Wire_Ghost/script/docx/*.py)",
+      "Bash(grep -Eoh '\\\\b\\(nmap|nuclei|nettacker|dirsearch|httpx|fping|python3|python\\)\\\\b' /home/demon/Tools/Wire_Ghost/script/*.sh)",
+      "Bash(ls /home/demon/Tools/Wire_Ghost/script/docx/env/lib/python3.12/site-packages/*.dist-info)",
+      "Bash(ls -d /home/demon/Tools/Wire_Ghost/script/docx/env/lib/python3.12/site-packages/*/)",
+      "Bash(ls /home/demon/Tools/Wire_Ghost/script/docx/env/lib/python3.12/site-packages/*.dist-info/)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

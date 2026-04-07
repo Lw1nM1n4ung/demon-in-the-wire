@@ -1,0 +1,3 @@
+[console_scripts]
+nettacker=nettacker.main:run
+
