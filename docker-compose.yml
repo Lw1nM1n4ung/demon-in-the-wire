@@ -2,7 +2,7 @@ services:
   wireghost:
     build: .
     volumes:
-      - scan-data:/data/output
+      - ./output:/data/output
     environment:
       - WIREGHOST_OUTPUT_DIR=/data/output
     network_mode: host
@@ -10,23 +10,20 @@ services:
   nmap:
     image: instrumentisto/nmap:latest
     volumes:
-      - scan-data:/data/output
+      - ./output:/data/output
     network_mode: host
     profiles: ["tools"]
 
   nuclei:
     image: projectdiscovery/nuclei:latest
     volumes:
-      - scan-data:/data/output
+      - ./output:/data/output
     network_mode: host
     profiles: ["tools"]
 
   httpx:
     image: projectdiscovery/httpx:latest
     volumes:
-      - scan-data:/data/output
+      - ./output:/data/output
     network_mode: host
     profiles: ["tools"]
-
-volumes:
-  scan-data:
