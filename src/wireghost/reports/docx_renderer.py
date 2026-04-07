@@ -1,43 +1,56 @@
-"""DOCX report renderer."""
+"""DOCX report renderer — professional VA report format."""
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import RGBColor
-
-from wireghost.models.severity import (
-    SEVERITY_COLORS,
-    SEVERITY_ORDER,
-    Severity,
-)
+from docx.shared import Pt
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
+    from wireghost.models.finding import Finding
     from wireghost.models.report import ScanReport
+    from wireghost.models.scan import Host
 
 
-def _docx_color(sev: Severity) -> RGBColor:
-    """Convert a Severity to a python-docx RGBColor."""
-    r, g, b = SEVERITY_COLORS.get(sev, (128, 128, 128))
-    return RGBColor(r, g, b)
+_DISCLAIMER = (
+    "Nothing contained in this document shall be construed as conferring "
+    "by implication, estoppels, or otherwise, any license or right to any "
+    "copyright, patent or trademark of the authors or any third party. "
+    "The document is provided on an 'AS IS' basis.\n\n"
+    "The findings in this report reflect the conditions found during the "
+    "assessment period (vulnerability / exploit reported to the date of "
+    "the report and cannot guarantee any future compliance). Security is "
+    "a continuous process and new vulnerabilities may be discovered after "
+    "this assessment."
+)
 
 
-_SEVERITY_WALK = [
-    Severity.CRITICAL,
-    Severity.HIGH,
-    Severity.MEDIUM,
-    Severity.LOW,
-    Severity.INFO,
-]
+def _group_hosts_by_subnet(hosts: list[Host]) -> dict[str, list[Host]]:
+    """Group hosts by their /24 subnet prefix."""
+    subnets: dict[str, list[Host]] = defaultdict(list)
+    for h in hosts:
+        parts = h.ip.rsplit(".", 1)
+        subnet = f"{parts[0]}.0/24" if len(parts) == 2 else h.ip
+        subnets[subnet].append(h)
+    return dict(sorted(subnets.items()))
+
+
+def _group_findings_by_host(findings: list[Finding]) -> dict[str, list[Finding]]:
+    """Group findings by host IP."""
+    grouped: dict[str, list[Finding]] = defaultdict(list)
+    for f in findings:
+        grouped[f.host].append(f)
+    return dict(sorted(grouped.items()))
 
 
 class DocxRenderer:
-    """Render a ScanReport as a Microsoft Word document."""
+    """Render a ScanReport as a professional VA report (DOCX)."""
 
     def render(
         self,
@@ -47,201 +60,221 @@ class DocxRenderer:
     ) -> Path:
         doc = Document()
 
-        self._title_page(doc, config, report)
-        self._executive_summary(doc, report)
-        self._vuln_breakdown(doc, report)
-        self._detailed_findings(doc, report)
-        self._recommendations(doc, report)
+        self._cover_page(doc, config, report)
+        self._executive_summary(doc, config, report)
+        self._target_subnets(doc, report)
+        self._live_hosts(doc, report)
+        self._open_ports(doc, report)
+        self._identified_issues(doc, report)
 
         out = reports_dir / "security_report.docx"
         doc.save(str(out))
         return out
 
     # ------------------------------------------------------------------ #
-    # Sections
-    # ------------------------------------------------------------------ #
 
-    def _title_page(
+    def _cover_page(
         self, doc: Document, config: ScanConfig, report: ScanReport
     ) -> None:
-        title = doc.add_heading(config.report_title, level=0)
+        # Title
+        doc.add_paragraph()
+        doc.add_paragraph()
+
+        title = doc.add_paragraph()
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = title.add_run(report.target)
+        run.bold = True
+        run.font.size = Pt(28)
 
-        now = report.scan_start or datetime.now()
-        doc.add_paragraph(
-            f"Generated on: {now.strftime('%Y-%m-%d at %H:%M:%S')}"
-        )
-        doc.add_paragraph(f"Target: {report.target}")
-        doc.add_page_break()
-
-    def _executive_summary(self, doc: Document, report: ScanReport) -> None:
-        doc.add_heading("Executive Summary", level=1)
-
-        stats = report.severity_stats()
-        crit_high = stats.get(Severity.CRITICAL, 0) + stats.get(
-            Severity.HIGH, 0
-        )
-
-        risk_para = doc.add_paragraph()
-        risk_para.add_run("Overall Risk Assessment:\n").bold = True
-
-        if crit_high > 0:
-            run = risk_para.add_run(
-                f"HIGH RISK - {crit_high} critical/high vulnerabilities found\n"
-            )
-            run.font.color.rgb = _docx_color(Severity.CRITICAL)
-        elif stats.get(Severity.MEDIUM, 0) > 0:
-            run = risk_para.add_run(
-                f"MEDIUM RISK - {stats[Severity.MEDIUM]} medium vulnerabilities found\n"
-            )
-            run.font.color.rgb = _docx_color(Severity.MEDIUM)
-        else:
-            run = risk_para.add_run(
-                "LOW RISK - No critical or high severity vulnerabilities found\n"
-            )
-            run.font.color.rgb = _docx_color(Severity.INFO)
-
-        # Stats table
-        stats_table = doc.add_table(rows=6, cols=2)
-        stats_table.style = "Light Grid Accent 1"
-
-        rows_data = [
-            ("Hosts Scanned", str(len(report.hosts))),
-            ("Open Ports", str(report.total_open_ports)),
-            ("Total Vulnerabilities", str(len(report.findings))),
-            ("Critical Findings", str(stats.get(Severity.CRITICAL, 0))),
-            ("High Findings", str(stats.get(Severity.HIGH, 0))),
-            ("Medium Findings", str(stats.get(Severity.MEDIUM, 0))),
-        ]
-
-        for idx, (label, value) in enumerate(rows_data):
-            stats_table.cell(idx, 0).text = label
-            stats_table.cell(idx, 1).text = value
+        subtitle = doc.add_paragraph()
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = subtitle.add_run("Vulnerability Assessment Report")
+        run.bold = True
+        run.font.size = Pt(18)
 
         doc.add_paragraph()
 
-    def _vuln_breakdown(self, doc: Document, report: ScanReport) -> None:
-        doc.add_heading("Vulnerability Breakdown", level=2)
+        # Disclaimer
+        doc.add_paragraph()
+        disc_title = doc.add_paragraph()
+        disc_title.add_run("DISCLAIMER").bold = True
+        doc.add_paragraph(_DISCLAIMER)
 
-        nmap_vulns = [f for f in report.findings if f.source == "nmap_vuln"]
-        nuclei_vulns = [f for f in report.findings if f.source == "nuclei"]
+        doc.add_paragraph()
 
-        source_table = doc.add_table(rows=3, cols=4)
-        source_table.style = "Light Grid Accent 2"
-
-        headers = source_table.rows[0].cells
-        headers[0].text = "Source"
-        headers[1].text = "Total"
-        headers[2].text = "Critical/High"
-        headers[3].text = "Medium/Low"
-
-        for row_idx, (label, vulns) in enumerate(
-            [("Nmap Scans", nmap_vulns), ("Nuclei Scans", nuclei_vulns)],
-            start=1,
-        ):
-            cells = source_table.rows[row_idx].cells
-            cells[0].text = label
-            cells[1].text = str(len(vulns))
-            ch = sum(
-                1
-                for v in vulns
-                if v.severity in (Severity.CRITICAL, Severity.HIGH)
-            )
-            ml = sum(
-                1
-                for v in vulns
-                if v.severity in (Severity.MEDIUM, Severity.LOW)
-            )
-            cells[2].text = str(ch)
-            cells[3].text = str(ml)
+        # Prepared / Reviewed / Approved / Date
+        now = report.scan_start or datetime.now()
+        meta = doc.add_paragraph()
+        meta.add_run("Prepared By: ").bold = True
+        meta.add_run(getattr(config, "prepared_by", "Security Team"))
+        meta.add_run("\n")
+        meta.add_run("Reviewed By: ").bold = True
+        meta.add_run(getattr(config, "reviewed_by", ""))
+        meta.add_run("\n")
+        meta.add_run("Approved By: ").bold = True
+        meta.add_run(getattr(config, "approved_by", ""))
+        meta.add_run("\n")
+        meta.add_run("Date: ").bold = True
+        meta.add_run(now.strftime("%d %b %Y"))
 
         doc.add_page_break()
 
-    def _detailed_findings(self, doc: Document, report: ScanReport) -> None:
+    def _executive_summary(
+        self, doc: Document, config: ScanConfig, report: ScanReport
+    ) -> None:
+        doc.add_heading("Executive Summary", level=1)
+        doc.add_paragraph(
+            f"A comprehensive Vulnerability Assessment was conducted on "
+            f"{report.target} to identify existing vulnerabilities, "
+            f"misconfigurations and known threats."
+        )
+
+        stats = report.severity_stats()
+        from wireghost.models.severity import Severity
+
+        summary = doc.add_paragraph()
+        summary.add_run("Assessment Results:\n").bold = True
+        summary.add_run(f"  Hosts Scanned: {len(report.hosts)}\n")
+        summary.add_run(f"  Open Ports: {report.total_open_ports}\n")
+        summary.add_run(f"  Total Findings: {len(report.findings)}\n")
+        summary.add_run(f"  Critical: {stats.get(Severity.CRITICAL, 0)}\n")
+        summary.add_run(f"  High: {stats.get(Severity.HIGH, 0)}\n")
+        summary.add_run(f"  Medium: {stats.get(Severity.MEDIUM, 0)}\n")
+        summary.add_run(f"  Low: {stats.get(Severity.LOW, 0)}\n")
+        summary.add_run(f"  Info: {stats.get(Severity.INFO, 0)}\n")
+
+    def _target_subnets(self, doc: Document, report: ScanReport) -> None:
+        doc.add_heading("Target Subnets", level=1)
+        doc.add_paragraph(
+            "Vulnerability Assessment was conducted on the following targets."
+        )
+
+        subnets = _group_hosts_by_subnet(report.hosts)
+        table = doc.add_table(rows=1, cols=2)
+        table.style = "Light Grid Accent 1"
+        table.rows[0].cells[0].text = "Subnets"
+        table.rows[0].cells[1].text = "Hosts"
+
+        if subnets:
+            for subnet, hosts in subnets.items():
+                row = table.add_row().cells
+                row[0].text = subnet
+                row[1].text = str(len(hosts))
+        else:
+            row = table.add_row().cells
+            row[0].text = report.target
+            row[1].text = "0"
+
+    def _live_hosts(self, doc: Document, report: ScanReport) -> None:
+        doc.add_heading("Identified Live Hosts", level=1)
+        doc.add_paragraph("The following IPs are alive in the subnets.")
+
+        subnets = _group_hosts_by_subnet(report.hosts)
+
+        table = doc.add_table(rows=1, cols=2)
+        table.style = "Light Grid Accent 1"
+        table.rows[0].cells[0].text = "Subnets"
+        table.rows[0].cells[1].text = "Hosts"
+
+        for subnet, hosts in subnets.items():
+            first = True
+            for h in sorted(hosts, key=lambda x: tuple(int(p) for p in x.ip.split("."))):
+                row = table.add_row().cells
+                row[0].text = subnet if first else ""
+                row[1].text = h.ip
+                first = False
+
+        if not subnets:
+            row = table.add_row().cells
+            row[0].text = report.target
+            row[1].text = "No Live Host"
+
+    def _open_ports(self, doc: Document, report: ScanReport) -> None:
+        doc.add_heading("Open Ports", level=1)
+
+        subnets = _group_hosts_by_subnet(report.hosts)
+        section_num = 4
+        sub_num = 1
+
+        for subnet, hosts in subnets.items():
+            doc.add_heading(
+                f"{section_num}.{sub_num}. Summarized open ports on {subnet} subnet.",
+                level=2,
+            )
+
+            table = doc.add_table(rows=1, cols=2)
+            table.style = "Light Grid Accent 1"
+            table.rows[0].cells[0].text = "Hosts"
+            table.rows[0].cells[1].text = "Ports"
+
+            for h in sorted(hosts, key=lambda x: tuple(int(p) for p in x.ip.split("."))):
+                ports_str = ",".join(
+                    f"{p.number}/{p.protocol}" for p in h.open_ports
+                )
+                row = table.add_row().cells
+                row[0].text = h.ip
+                row[1].text = ports_str or ""
+
+            sub_num += 1
+
+    def _identified_issues(self, doc: Document, report: ScanReport) -> None:
         if not report.findings:
             return
 
-        doc.add_heading("Detailed Vulnerability Findings", level=1)
+        findings_by_host = _group_findings_by_host(report.findings)
 
-        by_sev = report.findings_by_severity()
+        # Group hosts into subnets for section numbering
+        host_to_subnet: dict[str, str] = {}
+        for h in report.hosts:
+            parts = h.ip.rsplit(".", 1)
+            host_to_subnet[h.ip] = f"{parts[0]}.0/24" if len(parts) == 2 else h.ip
 
-        for sev in _SEVERITY_WALK:
-            findings = by_sev.get(sev, [])
-            if not findings:
-                continue
+        # Group findings by subnet
+        findings_by_subnet: dict[str, list[Finding]] = defaultdict(list)
+        for host_ip, host_findings in findings_by_host.items():
+            subnet = host_to_subnet.get(host_ip, host_ip)
+            findings_by_subnet[subnet].extend(host_findings)
 
-            doc.add_heading(f"{sev.value.upper()} Severity Findings", level=2)
+        section_num = 5
+        for subnet in sorted(findings_by_subnet.keys()):
+            subnet_findings = findings_by_subnet[subnet]
+            doc.add_heading(
+                f"{section_num}. Identified issues on {subnet} subnet.",
+                level=1,
+            )
 
-            for i, finding in enumerate(findings, 1):
-                doc.add_heading(f"{i}. {finding.title}", level=3)
-
-                # Severity badge
-                badge_para = doc.add_paragraph()
-                badge_run = badge_para.add_run(
-                    f"SEVERITY: {sev.value.upper()} | TYPE: {finding.source.upper()}"
+            for idx, finding in enumerate(subnet_findings, 1):
+                # Heading: section.idx. Title
+                doc.add_heading(
+                    f"{section_num}.{idx}. {finding.title}",
+                    level=2,
                 )
-                badge_run.bold = True
-                badge_run.font.color.rgb = _docx_color(sev)
 
-                # Detail table
-                detail_table = doc.add_table(rows=0, cols=2)
-                detail_table.style = "Light Grid Accent 2"
+                # IP
+                doc.add_paragraph(f"IP: {finding.host}")
 
-                def _add(label: str, value: str) -> None:
-                    if value and value != "N/A":
-                        row = detail_table.add_row().cells
-                        row[0].text = label
-                        row[1].text = value
-
-                _add("Host", finding.host)
-                _add("Endpoint", finding.endpoint or "/")
+                # Port
                 if finding.port:
-                    _add(
-                        "Port",
-                        f"{finding.port}/{finding.protocol}",
+                    doc.add_paragraph(f"Port: {finding.port}")
+
+                # URL (if web endpoint)
+                if finding.full_url:
+                    doc.add_paragraph(f"URL: {finding.full_url}")
+                elif finding.matched_at:
+                    doc.add_paragraph(f"URL: {finding.matched_at}")
+                elif finding.endpoint and finding.endpoint != "/":
+                    protocol = finding.protocol or "http"
+                    port = finding.port or "80"
+                    doc.add_paragraph(
+                        f"URL: {protocol}://{finding.host}:{port}{finding.endpoint}"
                     )
-                _add("Template ID", finding.template_id)
-                _add("Description", finding.description)
-                _add("Raw Output", finding.raw_output)
 
-                doc.add_paragraph()
+                # Vulnerability Summary
+                doc.add_heading("Vulnerability Summary", level=3)
+                desc = finding.description or finding.raw_output or finding.title
+                doc.add_paragraph(desc)
 
-    def _recommendations(self, doc: Document, report: ScanReport) -> None:
-        doc.add_page_break()
-        doc.add_heading("Security Recommendations", level=1)
+            section_num += 1
 
-        recs: list[str] = []
-        stats = report.severity_stats()
-        crit_high = stats.get(Severity.CRITICAL, 0) + stats.get(
-            Severity.HIGH, 0
-        )
-
-        if crit_high > 0:
-            recs.append(
-                f"IMMEDIATE ACTION: Address {crit_high} critical/high severity vulnerabilities"
-            )
-
-        # Dynamic recommendations based on findings
-        ports_seen = {f.port for f in report.findings}
-        if ports_seen & {"80", "443", "8080", "8443"}:
-            recs.append(
-                "WEB SERVICES: Implement WAF, update web applications, and configure security headers"
-            )
-        if ports_seen & {"22", "21", "23"}:
-            recs.append(
-                "REMOTE ACCESS: Harden SSH/FTP/Telnet configurations and use key-based authentication"
-            )
-
-        # Static general recommendations
-        recs.extend(
-            [
-                "NETWORK SECURITY: Implement network segmentation and firewall rules",
-                "MONITORING: Deploy SIEM and intrusion detection systems",
-                "PATCHING: Establish regular patch management process",
-                "ACCESS CONTROL: Implement principle of least privilege",
-                "TESTING: Conduct regular security assessments and penetration tests",
-            ]
-        )
-
-        for rec in recs:
-            doc.add_paragraph(rec, style="List Bullet")
+        doc.add_paragraph()
+        doc.add_paragraph("END OF DOCUMENT")
