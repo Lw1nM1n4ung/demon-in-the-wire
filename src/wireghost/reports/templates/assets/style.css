@@ -743,3 +743,10 @@ tr:hover { background: rgba(88,166,255,0.03); }
   .finding-card { page-break-inside: avoid; }
   .host-panel { page-break-inside: avoid; }
 }
+
+/* Known Exploits table */
+.exploits-section { margin-bottom: 1.5rem; }
+.exploits-table { width: 100%; border-collapse: collapse; }
+.exploits-table th { background: #21262d; color: #58a6ff; padding: 0.5rem 0.75rem; text-align: left; font-size: 0.85rem; border-bottom: 2px solid #30363d; }
+.exploits-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #30363d; font-size: 0.85rem; }
+.exploits-table tr:hover { background: rgba(88,166,255,0.05); }

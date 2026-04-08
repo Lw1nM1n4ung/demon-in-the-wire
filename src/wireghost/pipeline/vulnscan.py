@@ -147,7 +147,10 @@ async def run_searchsploit(
                     all_findings.append(f)
 
     # Method 2: Per-version searches (more targeted)
+    import json as json_mod
     versions = _collect_versions(host)
+    combined_exploits: list[dict] = []
+
     for software in versions:
         result = await run_tool(
             ["searchsploit", "-j", software],
@@ -155,19 +158,25 @@ async def run_searchsploit(
             label=f"searchsploit:{software}",
         )
         output = result.stdout.strip()
-        if output:
-            import json as json_mod
-            try:
-                data = json_mod.loads(output)  # noqa: F841
-                json_path = vuln_dir / "searchsploit_ver.json"
-                json_path.write_text(output, encoding="utf-8")
-                findings = parse_searchsploit_json(json_path, host_ip=host.ip)
-                for f in findings:
-                    if f.template_id not in seen_edb:
-                        seen_edb.add(f.template_id)
-                        all_findings.append(f)
-            except (json_mod.JSONDecodeError, Exception):
-                pass
+        if not output:
+            continue
+        try:
+            data = json_mod.loads(output)
+            for entry in data.get("RESULTS_EXPLOIT", []):
+                combined_exploits.append(entry)
+        except (json_mod.JSONDecodeError, Exception):
+            pass
+
+    # Save ALL accumulated results as one JSON file
+    if combined_exploits:
+        combined = {"RESULTS_EXPLOIT": combined_exploits, "RESULTS_SHELLCODE": []}
+        json_path = vuln_dir / "searchsploit_all.json"
+        json_path.write_text(json_mod.dumps(combined), encoding="utf-8")
+        findings = parse_searchsploit_json(json_path, host_ip=host.ip)
+        for f in findings:
+            if f.template_id not in seen_edb:
+                seen_edb.add(f.template_id)
+                all_findings.append(f)
 
     log.info("Searchsploit %s: %d exploit(s) from %d version(s)", host.ip, len(all_findings), len(versions))
     return all_findings

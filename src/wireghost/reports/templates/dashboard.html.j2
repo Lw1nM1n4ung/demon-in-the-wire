@@ -84,6 +84,39 @@
   </div>
   {% endif %}
 
+  <!-- Known Exploits -->
+  {% if exploits %}
+  <div class="card exploits-section">
+    <h2 class="section-title">Known Exploits <span class="count">{{ exploits|length }}</span></h2>
+    <p style="color:#8b949e;margin-bottom:1rem;">Public exploits found in Exploit-DB matching detected software versions.</p>
+    <table class="exploits-table">
+      <thead>
+        <tr><th>Severity</th><th>Exploit Title</th><th>EDB-ID</th><th>References</th></tr>
+      </thead>
+      <tbody>
+        {% for e in exploits %}
+        <tr>
+          <td><span class="badge badge-{{ e.severity }}">{{ e.severity }}</span></td>
+          <td>{{ e.title }}</td>
+          <td>
+            {% if e.template_id %}
+            <a href="https://www.exploit-db.com/exploits/{{ e.template_id|replace('EDB-', '') }}" target="_blank" style="color:#58a6ff;">{{ e.template_id }}</a>
+            {% endif %}
+          </td>
+          <td>
+            {% for ref in e.references %}
+              {% if 'CVE-' in ref %}
+              <span class="meta-badge meta-cve">{{ ref }}</span>
+              {% endif %}
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <!-- Findings -->
   <div class="findings-section">
     <h2 class="section-title">Vulnerability Findings <span class="count">{{ findings|length }}</span></h2>

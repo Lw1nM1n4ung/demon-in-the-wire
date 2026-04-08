@@ -80,6 +80,7 @@ class DashboardRenderer:
                 "cwe": html_escape(f.cwe),
                 "cve": html_escape(f.cve),
                 "references": [html_escape(r) for r in f.references],
+                "template_id": html_escape(f.template_id),
             }
             for f in sorted_findings
         ]
@@ -123,6 +124,9 @@ class DashboardRenderer:
             for t in technologies
         ]
 
+        # Separate known exploits (searchsploit findings)
+        exploits = [f for f in findings_dicts if f["source"] == "searchsploit"]
+
         html = template.render(
             title=config.report_title,
             date=(report.scan_start or datetime.now()).strftime(
@@ -138,6 +142,7 @@ class DashboardRenderer:
             medium=stats.get(Severity.MEDIUM, 0),
             risk_level=risk_level,
             findings=findings_dicts,
+            exploits=exploits,
             hosts=hosts_dicts,
             technologies=tech_dicts,
             sources=sources,
