@@ -138,14 +138,20 @@ async def run_openvas(
     config: ScanConfig,
     tree: OutputTree,
 ) -> list[Finding]:
-    """Run OpenVAS scan against host (if enabled and server available)."""
+    """Run full OpenVAS scan via gvm-cli (if enabled and available)."""
     if config.skip_openvas:
         return []
 
-    from wireghost.pipeline.openvas_client import OpenVASClient
-    client = OpenVASClient(config.openvas_socket, config.openvas_user, config.openvas_password)
+    from wireghost.pipeline.openvas_client import scan_host_openvas
     vuln_dir = tree.host_vuln_dir(host.ip)
-    xml_path = await client.scan_host(host.ip, vuln_dir, config.tool_timeout)
+    xml_path = await scan_host_openvas(
+        ip=host.ip,
+        output_dir=vuln_dir,
+        socket_path=config.openvas_socket,
+        username=config.openvas_user,
+        password=config.openvas_password,
+        timeout=config.tool_timeout,
+    )
     if xml_path is None:
         return []
     findings = parse_openvas_xml(xml_path, host.ip)
