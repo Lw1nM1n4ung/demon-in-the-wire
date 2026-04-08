@@ -33,8 +33,8 @@ def main(
 @app.command()
 def scan(
     target: str = typer.Argument(..., help="Target IP, CIDR range, or hostname"),
-    output_dir: Path = typer.Option(
-        Path("./output"), "--output", "-o", help="Output directory"
+    output_dir: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Output directory (default: ./output)"
     ),
     parallelism: int = typer.Option(
         10, "--parallelism", "-j", help="Max concurrent host scans"
