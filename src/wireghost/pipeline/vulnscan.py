@@ -95,32 +95,47 @@ async def run_nmap_vuln(
     return findings
 
 
-def _collect_versions(host: Host) -> list[str]:
-    """Collect search terms for searchsploit.
+def _collect_versions(host: Host) -> list[tuple[str, str]]:
+    """Collect search terms for searchsploit with associated port.
 
-    Returns both "product version" (exact) and "product" (broad) for key services.
-    Skips generic names like framework names without versions.
+    Returns list of (search_term, port_number) tuples.
+    Skips generic names like OS names.
     """
-    terms: set[str] = set()
+    terms: list[tuple[str, str]] = []
+    seen: set[str] = set()
 
-    # Skip these — too generic, return thousands of irrelevant results
     _SKIP = {"linux", "ubuntu", "debian", "windows", "http", "https", "tcp", "udp"}
 
-    # From nmap -sV (Service.product + Service.version)
+    # From nmap -sV (Service.product + Service.version → port)
     for port in host.open_ports:
         if port.service and port.service.product:
             name = port.service.product
             if name.lower() in _SKIP:
                 continue
+            port_str = str(port.number)
             if port.service.version:
-                terms.add(f"{name} {port.service.version}")
-            terms.add(name)
+                key = f"{name} {port.service.version}"
+                if key not in seen:
+                    seen.add(key)
+                    terms.append((key, port_str))
+            if name not in seen:
+                seen.add(name)
+                terms.append((name, port_str))
 
     # From httpx tech-detect (WebTech) — with version
     for tech in host.technologies:
-        if tech.name and tech.name.lower() not in _SKIP:
-            if tech.version:
-                terms.add(f"{tech.name} {tech.version}")
+        if tech.name and tech.name.lower() not in _SKIP and tech.version:
+            key = f"{tech.name} {tech.version}"
+            # Try to find port from URL
+            port_str = ""
+            if tech.url:
+                import re
+                m = re.search(r':(\d+)', tech.url)
+                if m:
+                    port_str = m.group(1)
+            if key not in seen:
+                seen.add(key)
+                terms.append((key, port_str))
 
     return sorted(terms)
 
@@ -156,12 +171,14 @@ async def run_searchsploit(
                     seen_edb.add(f.template_id)
                     all_findings.append(f)
 
-    # Method 2: Per-version searches (more targeted)
+    # Method 2: Per-version searches (more targeted, with port mapping)
     import json as json_mod
-    versions = _collect_versions(host)
+    version_tuples = _collect_versions(host)
     combined_exploits: list[dict] = []
+    # Track which port each exploit came from
+    exploit_ports: dict[str, str] = {}  # EDB-ID → port
 
-    for software in versions:
+    for software, port_str in version_tuples:
         result = await run_tool(
             ["searchsploit", "-j", software],
             timeout=30,
@@ -173,6 +190,9 @@ async def run_searchsploit(
         try:
             data = json_mod.loads(output)
             for entry in data.get("RESULTS_EXPLOIT", []):
+                edb = str(entry.get("EDB-ID", ""))
+                if edb and edb not in exploit_ports:
+                    exploit_ports[edb] = port_str
                 combined_exploits.append(entry)
         except (json_mod.JSONDecodeError, Exception):
             pass
@@ -183,6 +203,11 @@ async def run_searchsploit(
         json_path = vuln_dir / "searchsploit_all.json"
         json_path.write_text(json_mod.dumps(combined), encoding="utf-8")
         findings = parse_searchsploit_json(json_path, host_ip=host.ip)
+        # Set port on each finding based on which service matched
+        for f in findings:
+            edb = f.template_id.replace("EDB-", "")
+            if edb in exploit_ports:
+                f.port = exploit_ports[edb]
         for f in findings:
             if f.template_id not in seen_edb:
                 seen_edb.add(f.template_id)

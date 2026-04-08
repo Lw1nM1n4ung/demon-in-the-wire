@@ -99,7 +99,8 @@
       "Bash(mkdir -p /tmp/nasl-feed)",
       "Read(//tmp/**)",
       "Bash(ls /tmp/claude-1000/-home-demon-Tools-Wire-Ghost/04907a97-0d9d-4c76-b11a-f6726d06ce21/tasks/*.output)",
-      "Bash(searchsploit --version)"
+      "Bash(searchsploit --version)",
+      "Bash(sort -k2)"
     ]
   }
 }
