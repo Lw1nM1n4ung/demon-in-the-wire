@@ -48,7 +48,7 @@ RUN git clone --depth 1 https://github.com/greenbone/openvas-scanner.git . \
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nmap fping masscan libpcap0.8 libsnmp40 git rsync \
+    nmap fping masscan libpcap0.8 libsnmp40 git rsync libxml2-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install searchsploit (exploitdb)

@@ -96,23 +96,33 @@ async def run_nmap_vuln(
 
 
 def _collect_versions(host: Host) -> list[str]:
-    """Collect software+version strings — ONLY when a version number is detected.
+    """Collect search terms for searchsploit.
 
-    Without a version number, searchsploit returns too many generic/irrelevant results.
+    Returns both "product version" (exact) and "product" (broad) for key services.
+    Skips generic names like framework names without versions.
     """
-    versions: set[str] = set()
+    terms: set[str] = set()
+
+    # Skip these — too generic, return thousands of irrelevant results
+    _SKIP = {"linux", "ubuntu", "debian", "windows", "http", "https", "tcp", "udp"}
 
     # From nmap -sV (Service.product + Service.version)
     for port in host.open_ports:
-        if port.service and port.service.product and port.service.version:
-            versions.add(f"{port.service.product} {port.service.version}")
+        if port.service and port.service.product:
+            name = port.service.product
+            if name.lower() in _SKIP:
+                continue
+            if port.service.version:
+                terms.add(f"{name} {port.service.version}")
+            terms.add(name)
 
-    # From httpx tech-detect (WebTech) — only with version
+    # From httpx tech-detect (WebTech) — with version
     for tech in host.technologies:
-        if tech.name and tech.version:
-            versions.add(f"{tech.name} {tech.version}")
+        if tech.name and tech.name.lower() not in _SKIP:
+            if tech.version:
+                terms.add(f"{tech.name} {tech.version}")
 
-    return sorted(versions)
+    return sorted(terms)
 
 
 async def run_searchsploit(
