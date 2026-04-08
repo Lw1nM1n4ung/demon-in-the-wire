@@ -114,18 +114,10 @@ services:
     profiles: ["openvas"]
 
   # --- Database ---
-  pg-gvm-migrator:
-    image: registry.community.greenbone.net/community/pg-gvm-migrator:stable
-    deploy:
-      restart_policy:
-        condition: none
-    volumes:
-      - psql_data_vol:/var/lib/postgresql
-      - psql_socket_vol:/var/run/postgresql
-    profiles: ["openvas"]
-
   pg-gvm:
-    image: registry.community.greenbone.net/community/pg-gvm:stable
+    image: registry.community.greenbone.net/community/pg-gvm:v22.6.12-amd64
+    environment:
+      POSTGRES_VERSION: 15
     deploy:
       restart_policy:
         condition: any
@@ -133,9 +125,6 @@ services:
       - psql_data_vol:/var/lib/postgresql
       - psql_socket_vol:/var/run/postgresql
     profiles: ["openvas"]
-    depends_on:
-      pg-gvm-migrator:
-        condition: service_completed_successfully
 
   # --- Redis ---
   redis-server:
