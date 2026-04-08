@@ -27,7 +27,7 @@ async def _run_nmap(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_base = str(nmap_dir / "portscan")
     xml_path = nmap_dir / "portscan.xml"
     result = await run_tool(
-        ["nmap", "--open", "-p-", "-Pn", "-oA", out_base, ip],
+        ["nmap", "--open", "-p-", "-sV", "-Pn", "-oA", out_base, ip],
         timeout=int(config.tool_timeout),
         label=f"nmap:{ip}",
     )

@@ -95,41 +95,86 @@ async def run_nmap_vuln(
     return findings
 
 
+def _collect_versions(host: Host) -> list[str]:
+    """Collect all software+version strings from nmap and httpx detection."""
+    versions: set[str] = set()
+
+    # From nmap -sV (Service.product + Service.version)
+    for port in host.open_ports:
+        if port.service and port.service.product:
+            name = port.service.product
+            ver = port.service.version
+            if ver:
+                versions.add(f"{name} {ver}")
+            else:
+                versions.add(name)
+
+    # From httpx tech-detect (WebTech)
+    for tech in host.technologies:
+        if tech.version:
+            versions.add(f"{tech.name} {tech.version}")
+        elif tech.name:
+            versions.add(tech.name)
+
+    return sorted(versions)
+
+
 async def run_searchsploit(
     host: Host,
     config: ScanConfig,
     tree: OutputTree,
 ) -> list[Finding]:
-    """Run searchsploit --nmap against port scan XML to find known exploits."""
+    """Run searchsploit with version-aware searches."""
     if not shutil.which("searchsploit"):
         return []
 
-    # Use the nmap port scan XML from phase 3
-    nmap_xml = tree.host_nmap_xml_dir(host.ip) / "portscan.xml"
-    if not nmap_xml.exists():
-        return []
-
     vuln_dir = tree.host_vuln_dir(host.ip)
-    json_out = vuln_dir / "searchsploit.json"
+    all_findings: list[Finding] = []
+    seen_edb: set[str] = set()
 
-    result = await run_tool(
-        ["searchsploit", "--nmap", str(nmap_xml), "-j"],
-        timeout=int(config.tool_timeout),
-        label=f"searchsploit {host.ip}",
-    )
+    # Method 1: searchsploit --nmap (basic, uses nmap XML with -sV data)
+    nmap_xml = tree.host_nmap_xml_dir(host.ip) / "portscan.xml"
+    if nmap_xml.exists():
+        result = await run_tool(
+            ["searchsploit", "--nmap", str(nmap_xml), "-j"],
+            timeout=int(config.tool_timeout),
+            label=f"searchsploit:nmap {host.ip}",
+        )
+        output = result.stdout.strip()
+        if output:
+            json_out = vuln_dir / "searchsploit_nmap.json"
+            json_out.write_text(output, encoding="utf-8")
+            findings = parse_searchsploit_json(json_out, host_ip=host.ip)
+            for f in findings:
+                if f.template_id not in seen_edb:
+                    seen_edb.add(f.template_id)
+                    all_findings.append(f)
 
-    if result.returncode != 0 and not result.stdout.strip():
-        log.warning("Searchsploit failed for %s (rc=%d)", host.ip, result.returncode)
-        return []
+    # Method 2: Per-version searches (more targeted)
+    versions = _collect_versions(host)
+    for software in versions:
+        result = await run_tool(
+            ["searchsploit", "-j", software],
+            timeout=30,
+            label=f"searchsploit:{software}",
+        )
+        output = result.stdout.strip()
+        if output:
+            import json as json_mod
+            try:
+                data = json_mod.loads(output)  # noqa: F841
+                json_path = vuln_dir / "searchsploit_ver.json"
+                json_path.write_text(output, encoding="utf-8")
+                findings = parse_searchsploit_json(json_path, host_ip=host.ip)
+                for f in findings:
+                    if f.template_id not in seen_edb:
+                        seen_edb.add(f.template_id)
+                        all_findings.append(f)
+            except (json_mod.JSONDecodeError, Exception):
+                pass
 
-    # searchsploit -j writes JSON to stdout
-    output = result.stdout.strip()
-    if output:
-        json_out.write_text(output, encoding="utf-8")
-
-    findings = parse_searchsploit_json(json_out, host_ip=host.ip)
-    log.info("Searchsploit %s: %d exploit(s) found", host.ip, len(findings))
-    return findings
+    log.info("Searchsploit %s: %d exploit(s) from %d version(s)", host.ip, len(all_findings), len(versions))
+    return all_findings
 
 
 async def run_openvas(

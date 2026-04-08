@@ -2,7 +2,7 @@
 
 from wireghost.models.finding import Finding
 from wireghost.models.report import ScanReport
-from wireghost.models.scan import Host, Port, Service
+from wireghost.models.scan import Host, Port, Service, WebTech
 from wireghost.models.severity import (
     SEVERITY_COLORS,
     SEVERITY_HEX,
@@ -19,6 +19,7 @@ __all__ = [
     "categorize_nmap_vuln",
     "Service",
     "Port",
+    "WebTech",
     "Host",
     "Finding",
     "ScanReport",

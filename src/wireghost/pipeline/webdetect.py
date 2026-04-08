@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import shutil
 import ssl
 from typing import TYPE_CHECKING
 
 import aiohttp
 
-from wireghost.models.scan import Host
+from wireghost.models.scan import Host, WebTech
+from wireghost.utils.process import run_tool
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
@@ -29,6 +32,54 @@ async def _try_url(session: aiohttp.ClientSession, url: str) -> bool:
             return resp.status < 600  # any HTTP response counts
     except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
         return False
+
+
+async def _detect_technologies(
+    host: Host, tree: OutputTree, timeout: float,
+) -> None:
+    """Run httpx -tech-detect on web endpoints to identify technologies."""
+    if not host.web_endpoints or not shutil.which("httpx"):
+        return
+
+    web_dir = tree.host_web_dir(host.ip)
+    endpoints_file = web_dir / "endpoints.txt"
+    # endpoints.txt should already exist from probe_host
+    if not endpoints_file.exists():
+        endpoints_file.write_text("\n".join(host.web_endpoints) + "\n")
+
+    tech_json = web_dir / "tech_detect.json"
+
+    await run_tool(
+        ["httpx", "-l", str(endpoints_file), "-tech-detect", "-json", "-o", str(tech_json), "-silent"],
+        timeout=int(timeout),
+        label=f"httpx tech {host.ip}",
+    )
+
+    if not tech_json.exists():
+        return
+
+    # Parse httpx JSON output (one JSON object per line)
+    for line in tech_json.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        url = item.get("url", "")
+        techs = item.get("tech", [])
+        if isinstance(techs, list):
+            for tech in techs:
+                # httpx tech format: "TechName" or "TechName:version"
+                if ":" in tech:
+                    name, version = tech.split(":", 1)
+                else:
+                    name, version = tech, ""
+                host.technologies.append(WebTech(name=name.strip(), version=version.strip(), url=url))
+
+    log.info("Tech detect %s: %d technologies found", host.ip, len(host.technologies))
 
 
 async def probe_host(
@@ -84,3 +135,6 @@ async def probe_host(
                     fh.write(url + "\n")
         else:
             log.info("Web detect %s: no web endpoints", host.ip)
+
+        # Run httpx tech detection on discovered endpoints
+        await _detect_technologies(host, tree, config.tool_timeout)

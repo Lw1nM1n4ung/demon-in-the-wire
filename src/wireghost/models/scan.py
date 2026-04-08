@@ -21,12 +21,20 @@ class Port:
 
 
 @dataclass
+class WebTech:
+    name: str       # e.g. "Apache", "nginx", "WordPress"
+    version: str    # e.g. "2.4.49", "1.24"
+    url: str = ""   # which endpoint detected it
+
+
+@dataclass
 class Host:
     ip: str
     hostname: str = ""
     status: str = "up"
     ports: list[Port] = field(default_factory=list)
     web_endpoints: list[str] = field(default_factory=list)
+    technologies: list[WebTech] = field(default_factory=list)
 
     @property
     def open_ports(self) -> list[Port]:
