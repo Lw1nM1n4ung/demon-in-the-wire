@@ -1,14 +1,20 @@
 services:
+  # ============================================================
+  # Wire_Ghost scanner
+  # ============================================================
   wireghost:
     build: .
-    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./output:/data/output
+      - gvmd_socket_vol:/run/gvmd        # connect to OpenVAS via GMP socket
     environment:
       - WIREGHOST_OUTPUT_DIR=/data/output
-      - HOME=/tmp
+      - WIREGHOST_OPENVAS_SOCKET=/run/gvmd/gvmd.sock
     network_mode: host
 
+  # ============================================================
+  # Standalone tool containers (optional)
+  # ============================================================
   nmap:
     image: instrumentisto/nmap:latest
     volumes:
@@ -30,39 +36,274 @@ services:
     network_mode: host
     profiles: ["tools"]
 
-  openvas:
-    image: greenbone/openvas-scanner:latest
+  # ============================================================
+  # OpenVAS / Greenbone Community Edition
+  # Start with: docker compose --profile openvas up -d
+  # ============================================================
+
+  # --- Data feed containers ---
+  vulnerability-tests:
+    image: registry.community.greenbone.net/community/vulnerability-tests
+    environment:
+      FEED_RELEASE: "24.10"
+      KEEP_ALIVE: 1
     volumes:
-      - openvas_data:/var/lib/openvas
-      - gvmd_socket:/run/gvmd
-    network_mode: host
+      - vt_data_vol:/mnt
     profiles: ["openvas"]
 
-  gvmd:
-    image: greenbone/gvmd:latest
-    volumes:
-      - gvmd_data:/var/lib/gvm
-      - gvmd_socket:/run/gvmd
-      - openvas_data:/var/lib/openvas
+  notus-data:
+    image: registry.community.greenbone.net/community/notus-data
     environment:
-      - GVMD_USER=admin
-      - GVMD_PASSWORD=admin
-    network_mode: host
+      KEEP_ALIVE: 1
+    volumes:
+      - notus_data_vol:/mnt
+    profiles: ["openvas"]
+
+  scap-data:
+    image: registry.community.greenbone.net/community/scap-data
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+      - scap_data_vol:/mnt
+    profiles: ["openvas"]
+
+  cert-bund-data:
+    image: registry.community.greenbone.net/community/cert-bund-data
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+      - cert_data_vol:/mnt
+    profiles: ["openvas"]
+
+  dfn-cert-data:
+    image: registry.community.greenbone.net/community/dfn-cert-data
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+      - cert_data_vol:/mnt
     profiles: ["openvas"]
     depends_on:
-      - openvas
+      cert-bund-data:
+        condition: service_healthy
+
+  data-objects:
+    image: registry.community.greenbone.net/community/data-objects
+    environment:
+      FEED_RELEASE: "24.10"
+      KEEP_ALIVE: 1
+    volumes:
+      - data_objects_vol:/mnt
+    profiles: ["openvas"]
+
+  report-formats:
+    image: registry.community.greenbone.net/community/report-formats
+    environment:
+      FEED_RELEASE: "24.10"
+      KEEP_ALIVE: 1
+    volumes:
+      - data_objects_vol:/mnt
+    profiles: ["openvas"]
+    depends_on:
+      data-objects:
+        condition: service_healthy
+
+  gpg-data:
+    image: registry.community.greenbone.net/community/gpg-data
+    volumes:
+      - gpg_data_vol:/mnt
+    profiles: ["openvas"]
+
+  # --- Database ---
+  pg-gvm-migrator:
+    image: registry.community.greenbone.net/community/pg-gvm-migrator:stable
+    deploy:
+      restart_policy:
+        condition: none
+    volumes:
+      - psql_data_vol:/var/lib/postgresql
+      - psql_socket_vol:/var/run/postgresql
+    profiles: ["openvas"]
+
+  pg-gvm:
+    image: registry.community.greenbone.net/community/pg-gvm:stable
+    deploy:
+      restart_policy:
+        condition: any
+    volumes:
+      - psql_data_vol:/var/lib/postgresql
+      - psql_socket_vol:/var/run/postgresql
+    profiles: ["openvas"]
+    depends_on:
+      pg-gvm-migrator:
+        condition: service_completed_successfully
+
+  # --- Redis ---
+  redis-server:
+    image: registry.community.greenbone.net/community/redis-server
+    deploy:
+      restart_policy:
+        condition: any
+    volumes:
+      - redis_socket_vol:/run/redis/
+    profiles: ["openvas"]
+
+  # --- Core services ---
+  gvmd:
+    image: registry.community.greenbone.net/community/gvmd:stable
+    deploy:
+      restart_policy:
+        condition: any
+    volumes:
+      - gvmd_data_vol:/var/lib/gvm
+      - scap_data_vol:/var/lib/gvm/scap-data/
+      - cert_data_vol:/var/lib/gvm/cert-data
+      - data_objects_vol:/var/lib/gvm/data-objects/gvmd
+      - vt_data_vol:/var/lib/openvas/plugins
+      - psql_data_vol:/var/lib/postgresql
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+      - psql_socket_vol:/var/run/postgresql
+    profiles: ["openvas"]
+    depends_on:
+      pg-gvm:
+        condition: service_started
+      scap-data:
+        condition: service_healthy
+      cert-bund-data:
+        condition: service_healthy
+      dfn-cert-data:
+        condition: service_healthy
+      data-objects:
+        condition: service_healthy
+      report-formats:
+        condition: service_healthy
+
+  configure-openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    volumes:
+      - openvas_data_vol:/mnt
+      - openvas_log_data_vol:/var/log/openvas
+    profiles: ["openvas"]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf "table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n" > /mnt/openvas.conf
+        sed "s/127/128/" /etc/openvas/openvas_log.conf | sed 's/gvm/openvas/' > /mnt/openvas_log.conf
+        chmod 644 /mnt/openvas.conf
+        chmod 644 /mnt/openvas_log.conf
+        touch /var/log/openvas/openvas.log
+        chmod 666 /var/log/openvas/openvas.log
+
+  openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+    profiles: ["openvas"]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat /etc/openvas/openvas.conf
+        tail -f /var/log/openvas/openvas.log
+    depends_on:
+      configure-openvas:
+        condition: service_completed_successfully
+
+  openvasd:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    deploy:
+      restart_policy:
+        condition: any
+    environment:
+      OPENVASD_MODE: service_notus
+      GNUPGHOME: /etc/openvas/gnupg
+      LISTENING: 0.0.0.0:80
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+      - gpg_data_vol:/etc/openvas/gnupg
+      - notus_data_vol:/var/lib/notus
+    profiles: ["openvas"]
+    depends_on:
+      vulnerability-tests:
+        condition: service_healthy
+      notus-data:
+        condition: service_healthy
+      configure-openvas:
+        condition: service_completed_successfully
+      gpg-data:
+        condition: service_completed_successfully
+    networks:
+      default:
+        aliases:
+          - openvasd
 
   ospd-openvas:
-    image: greenbone/ospd-openvas:latest
+    image: registry.community.greenbone.net/community/ospd-openvas:stable
+    deploy:
+      restart_policy:
+        condition: any
+    hostname: ospd-openvas.local
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    command:
+      [
+        "ospd-openvas", "-f",
+        "--config", "/etc/gvm/ospd-openvas.conf",
+        "--notus-feed-dir", "/var/lib/notus/advisories",
+        "-m", "666",
+      ]
     volumes:
-      - openvas_data:/var/lib/openvas
-      - gvmd_socket:/run/gvmd
-    network_mode: host
+      - gpg_data_vol:/etc/openvas/gnupg
+      - vt_data_vol:/var/lib/openvas/plugins
+      - notus_data_vol:/var/lib/notus
+      - ospd_openvas_socket_vol:/run/ospd
+      - redis_socket_vol:/run/redis/
+      - openvas_data_vol:/etc/openvas/
+      - openvas_log_data_vol:/var/log/openvas
     profiles: ["openvas"]
     depends_on:
-      - openvas
+      redis-server:
+        condition: service_started
+      gpg-data:
+        condition: service_completed_successfully
+      configure-openvas:
+        condition: service_completed_successfully
+      vulnerability-tests:
+        condition: service_healthy
+      notus-data:
+        condition: service_healthy
+
+  # --- GVM CLI tools (for wireghost to use) ---
+  gvm-tools:
+    image: registry.community.greenbone.net/community/gvm-tools
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+    profiles: ["openvas"]
+    depends_on:
+      - gvmd
+      - ospd-openvas
 
 volumes:
-  openvas_data:
-  gvmd_data:
-  gvmd_socket:
+  # OpenVAS volumes
+  gpg_data_vol:
+  scap_data_vol:
+  cert_data_vol:
+  data_objects_vol:
+  gvmd_data_vol:
+  psql_data_vol:
+  vt_data_vol:
+  notus_data_vol:
+  psql_socket_vol:
+  gvmd_socket_vol:
+  ospd_openvas_socket_vol:
+  redis_socket_vol:
+  openvas_data_vol:
+  openvas_log_data_vol:
