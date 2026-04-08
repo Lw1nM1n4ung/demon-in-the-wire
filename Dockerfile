@@ -62,12 +62,12 @@ COPY --from=tools /tools/httpx /usr/local/bin/httpx
 COPY --from=tools /tools/naabu /usr/local/bin/naabu
 COPY --from=scannerctl-builder /usr/local/bin/scannerctl /usr/local/bin/scannerctl
 
-# Install wireghost + gvm-tools
+# Install wireghost
 WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 COPY wireghost.example.yml .
-RUN pip install --no-cache-dir . gvm-tools greenbone-feed-sync
+RUN pip install --no-cache-dir . greenbone-feed-sync
 
 # Download nuclei templates
 RUN nuclei -update-templates
@@ -84,7 +84,6 @@ RUN echo "=== Tool verification ===" \
     && naabu -version 2>&1 | head -1 \
     && masscan --version 2>&1 | head -1 \
     && scannerctl version 2>&1 | head -1 \
-    && gvm-cli --version 2>&1 | head -1 \
     && wireghost --version
 
 ENV WIREGHOST_OUTPUT_DIR=/data/output

@@ -11,7 +11,6 @@ from wireghost.models.finding import Finding
 from wireghost.models.scan import Host
 from wireghost.parsers.nmap import parse_nmap_vuln_xml
 from wireghost.parsers.nuclei import parse_nuclei_json
-from wireghost.parsers.openvas import parse_openvas_xml
 from wireghost.parsers.searchsploit import parse_searchsploit_json
 from wireghost.utils.process import run_tool
 
@@ -138,23 +137,28 @@ async def run_openvas(
     config: ScanConfig,
     tree: OutputTree,
 ) -> list[Finding]:
-    """Run full OpenVAS scan via gvm-cli (if enabled and available)."""
+    """Run OpenVAS scan via scannerctl (if enabled and available)."""
     if config.skip_openvas:
         return []
 
-    from wireghost.pipeline.openvas_client import scan_host_openvas
+    from wireghost.pipeline.openvas_client import scan_host_scannerctl
     vuln_dir = tree.host_vuln_dir(host.ip)
-    xml_path = await scan_host_openvas(
+    result_path = await scan_host_scannerctl(
         ip=host.ip,
         output_dir=vuln_dir,
-        socket_path=config.openvas_socket,
-        username=config.openvas_user,
-        password=config.openvas_password,
         timeout=config.tool_timeout,
     )
-    if xml_path is None:
+    if result_path is None:
         return []
-    findings = parse_openvas_xml(xml_path, host.ip)
+
+    # Try parsing as OpenVAS XML first, fall back to text parsing
+    from wireghost.parsers.openvas import parse_openvas_xml
+    xml_path = vuln_dir / f"openvas_report_{host.ip}.xml"
+    if xml_path.exists():
+        findings = parse_openvas_xml(xml_path, host.ip)
+    else:
+        findings = parse_openvas_xml(result_path, host.ip)
+
     log.info("OpenVAS %s: %d finding(s)", host.ip, len(findings))
     return findings
 
