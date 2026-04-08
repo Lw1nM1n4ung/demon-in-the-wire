@@ -1,4 +1,4 @@
-"""Tests for wireghost.parsers — nmap + nuclei + naabu + masscan."""
+"""Tests for wireghost.parsers — nmap + nuclei + naabu + masscan + searchsploit."""
 
 from __future__ import annotations
 
@@ -227,3 +227,61 @@ class TestParseMasscanXml:
         hosts = parse_masscan_xml(fixture)
         for port in hosts[0].ports:
             assert port.service is None
+
+
+# ------------------------------------------------------------------ #
+# searchsploit
+# ------------------------------------------------------------------ #
+from wireghost.parsers.searchsploit import parse_searchsploit_json
+
+
+class TestParseSearchsploitJson:
+    def test_parses_exploits(self):
+        fixture = Path(__file__).parent / "fixtures" / "searchsploit_output.json"
+        findings = parse_searchsploit_json(fixture, host_ip="10.0.0.1")
+        assert len(findings) == 3
+        assert findings[0].source == "searchsploit"
+        assert findings[0].host == "10.0.0.1"
+        assert "Apache 2.4.49" in findings[0].title
+
+    def test_severity_classification(self):
+        fixture = Path(__file__).parent / "fixtures" / "searchsploit_output.json"
+        findings = parse_searchsploit_json(fixture)
+        titles = {f.title: f.severity for f in findings}
+        # "Remote Code Execution" -> CRITICAL
+        assert titles["Exploit: Apache 2.4.49 - Path Traversal & Remote Code Execution"] == Severity.CRITICAL
+        # "Remote" type -> HIGH
+        assert titles["Exploit: OpenSSH 8.9 - Remote Code Execution"] == Severity.CRITICAL
+        # "Denial of Service" -> MEDIUM
+        assert titles["Exploit: MySQL 5.7 - Denial of Service"] == Severity.MEDIUM
+
+    def test_cve_references(self):
+        fixture = Path(__file__).parent / "fixtures" / "searchsploit_output.json"
+        findings = parse_searchsploit_json(fixture)
+        apache = findings[0]
+        assert any("CVE-2021-41773" in r for r in apache.references)
+        assert any("exploit-db.com" in r for r in apache.references)
+
+    def test_edb_id_in_template_id(self):
+        fixture = Path(__file__).parent / "fixtures" / "searchsploit_output.json"
+        findings = parse_searchsploit_json(fixture)
+        assert findings[0].template_id == "EDB-50383"
+
+    def test_missing_file_returns_empty(self):
+        assert parse_searchsploit_json(Path("/nonexistent.json")) == []
+
+    def test_empty_file_returns_empty(self, tmp_path):
+        empty = tmp_path / "empty.json"
+        empty.write_text("")
+        assert parse_searchsploit_json(empty) == []
+
+    def test_deduplicates_by_edb_id(self, tmp_path):
+        import json
+        data = {"RESULTS_EXPLOIT": [
+            {"Title": "Dup Exploit", "EDB-ID": "11111", "Type": "remote", "Platform": "linux", "Codes": "", "Path": "", "Date_Published": ""},
+            {"Title": "Dup Exploit Again", "EDB-ID": "11111", "Type": "remote", "Platform": "linux", "Codes": "", "Path": "", "Date_Published": ""},
+        ], "RESULTS_SHELLCODE": []}
+        f = tmp_path / "dup.json"
+        f.write_text(json.dumps(data))
+        findings = parse_searchsploit_json(f)
+        assert len(findings) == 1

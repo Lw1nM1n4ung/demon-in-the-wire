@@ -1,0 +1,37 @@
+{
+  "SEARCH": "nmap",
+  "DB_PATH_EXPLOIT": "/usr/share/exploitdb",
+  "RESULTS_EXPLOIT": [
+    {
+      "Title": "Apache 2.4.49 - Path Traversal & Remote Code Execution",
+      "EDB-ID": "50383",
+      "Date_Published": "2021-10-05",
+      "Author": "Offensive Security",
+      "Type": "webapps",
+      "Platform": "multiple",
+      "Path": "/usr/share/exploitdb/exploits/multiple/webapps/50383.py",
+      "Codes": "CVE-2021-41773;CVE-2021-42013"
+    },
+    {
+      "Title": "OpenSSH 8.9 - Remote Code Execution",
+      "EDB-ID": "51234",
+      "Date_Published": "2022-06-15",
+      "Author": "Security Researcher",
+      "Type": "remote",
+      "Platform": "linux",
+      "Path": "/usr/share/exploitdb/exploits/linux/remote/51234.py",
+      "Codes": "CVE-2022-12345"
+    },
+    {
+      "Title": "MySQL 5.7 - Denial of Service",
+      "EDB-ID": "49999",
+      "Date_Published": "2020-01-10",
+      "Author": "Researcher",
+      "Type": "dos",
+      "Platform": "linux",
+      "Path": "/usr/share/exploitdb/exploits/linux/dos/49999.py",
+      "Codes": ""
+    }
+  ],
+  "RESULTS_SHELLCODE": []
+}

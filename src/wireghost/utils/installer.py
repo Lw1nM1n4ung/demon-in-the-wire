@@ -20,6 +20,7 @@ _APT_TOOLS = {
     "nmap": "nmap",
     "fping": "fping",
     "masscan": "masscan",
+    "searchsploit": "exploitdb",
 }
 
 # ProjectDiscovery tools — downloaded as pre-built binaries

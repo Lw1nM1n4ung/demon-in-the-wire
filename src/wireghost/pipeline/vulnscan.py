@@ -1,15 +1,17 @@
-"""Phase 4 -- Vulnerability scanning via nuclei and nmap --script=vuln."""
+"""Phase 4 -- Vulnerability scanning via nuclei, nmap --script=vuln, and searchsploit."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from typing import TYPE_CHECKING
 
 from wireghost.models.finding import Finding
 from wireghost.models.scan import Host
 from wireghost.parsers.nmap import parse_nmap_vuln_xml
 from wireghost.parsers.nuclei import parse_nuclei_json
+from wireghost.parsers.searchsploit import parse_searchsploit_json
 from wireghost.utils.process import run_tool
 
 if TYPE_CHECKING:
@@ -93,13 +95,50 @@ async def run_nmap_vuln(
     return findings
 
 
+async def run_searchsploit(
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+) -> list[Finding]:
+    """Run searchsploit --nmap against port scan XML to find known exploits."""
+    if not shutil.which("searchsploit"):
+        return []
+
+    # Use the nmap port scan XML from phase 3
+    nmap_xml = tree.host_nmap_xml_dir(host.ip) / "portscan.xml"
+    if not nmap_xml.exists():
+        return []
+
+    vuln_dir = tree.host_vuln_dir(host.ip)
+    json_out = vuln_dir / "searchsploit.json"
+
+    result = await run_tool(
+        ["searchsploit", "--nmap", str(nmap_xml), "-j"],
+        timeout=int(config.tool_timeout),
+        label=f"searchsploit {host.ip}",
+    )
+
+    if result.returncode != 0 and not result.stdout.strip():
+        log.warning("Searchsploit failed for %s (rc=%d)", host.ip, result.returncode)
+        return []
+
+    # searchsploit -j writes JSON to stdout
+    output = result.stdout.strip()
+    if output:
+        json_out.write_text(output, encoding="utf-8")
+
+    findings = parse_searchsploit_json(json_out, host_ip=host.ip)
+    log.info("Searchsploit %s: %d exploit(s) found", host.ip, len(findings))
+    return findings
+
+
 async def scan_host_vulns(
     host: Host,
     config: ScanConfig,
     tree: OutputTree,
     sem: asyncio.Semaphore,
 ) -> list[Finding]:
-    """Run nuclei and nmap vuln scans concurrently for a single host.
+    """Run nuclei, nmap vuln, and searchsploit concurrently for a single host.
 
     *sem* limits how many hosts are scanned in parallel.
     """
@@ -111,6 +150,9 @@ async def scan_host_vulns(
 
         if not config.skip_vuln:
             tasks.append(asyncio.create_task(run_nmap_vuln(host, config, tree)))
+
+        # Searchsploit: auto-find exploits for detected services (if installed)
+        tasks.append(asyncio.create_task(run_searchsploit(host, config, tree)))
 
         if not tasks:
             return []
