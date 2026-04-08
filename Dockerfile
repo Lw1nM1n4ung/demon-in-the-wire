@@ -29,11 +29,26 @@ RUN NAABU_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/naabu/rel
     && unzip -o naabu.zip naabu -d /tools/ \
     && chmod +x /tools/naabu && rm naabu.zip
 
-# === Stage 2: Final image ===
+# === Stage 2: Build scannerctl from OpenVAS Rust source ===
+FROM rust:1.93-bookworm AS scannerctl-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpcap-dev libssl-dev pkg-config cmake libsnmp-dev capnproto \
+    libclang-dev clang \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+# Clone and build only scannerctl (not the full openvasd server)
+RUN git clone --depth 1 https://github.com/greenbone/openvas-scanner.git . \
+    && cd rust \
+    && cargo build --release --bin scannerctl \
+    && cp target/release/scannerctl /usr/local/bin/scannerctl
+
+# === Stage 3: Final image ===
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nmap fping masscan libpcap0.8 git \
+    nmap fping masscan libpcap0.8 libsnmp40 git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install searchsploit (exploitdb)
@@ -45,17 +60,21 @@ RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/e
 COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
 COPY --from=tools /tools/httpx /usr/local/bin/httpx
 COPY --from=tools /tools/naabu /usr/local/bin/naabu
+COPY --from=scannerctl-builder /usr/local/bin/scannerctl /usr/local/bin/scannerctl
 
 # Install wireghost + gvm-tools
 WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 COPY wireghost.example.yml .
-RUN pip install --no-cache-dir . gvm-tools
+RUN pip install --no-cache-dir . gvm-tools greenbone-feed-sync
 
-# Download nuclei templates + update searchsploit db
+# Download nuclei templates
 RUN nuclei -update-templates
-RUN searchsploit -u 2>/dev/null || true
+
+# Download OpenVAS NASL feeds
+RUN mkdir -p /var/lib/openvas/plugins \
+    && greenbone-feed-sync --type nasl --nasl-destination /var/lib/openvas/plugins 2>/dev/null || true
 
 # Verify all tools
 RUN echo "=== Tool verification ===" \
@@ -64,7 +83,7 @@ RUN echo "=== Tool verification ===" \
     && nuclei -version 2>&1 | head -1 \
     && naabu -version 2>&1 | head -1 \
     && masscan --version 2>&1 | head -1 \
-    && searchsploit --version 2>&1 | head -1 || true \
+    && scannerctl version 2>&1 | head -1 \
     && gvm-cli --version 2>&1 | head -1 \
     && wireghost --version
 
