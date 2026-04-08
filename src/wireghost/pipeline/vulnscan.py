@@ -96,25 +96,21 @@ async def run_nmap_vuln(
 
 
 def _collect_versions(host: Host) -> list[str]:
-    """Collect all software+version strings from nmap and httpx detection."""
+    """Collect software+version strings — ONLY when a version number is detected.
+
+    Without a version number, searchsploit returns too many generic/irrelevant results.
+    """
     versions: set[str] = set()
 
     # From nmap -sV (Service.product + Service.version)
     for port in host.open_ports:
-        if port.service and port.service.product:
-            name = port.service.product
-            ver = port.service.version
-            if ver:
-                versions.add(f"{name} {ver}")
-            else:
-                versions.add(name)
+        if port.service and port.service.product and port.service.version:
+            versions.add(f"{port.service.product} {port.service.version}")
 
-    # From httpx tech-detect (WebTech)
+    # From httpx tech-detect (WebTech) — only with version
     for tech in host.technologies:
-        if tech.version:
+        if tech.name and tech.version:
             versions.add(f"{tech.name} {tech.version}")
-        elif tech.name:
-            versions.add(tech.name)
 
     return sorted(versions)
 
