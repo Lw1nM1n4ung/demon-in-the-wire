@@ -170,6 +170,28 @@ def report(
                     if line.strip()
                 ]
 
+            # Technologies
+            tech_file = ip_dir / "web" / "tech_detect.json"
+            if tech_file.is_file():
+                import json as _json
+                from wireghost.models.scan import WebTech
+                for line in tech_file.read_text().splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = _json.loads(line)
+                        for t in item.get("tech", []):
+                            if ":" in t:
+                                name, ver = t.split(":", 1)
+                            else:
+                                name, ver = t, ""
+                            host.technologies.append(
+                                WebTech(name=name.strip(), version=ver.strip(), url=item.get("url", ""))
+                            )
+                    except _json.JSONDecodeError:
+                        pass
+
             # Vuln findings
             vuln_dir = ip_dir / "vuln"
             if vuln_dir.is_dir():
@@ -178,6 +200,13 @@ def report(
 
                 nmap_vuln_xml = vuln_dir / "nmap_vuln.xml"
                 findings.extend(parse_nmap_vuln_xml(nmap_vuln_xml))
+
+                # Searchsploit exploits
+                from wireghost.parsers.searchsploit import parse_searchsploit_json
+                for ss_file in ("searchsploit_all.json", "searchsploit_nmap.json", "searchsploit_ver.json"):
+                    ss_path = vuln_dir / ss_file
+                    if ss_path.is_file():
+                        findings.extend(parse_searchsploit_json(ss_path, host_ip=host.ip))
 
     # Infer target from directory name
     target_name = scan_dir.name
