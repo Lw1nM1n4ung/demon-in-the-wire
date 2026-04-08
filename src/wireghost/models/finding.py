@@ -25,3 +25,9 @@ class Finding:
     raw_output: str = ""
     references: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    request: str = ""       # HTTP request sent
+    response: str = ""      # HTTP response received
+    curl_command: str = ""  # curl to reproduce
+    cvss: str = ""          # CVSS score/metrics
+    cwe: str = ""           # CWE ID
+    cve: str = ""           # CVE ID

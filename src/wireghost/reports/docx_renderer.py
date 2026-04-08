@@ -453,6 +453,37 @@ class DocxRenderer:
                 desc = finding.description or finding.raw_output or finding.title
                 doc.add_paragraph(desc)
 
+                # CVE/CWE/CVSS
+                if finding.cve:
+                    cve_para = doc.add_paragraph()
+                    cve_para.add_run("CVE: ").bold = True
+                    cve_para.add_run(finding.cve)
+                if finding.cwe:
+                    cwe_para = doc.add_paragraph()
+                    cwe_para.add_run("CWE: ").bold = True
+                    cwe_para.add_run(finding.cwe)
+                if finding.cvss:
+                    cvss_para = doc.add_paragraph()
+                    cvss_para.add_run("CVSS: ").bold = True
+                    cvss_para.add_run(finding.cvss)
+
+                # Curl command to reproduce
+                if finding.curl_command:
+                    doc.add_heading("Reproduce", level=3)
+                    curl_para = doc.add_paragraph()
+                    curl_run = curl_para.add_run(finding.curl_command[:500])
+                    curl_run.font.size = Pt(9)
+
+                # Evidence (request/response) - truncated
+                if finding.request:
+                    doc.add_heading("Evidence", level=3)
+                    req_text = finding.request[:500]
+                    if len(finding.request) > 500:
+                        req_text += "\n[TRUNCATED]"
+                    req_para = doc.add_paragraph()
+                    req_run = req_para.add_run(req_text)
+                    req_run.font.size = Pt(8)
+
             section_num += 1
 
         doc.add_paragraph()

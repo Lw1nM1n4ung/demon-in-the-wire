@@ -78,6 +78,31 @@ def _parse_item(item: dict) -> Finding | None:
     else:
         tags = []
 
+    # Evidence data
+    request = str(item.get("request", ""))
+    response = str(item.get("response", ""))
+    if len(response) > 2000:
+        response = response[:2000] + "\n\n[TRUNCATED]"
+    curl_cmd = str(item.get("curl-command", ""))
+
+    # Classification
+    classification = safe_get(item, ["info", "classification"], default={})
+    cvss = ""
+    cwe = ""
+    cve = ""
+    if isinstance(classification, dict):
+        cvss = str(classification.get("cvss-metrics", "") or "")
+        cwe_list = classification.get("cwe-id") or []
+        if isinstance(cwe_list, list):
+            cwe = ", ".join(str(c) for c in cwe_list if c)
+        elif cwe_list:
+            cwe = str(cwe_list)
+        cve_list = classification.get("cve-id") or []
+        if isinstance(cve_list, list):
+            cve = ", ".join(str(c) for c in cve_list if c)
+        elif cve_list:
+            cve = str(cve_list)
+
     return Finding(
         source="nuclei",
         host=ip,
@@ -92,6 +117,12 @@ def _parse_item(item: dict) -> Finding | None:
         matched_at=matched_at,
         references=references,
         tags=tags,
+        request=request,
+        response=response,
+        curl_command=curl_cmd,
+        cvss=cvss,
+        cwe=cwe,
+        cve=cve,
     )
 
 
