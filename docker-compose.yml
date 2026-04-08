@@ -29,3 +29,40 @@ services:
       - ./output:/data/output
     network_mode: host
     profiles: ["tools"]
+
+  openvas:
+    image: greenbone/openvas-scanner:latest
+    volumes:
+      - openvas_data:/var/lib/openvas
+      - gvmd_socket:/run/gvmd
+    network_mode: host
+    profiles: ["openvas"]
+
+  gvmd:
+    image: greenbone/gvmd:latest
+    volumes:
+      - gvmd_data:/var/lib/gvm
+      - gvmd_socket:/run/gvmd
+      - openvas_data:/var/lib/openvas
+    environment:
+      - GVMD_USER=admin
+      - GVMD_PASSWORD=admin
+    network_mode: host
+    profiles: ["openvas"]
+    depends_on:
+      - openvas
+
+  ospd-openvas:
+    image: greenbone/ospd-openvas:latest
+    volumes:
+      - openvas_data:/var/lib/openvas
+      - gvmd_socket:/run/gvmd
+    network_mode: host
+    profiles: ["openvas"]
+    depends_on:
+      - openvas
+
+volumes:
+  openvas_data:
+  gvmd_data:
+  gvmd_socket:

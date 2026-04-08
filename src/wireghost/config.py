@@ -32,6 +32,10 @@ class ScanConfig:
     report_title: str = "Security Assessment Summary Report"
     verbose: bool = False
     logo_path: Path | None = None
+    skip_openvas: bool = True
+    openvas_socket: str = "/run/gvmd/gvmd.sock"
+    openvas_user: str = "admin"
+    openvas_password: str = "admin"
 
     @classmethod
     def load(
@@ -109,6 +113,10 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "report_title": "report_title",
         "verbose": "verbose",
         "logo_path": "logo_path",
+        "skip_openvas": "skip_openvas",
+        "openvas_socket": "openvas_socket",
+        "openvas_user": "openvas_user",
+        "openvas_password": "openvas_password",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -130,6 +138,10 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_REPORT_TITLE": ("report_title", str),
         "WIREGHOST_VERBOSE": ("verbose", bool),
         "WIREGHOST_LOGO": ("logo_path", Path),
+        "WIREGHOST_SKIP_OPENVAS": ("skip_openvas", bool),
+        "WIREGHOST_OPENVAS_SOCKET": ("openvas_socket", str),
+        "WIREGHOST_OPENVAS_USER": ("openvas_user", str),
+        "WIREGHOST_OPENVAS_PASSWORD": ("openvas_password", str),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

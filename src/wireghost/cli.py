@@ -60,6 +60,9 @@ def scan(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable debug logging"
     ),
+    skip_openvas: bool = typer.Option(
+        True, "--skip-openvas/--no-skip-openvas", help="Skip/enable OpenVAS scanning"
+    ),
     config_file: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to wireghost.yml config"
     ),
@@ -75,6 +78,7 @@ def scan(
         "skip_vuln": skip_vuln,
         "tool_timeout": timeout,
         "verbose": verbose,
+        "skip_openvas": skip_openvas,
     }
     if report_formats is not None:
         overrides["report_formats"] = [

@@ -11,6 +11,7 @@ from wireghost.models.finding import Finding
 from wireghost.models.scan import Host
 from wireghost.parsers.nmap import parse_nmap_vuln_xml
 from wireghost.parsers.nuclei import parse_nuclei_json
+from wireghost.parsers.openvas import parse_openvas_xml
 from wireghost.parsers.searchsploit import parse_searchsploit_json
 from wireghost.utils.process import run_tool
 
@@ -132,6 +133,26 @@ async def run_searchsploit(
     return findings
 
 
+async def run_openvas(
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+) -> list[Finding]:
+    """Run OpenVAS scan against host (if enabled and server available)."""
+    if config.skip_openvas:
+        return []
+
+    from wireghost.pipeline.openvas_client import OpenVASClient
+    client = OpenVASClient(config.openvas_socket, config.openvas_user, config.openvas_password)
+    vuln_dir = tree.host_vuln_dir(host.ip)
+    xml_path = await client.scan_host(host.ip, vuln_dir, config.tool_timeout)
+    if xml_path is None:
+        return []
+    findings = parse_openvas_xml(xml_path, host.ip)
+    log.info("OpenVAS %s: %d finding(s)", host.ip, len(findings))
+    return findings
+
+
 async def scan_host_vulns(
     host: Host,
     config: ScanConfig,
@@ -153,6 +174,10 @@ async def scan_host_vulns(
 
         # Searchsploit: auto-find exploits for detected services (if installed)
         tasks.append(asyncio.create_task(run_searchsploit(host, config, tree)))
+
+        # OpenVAS: full vulnerability assessment (if enabled)
+        if not config.skip_openvas:
+            tasks.append(asyncio.create_task(run_openvas(host, config, tree)))
 
         if not tasks:
             return []

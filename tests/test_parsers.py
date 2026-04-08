@@ -285,3 +285,51 @@ class TestParseSearchsploitJson:
         f.write_text(json.dumps(data))
         findings = parse_searchsploit_json(f)
         assert len(findings) == 1
+
+
+# ------------------------------------------------------------------ #
+# OpenVAS
+# ------------------------------------------------------------------ #
+from wireghost.parsers.openvas import parse_openvas_xml
+
+
+class TestParseOpenvasXml:
+    def test_parses_findings(self):
+        fixture = Path(__file__).parent / "fixtures" / "openvas_report.xml"
+        findings = parse_openvas_xml(fixture, host_ip="10.0.0.1")
+        assert len(findings) == 3
+        assert findings[0].source == "openvas"
+        assert findings[0].host == "10.0.0.1"
+
+    def test_severity_classification(self):
+        fixture = Path(__file__).parent / "fixtures" / "openvas_report.xml"
+        findings = parse_openvas_xml(fixture)
+        sev = {f.title: f.severity for f in findings}
+        # CVSS 9.8 -> CRITICAL
+        assert sev["Apache HTTP Server Path Traversal (CVE-2021-41773)"] == Severity.CRITICAL
+        # threat=Medium -> MEDIUM
+        assert sev["SSH Weak Algorithms"] == Severity.MEDIUM
+        # threat=Log -> INFO
+        assert sev["OS Detection"] == Severity.INFO
+
+    def test_cve_references(self):
+        fixture = Path(__file__).parent / "fixtures" / "openvas_report.xml"
+        findings = parse_openvas_xml(fixture)
+        apache = findings[0]
+        assert any("CVE-2021-41773" in r for r in apache.references)
+
+    def test_port_parsing(self):
+        fixture = Path(__file__).parent / "fixtures" / "openvas_report.xml"
+        findings = parse_openvas_xml(fixture)
+        assert findings[0].port == "80"
+        assert findings[0].protocol == "tcp"
+        # general/tcp -> empty port
+        assert findings[2].port == ""
+
+    def test_oid_in_template_id(self):
+        fixture = Path(__file__).parent / "fixtures" / "openvas_report.xml"
+        findings = parse_openvas_xml(fixture)
+        assert findings[0].template_id == "1.3.6.1.4.1.25623.1.0.100315"
+
+    def test_missing_file_returns_empty(self):
+        assert parse_openvas_xml(Path("/nonexistent.xml")) == []

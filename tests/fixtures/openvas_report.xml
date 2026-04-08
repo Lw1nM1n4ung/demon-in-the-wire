@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<report>
+  <results max="100" start="1">
+    <result>
+      <host>10.0.0.1</host>
+      <port>80/tcp</port>
+      <nvt oid="1.3.6.1.4.1.25623.1.0.100315">
+        <name>Apache HTTP Server Path Traversal (CVE-2021-41773)</name>
+        <cvss_base>9.8</cvss_base>
+        <severity>9.8</severity>
+        <family>Web Servers</family>
+      </nvt>
+      <threat>High</threat>
+      <description>Apache HTTP Server 2.4.49 allows path traversal attacks.</description>
+      <refs>
+        <ref type="cve" id="CVE-2021-41773"/>
+      </refs>
+    </result>
+    <result>
+      <host>10.0.0.1</host>
+      <port>22/tcp</port>
+      <nvt oid="1.3.6.1.4.1.25623.1.0.103239">
+        <name>SSH Weak Algorithms</name>
+        <cvss_base>4.3</cvss_base>
+        <severity>4.3</severity>
+        <family>General</family>
+      </nvt>
+      <threat>Medium</threat>
+      <description>The SSH server supports weak key exchange algorithms.</description>
+      <refs>
+        <ref type="cve" id="CVE-2020-14145"/>
+      </refs>
+    </result>
+    <result>
+      <host>10.0.0.1</host>
+      <port>general/tcp</port>
+      <nvt oid="1.3.6.1.4.1.25623.1.0.999999">
+        <name>OS Detection</name>
+        <cvss_base>0.0</cvss_base>
+        <severity>0.0</severity>
+        <family>General</family>
+      </nvt>
+      <threat>Log</threat>
+      <description>Remote operating system detected: Linux</description>
+      <refs/>
+    </result>
+  </results>
+</report>
