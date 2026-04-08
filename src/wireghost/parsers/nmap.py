@@ -102,6 +102,18 @@ def parse_nmap_vuln_xml(xml_path: Path) -> list[Finding]:
             for script_el in port_el.findall("script"):
                 script_id = script_el.get("id", "")
                 output = script_el.get("output", "")
+
+                # Skip non-vulnerable / error results
+                out_lower = output.lower()
+                if any(skip in out_lower for skip in (
+                    "couldn't find any",
+                    "error: script execution failed",
+                    "not vulnerable",
+                    "no vuln",
+                    "couldn\\'t find a file",
+                )):
+                    continue
+
                 severity = categorize_nmap_vuln(script_id, output)
 
                 findings.append(
