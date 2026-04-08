@@ -47,6 +47,16 @@
   /* Recommendations */
   .rec-list { list-style: disc inside; }
   .rec-list li { margin-bottom: 0.4rem; }
+
+  /* Evidence details */
+  .finding-evidence { background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 4px; margin: 0.75rem 0; }
+  .finding-evidence summary { padding: 0.4rem 0.75rem; font-weight: 600; font-size: 0.85rem; cursor: pointer; color: #333; }
+  .finding-evidence pre { margin: 0; padding: 0.6rem 0.75rem; background: #f0f0f0; font-size: 0.78rem; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; border-top: 1px solid #e0e0e0; }
+  .meta-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.75rem; font-weight: 600; margin-right: 0.5rem; margin-bottom: 0.35rem; border: 1px solid #ddd; }
+  .meta-badge.cve { background: #fdeaea; border-color: #e8b4b4; color: #9b2c2c; }
+  .meta-badge.cwe { background: #fef3e2; border-color: #e8c990; color: #92600e; }
+  .meta-badge.cvss { background: #e8f0fe; border-color: #a4c4f4; color: #1a56db; }
+  .finding-row-detail { padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
 </style>
 </head>
 <body>
@@ -100,6 +110,25 @@
           <td>{{ f.port }}</td>
           <td>{{ f.title }}</td>
         </tr>
+        {% if f.description or f.cve or f.cwe or f.cvss or f.curl_command or f.request or f.response %}
+        <tr>
+          <td colspan="5" class="finding-row-detail">
+            {% if f.description %}<p style="font-size:0.85rem; margin-bottom:0.5rem;">{{ f.description }}</p>{% endif %}
+            {% if f.cve %}<span class="meta-badge cve">CVE: {{ f.cve }}</span>{% endif %}
+            {% if f.cwe %}<span class="meta-badge cwe">CWE: {{ f.cwe }}</span>{% endif %}
+            {% if f.cvss %}<span class="meta-badge cvss">CVSS: {{ f.cvss }}</span>{% endif %}
+            {% if f.curl_command %}
+            <details class="finding-evidence"><summary>Curl Command</summary><pre>{{ f.curl_command }}</pre></details>
+            {% endif %}
+            {% if f.request %}
+            <details class="finding-evidence"><summary>HTTP Request</summary><pre>{{ f.request }}</pre></details>
+            {% endif %}
+            {% if f.response %}
+            <details class="finding-evidence"><summary>HTTP Response</summary><pre>{{ f.response }}</pre></details>
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>

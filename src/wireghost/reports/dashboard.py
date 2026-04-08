@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -46,10 +47,22 @@ class DashboardRenderer:
             key=lambda f: SEVERITY_ORDER.get(f.severity, 99),
         )
 
-        # Build JSON blob for client-side JS
-        scan_data = _build_scan_json(report, stats)
+        # Compute risk level
+        risk_level = _compute_risk_level(stats)
 
-        # Prepare template-friendly finding dicts
+        # Compute source counts
+        source_counts = _compute_source_counts(report)
+
+        # Deduplicate technologies across all hosts
+        technologies = _collect_technologies(report)
+
+        # Unique source names for the filter dropdown
+        sources = sorted(source_counts.keys())
+
+        # Build JSON blob for client-side JS
+        scan_data = _build_scan_json(report, stats, source_counts)
+
+        # Prepare template-friendly finding dicts with evidence fields
         findings_dicts = [
             {
                 "severity": f.severity.value,
@@ -57,6 +70,14 @@ class DashboardRenderer:
                 "host": f.host,
                 "port": f.port,
                 "title": f.title,
+                "description": f.description,
+                "request": f.request,
+                "response": f.response,
+                "curl_command": f.curl_command,
+                "cvss": f.cvss,
+                "cwe": f.cwe,
+                "cve": f.cve,
+                "references": f.references,
             }
             for f in sorted_findings
         ]
@@ -84,8 +105,21 @@ class DashboardRenderer:
                         }
                         for p in h.open_ports
                     ],
+                    "technologies": [
+                        {
+                            "name": t.name,
+                            "version": t.version,
+                        }
+                        for t in getattr(h, "technologies", [])
+                    ],
                 }
             )
+
+        # Prepare technology dicts for template
+        tech_dicts = [
+            {"name": t.name, "version": t.version}
+            for t in technologies
+        ]
 
         html = template.render(
             title=config.report_title,
@@ -96,11 +130,15 @@ class DashboardRenderer:
             hosts_count=len(report.hosts),
             open_ports=report.total_open_ports,
             total_findings=len(report.findings),
+            tech_count=len(technologies),
             critical=stats.get(Severity.CRITICAL, 0),
             high=stats.get(Severity.HIGH, 0),
             medium=stats.get(Severity.MEDIUM, 0),
+            risk_level=risk_level,
             findings=findings_dicts,
             hosts=hosts_dicts,
+            technologies=tech_dicts,
+            sources=sources,
             css=css,
             js=js,
             scan_json=json.dumps(scan_data),
@@ -111,9 +149,42 @@ class DashboardRenderer:
         return out
 
 
+def _compute_risk_level(stats: dict[Severity, int]) -> str:
+    """Determine overall risk level from severity stats."""
+    if stats.get(Severity.CRITICAL, 0) > 0:
+        return "CRITICAL"
+    if stats.get(Severity.HIGH, 0) > 0:
+        return "HIGH"
+    if stats.get(Severity.MEDIUM, 0) > 0:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _compute_source_counts(report: ScanReport) -> dict[str, int]:
+    """Count findings per source."""
+    counts: dict[str, int] = defaultdict(int)
+    for f in report.findings:
+        counts[f.source] += 1
+    return dict(counts)
+
+
+def _collect_technologies(report: ScanReport) -> list:
+    """Collect and deduplicate technologies from all hosts."""
+    seen: set[tuple[str, str]] = set()
+    techs = []
+    for h in report.hosts:
+        for t in getattr(h, "technologies", []):
+            key = (t.name, t.version)
+            if key not in seen:
+                seen.add(key)
+                techs.append(t)
+    return techs
+
+
 def _build_scan_json(
     report: ScanReport,
     stats: dict[Severity, int],
+    source_counts: dict[str, int],
 ) -> dict:
     """Build a JSON-serializable dict for the client-side JS."""
     return {
@@ -124,6 +195,7 @@ def _build_scan_json(
         "severity_stats": {
             sev.value: count for sev, count in stats.items()
         },
+        "source_counts": source_counts,
         "findings": [
             {
                 "severity": f.severity.value,
