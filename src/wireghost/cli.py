@@ -209,6 +209,30 @@ def report(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def update(
+    tools: bool = typer.Option(False, "--tools", help="Update security tools only"),
+    feeds: bool = typer.Option(False, "--feeds", help="Update vulnerability feeds only"),
+    self_update: bool = typer.Option(False, "--self", help="Update wireghost only"),
+) -> None:
+    """Update tools, feeds, and wireghost itself."""
+    from wireghost.utils.updater import update_all, update_feeds, update_self, update_tools
+
+    console.print(f"[bold green]Wire_Ghost Updater[/]")
+
+    # If no specific flag, update everything
+    if not tools and not feeds and not self_update:
+        update_all()
+    else:
+        if tools:
+            update_tools()
+        if feeds:
+            update_feeds()
+        if self_update:
+            update_self()
+        console.print("\n[bold green]Update complete![/]")
+
+
 @app.command("config")
 def config_cmd(
     action: str = typer.Argument(
