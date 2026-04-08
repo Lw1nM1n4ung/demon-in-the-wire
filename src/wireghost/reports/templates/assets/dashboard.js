@@ -139,7 +139,8 @@
   /* ── State ── */
   var sevActive = {};
   for (var si = 0; si < sevOrder.length; si++) {
-    sevActive[sevOrder[si]] = true;
+    // INFO hidden by default (too much noise — tech detection, headers, etc.)
+    sevActive[sevOrder[si]] = sevOrder[si] !== "info";
   }
   var currentSource = "all";
   var currentSort = "severity";
@@ -237,8 +238,13 @@
     }
   }
 
-  /* ── Finding card expand/collapse ── */
+  /* ── Finding card click to collapse (all start open) ── */
   function initFindingCards() {
+    // All cards start open — mark them
+    document.querySelectorAll(".finding-card").forEach(function (card) {
+      card.classList.add("open");
+    });
+
     document.querySelectorAll(".finding-header").forEach(function (header) {
       header.addEventListener("click", function () {
         var card = header.closest(".finding-card");
@@ -247,7 +253,7 @@
 
         var isOpen = card.classList.contains("open");
         card.classList.toggle("open", !isOpen);
-        detail.style.display = isOpen ? "none" : "block";
+        detail.style.display = isOpen ? "none" : "";
       });
     });
   }
@@ -316,6 +322,8 @@
     initSearch();
     initFindingCards();
     initCopyButtons();
+    // Apply initial filter (hides INFO by default)
+    applyFilters();
     initHostPanels();
   });
 })();

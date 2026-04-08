@@ -127,7 +127,7 @@
         <button class="sev-btn" data-sev="high">High</button>
         <button class="sev-btn" data-sev="medium">Medium</button>
         <button class="sev-btn" data-sev="low">Low</button>
-        <button class="sev-btn" data-sev="info">Info</button>
+        <button class="sev-btn off" data-sev="info">Info</button>
       </div>
       <div class="controls-sep"></div>
       <select id="sourceFilter" class="source-filter">
@@ -153,7 +153,7 @@
           <span class="finding-source">{{ f.source }}</span>
           <span class="finding-meta">{{ f.host }}{% if f.port %}:{{ f.port }}{% endif %}</span>
         </div>
-        <div class="finding-detail" style="display:none">
+        <div class="finding-detail">
           {% if f.description %}
           <div class="finding-description">{{ f.description }}</div>
           {% endif %}
