@@ -48,7 +48,7 @@ RUN git clone --depth 1 https://github.com/greenbone/openvas-scanner.git . \
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nmap fping masscan libpcap0.8 libsnmp40 git \
+    nmap fping masscan libpcap0.8 libsnmp40 git rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # Install searchsploit (exploitdb)
@@ -72,9 +72,10 @@ RUN pip install --no-cache-dir . greenbone-feed-sync
 # Download nuclei templates
 RUN nuclei -update-templates
 
-# Download OpenVAS NASL feeds
+# Download OpenVAS NASL feeds via rsync
 RUN mkdir -p /var/lib/openvas/plugins \
-    && greenbone-feed-sync --type nasl --nasl-destination /var/lib/openvas/plugins 2>/dev/null || true
+    && rsync -avz --timeout=120 rsync://feed.community.greenbone.net/community/vulnerability-feed/current/vt-data/nasl/ /var/lib/openvas/plugins/ 2>/dev/null || true \
+    && echo "NASL feed: $(ls /var/lib/openvas/plugins/*.nasl 2>/dev/null | wc -l) scripts"
 
 # Verify all tools
 RUN echo "=== Tool verification ===" \
