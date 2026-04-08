@@ -1,5 +1,6 @@
 services:
   wireghost:
+    image: callmedemon/wireghost:latest
     build: .
     volumes:
       - ./output:/data/output
