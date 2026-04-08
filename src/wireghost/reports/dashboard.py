@@ -62,22 +62,24 @@ class DashboardRenderer:
         # Build JSON blob for client-side JS
         scan_data = _build_scan_json(report, stats, source_counts)
 
-        # Prepare template-friendly finding dicts with evidence fields
+        # Prepare template-friendly finding dicts with HTML-escaped evidence
+        from html import escape as html_escape
+
         findings_dicts = [
             {
                 "severity": f.severity.value,
                 "source": f.source,
-                "host": f.host,
-                "port": f.port,
-                "title": f.title,
-                "description": f.description,
-                "request": f.request,
-                "response": f.response,
-                "curl_command": f.curl_command,
-                "cvss": f.cvss,
-                "cwe": f.cwe,
-                "cve": f.cve,
-                "references": f.references,
+                "host": html_escape(f.host),
+                "port": html_escape(f.port),
+                "title": html_escape(f.title),
+                "description": html_escape(f.description),
+                "request": html_escape(f.request),
+                "response": html_escape(f.response),
+                "curl_command": html_escape(f.curl_command),
+                "cvss": html_escape(f.cvss),
+                "cwe": html_escape(f.cwe),
+                "cve": html_escape(f.cve),
+                "references": [html_escape(r) for r in f.references],
             }
             for f in sorted_findings
         ]
