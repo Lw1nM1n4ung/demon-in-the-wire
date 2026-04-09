@@ -50,7 +50,7 @@ async def _detect_technologies(
     tech_json = web_dir / "tech_detect.json"
 
     await run_tool(
-        ["httpx", "-l", str(endpoints_file), "-tech-detect", "-json", "-o", str(tech_json), "-silent"],
+        ["httpx", "-l", str(endpoints_file), "-tech-detect", "-sc", "-title", "-server", "-favicon", "-jarm", "-json", "-o", str(tech_json), "-silent"],
         timeout=int(timeout),
         label=f"httpx tech {host.ip}",
     )
@@ -78,6 +78,18 @@ async def _detect_technologies(
                 else:
                     name, version = tech, ""
                 host.technologies.append(WebTech(name=name.strip(), version=version.strip(), url=url))
+
+        # Parse additional fields from httpx enrichment flags
+        status_code = item.get("status_code", 0)
+        title = item.get("title", "")
+        server = item.get("webserver", "")
+        favicon_hash = item.get("favicon", {}).get("hash", "") if isinstance(item.get("favicon"), dict) else ""
+        jarm = item.get("jarm", "")
+
+        if server:
+            host.technologies.append(WebTech(name="Server", version=server, url=url))
+        if title:
+            host.technologies.append(WebTech(name="Title", version=title, url=url))
 
     log.info("Tech detect %s: %d technologies found", host.ip, len(host.technologies))
 

@@ -35,6 +35,7 @@ class Host:
     ports: list[Port] = field(default_factory=list)
     web_endpoints: list[str] = field(default_factory=list)
     technologies: list[WebTech] = field(default_factory=list)
+    os: str = ""  # OS detection from nmap -O (e.g. "Linux 5.15")
 
     @property
     def open_ports(self) -> list[Port]:

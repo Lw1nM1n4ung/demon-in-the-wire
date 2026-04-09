@@ -72,8 +72,14 @@ def parse_nmap_xml(xml_path: Path) -> list[Host]:
                 )
             )
 
+        # OS detection
+        os_match = host_el.find("os/osmatch")
+        os_info = ""
+        if os_match is not None:
+            os_info = os_match.get("name", "")
+
         hosts.append(
-            Host(ip=ip, hostname=hostname, status=status, ports=ports)
+            Host(ip=ip, hostname=hostname, status=status, ports=ports, os=os_info)
         )
 
     return hosts

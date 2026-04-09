@@ -27,7 +27,7 @@ async def _run_nmap(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_base = str(nmap_dir / "portscan")
     xml_path = nmap_dir / "portscan.xml"
     result = await run_tool(
-        ["nmap", "--open", "-p-", "-sV", "-Pn", "-oA", out_base, ip],
+        ["nmap", "--open", "-p-", "-sV", "-sC", "-O", "-Pn", "-oA", out_base, ip],
         timeout=int(config.tool_timeout),
         label=f"nmap:{ip}",
     )
@@ -41,7 +41,7 @@ async def _run_naabu(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_dir = tree.host_dir(ip)
     json_path = out_dir / "naabu_scan.json"
     result = await run_tool(
-        ["naabu", "-host", ip, "-json", "-o", str(json_path)],
+        ["naabu", "-host", ip, "-json", "-o", str(json_path), "-Pn", "-rate", "1000"],
         timeout=int(config.tool_timeout),
         label=f"naabu:{ip}",
     )
@@ -55,7 +55,7 @@ async def _run_masscan(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_dir = tree.host_dir(ip)
     xml_path = out_dir / "masscan_scan.xml"
     result = await run_tool(
-        ["masscan", ip, "-p0-65535", "--rate", "1000", "-oX", str(xml_path)],
+        ["masscan", ip, "-p0-65535", "--rate", "5000", "--banners", "-oX", str(xml_path)],
         timeout=int(config.tool_timeout),
         label=f"masscan:{ip}",
     )

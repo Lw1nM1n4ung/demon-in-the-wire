@@ -42,9 +42,14 @@ async def run_nuclei(
         [
             "nuclei",
             "-l", str(targets_file),
+            "-as",
             "-jsonl",
             "-o", str(output_file),
-            "-silent",
+            "-rl", "150",
+            "-c", "25",
+            "-timeout", "10",
+            "-stats",
+            "-severity", "critical,high,medium,low",
         ],
         timeout=int(config.tool_timeout),
         label=f"nuclei {host.ip}",
@@ -77,7 +82,7 @@ async def run_nmap_vuln(
     result = await run_tool(
         [
             "nmap",
-            "--script=vuln",
+            "--script=vuln,auth,default",
             "-p", port_csv,
             "-Pn",
             "-oX", str(xml_path),
@@ -157,7 +162,7 @@ async def run_searchsploit(
     nmap_xml = tree.host_nmap_xml_dir(host.ip) / "portscan.xml"
     if nmap_xml.exists():
         result = await run_tool(
-            ["searchsploit", "--nmap", str(nmap_xml), "-j"],
+            ["searchsploit", "-v", "--nmap", str(nmap_xml), "-j"],
             timeout=int(config.tool_timeout),
             label=f"searchsploit:nmap {host.ip}",
         )
