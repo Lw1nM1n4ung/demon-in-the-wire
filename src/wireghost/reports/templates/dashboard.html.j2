@@ -91,7 +91,7 @@
     <p style="color:#8b949e;margin-bottom:1rem;">Public exploits found in Exploit-DB matching detected software versions.</p>
     <table class="exploits-table">
       <thead>
-        <tr><th>Severity</th><th>Host</th><th>Port</th><th>Exploit Title</th><th>EDB-ID</th><th>References</th></tr>
+        <tr><th>Severity</th><th>Host</th><th>Port</th><th>Detected Version</th><th>Exploit Title</th><th>EDB-ID</th><th>References</th></tr>
       </thead>
       <tbody>
         {% for e in exploits %}
@@ -99,6 +99,7 @@
           <td><span class="badge badge-{{ e.severity }}">{{ e.severity }}</span></td>
           <td>{{ e.host }}</td>
           <td>{{ e.port }}</td>
+          <td>{% if e.raw_output %}<span class="tech-badge">{{ e.raw_output }}</span>{% endif %}</td>
           <td>{{ e.title }}</td>
           <td>
             {% if e.template_id %}

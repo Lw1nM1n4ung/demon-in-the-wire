@@ -81,6 +81,7 @@ class DashboardRenderer:
                 "cve": html_escape(f.cve),
                 "references": [html_escape(r) for r in f.references],
                 "template_id": html_escape(f.template_id),
+                "raw_output": html_escape(f.raw_output),
             }
             for f in sorted_findings
         ]
