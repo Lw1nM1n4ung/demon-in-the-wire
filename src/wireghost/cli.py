@@ -206,7 +206,22 @@ def report(
                 for ss_file in ("searchsploit_all.json", "searchsploit_nmap.json", "searchsploit_ver.json"):
                     ss_path = vuln_dir / ss_file
                     if ss_path.is_file():
-                        findings.extend(parse_searchsploit_json(ss_path, host_ip=host.ip))
+                        ss_findings = parse_searchsploit_json(ss_path, host_ip=host.ip)
+                        # Match exploits to ports by service name
+                        svc_map: dict[str, str] = {}
+                        for p in host.open_ports:
+                            if p.service and p.service.product:
+                                svc_map[p.service.product.lower()] = str(p.number)
+                                if p.service.name:
+                                    svc_map[p.service.name.lower()] = str(p.number)
+                        for f in ss_findings:
+                            if not f.port:
+                                title_lower = f.title.lower()
+                                for svc_name, port_num in svc_map.items():
+                                    if svc_name in title_lower:
+                                        f.port = port_num
+                                        break
+                        findings.extend(ss_findings)
 
     # Infer target from directory name
     target_name = scan_dir.name
