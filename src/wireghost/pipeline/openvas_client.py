@@ -46,13 +46,13 @@ async def scan_host_scannerctl(
         log.info("No NASL feed found — skipping OpenVAS scan for %s", ip)
         return None
 
-    # Create scan config JSON
+    # Create scan config JSON — empty vts = run ALL available vulnerability tests
     scan_config = {
         "target": {
             "hosts": [ip],
             "ports": [{"protocol": "tcp", "range": [{"start": 1, "end": 65535}]}],
         },
-        "vts": [{"oid": "1.3.6.1.4.1.25623.1.0"}],
+        "vts": [],
     }
 
     config_path = output_dir / f"scannerctl_config_{ip}.json"
