@@ -218,7 +218,7 @@ async def run_searchsploit(
                 seen_edb.add(f.template_id)
                 all_findings.append(f)
 
-    log.info("Searchsploit %s: %d exploit(s) from %d version(s)", host.ip, len(all_findings), len(versions))
+    log.info("Searchsploit %s: %d exploit(s) from %d version(s)", host.ip, len(all_findings), len(version_tuples))
     return all_findings
 
 
