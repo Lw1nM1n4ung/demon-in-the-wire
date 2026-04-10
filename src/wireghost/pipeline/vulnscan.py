@@ -103,28 +103,31 @@ def _collect_versions(host: Host) -> list[tuple[str, str]]:
     """Collect search terms for searchsploit with associated port.
 
     Returns list of (search_term, port_number) tuples.
-    Skips generic names like OS names.
+    ONLY searches with version numbers to avoid false positives.
+    e.g. "OpenSSH 9.6" not just "OpenSSH" (which returns exploits for all versions).
     """
     terms: list[tuple[str, str]] = []
     seen: set[str] = set()
 
-    _SKIP = {"linux", "ubuntu", "debian", "windows", "http", "https", "tcp", "udp"}
+    _SKIP = {"linux", "ubuntu", "debian", "windows", "http", "https", "tcp", "udp",
+             "http-proxy", "unknown", "ppp"}
 
-    # From nmap -sV (Service.product + Service.version → port)
+    # From nmap -sV — ONLY when version is detected
     for port in host.open_ports:
-        if port.service and port.service.product:
+        if port.service and port.service.product and port.service.version:
             name = port.service.product
             if name.lower() in _SKIP:
                 continue
             port_str = str(port.number)
-            if port.service.version:
-                key = f"{name} {port.service.version}"
+            # Extract major.minor version only (e.g. "9.6" from "9.6p1 Ubuntu 3ubuntu13.15")
+            import re
+            ver_match = re.search(r'(\d+\.\d+)', port.service.version)
+            if ver_match:
+                short_ver = ver_match.group(1)
+                key = f"{name} {short_ver}"
                 if key not in seen:
                     seen.add(key)
                     terms.append((key, port_str))
-            if name not in seen:
-                seen.add(name)
-                terms.append((name, port_str))
 
     # From httpx tech-detect (WebTech) — with version
     for tech in host.technologies:
@@ -184,7 +187,7 @@ async def run_searchsploit(
 
     for software, port_str in version_tuples:
         result = await run_tool(
-            ["searchsploit", "-j", software],
+            ["searchsploit", "-s", "-j", software],
             timeout=30,
             label=f"searchsploit:{software}",
         )

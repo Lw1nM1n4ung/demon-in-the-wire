@@ -51,7 +51,8 @@ class TestParseNmapXml:
 class TestParseNmapVulnXml:
     def test_parse_nmap_vuln_xml(self, nmap_vuln_scan_xml: Path):
         findings = parse_nmap_vuln_xml(nmap_vuln_scan_xml)
-        assert len(findings) == 3
+        # ssh-auth-methods is filtered (info-only script, not a vuln)
+        assert len(findings) == 2
 
         by_title = {f.title: f for f in findings}
 
@@ -64,10 +65,6 @@ class TestParseNmapVulnXml:
         # http-vuln-cve2021-41773 -> HIGH (matches "vuln" keyword)
         f_cve = by_title["Nmap: http-vuln-cve2021-41773"]
         assert f_cve.severity == Severity.HIGH
-
-        # ssh-auth-methods -> INFO (no special keywords)
-        f_ssh = by_title["Nmap: ssh-auth-methods"]
-        assert f_ssh.severity == Severity.INFO
 
 
 class TestExtractOpenPorts:

@@ -109,15 +109,29 @@ def parse_nmap_vuln_xml(xml_path: Path) -> list[Finding]:
                 script_id = script_el.get("id", "")
                 output = script_el.get("output", "")
 
-                # Skip non-vulnerable / error results
+                # Skip non-vulnerable / error / info-only results
                 out_lower = output.lower()
+                sid_lower = script_id.lower()
+
+                # Skip error/negative results
                 if any(skip in out_lower for skip in (
                     "couldn't find any",
+                    "couldn\\'t find a file",
                     "error: script execution failed",
+                    "error: missing a param",
                     "not vulnerable",
                     "no vuln",
-                    "couldn\\'t find a file",
+                    "might be redirecting",
                 )):
+                    continue
+
+                # Skip pure info scripts (not vulnerabilities)
+                _INFO_SCRIPTS = {
+                    "ssh-hostkey", "ssh-publickey-acceptance", "ssh-auth-methods",
+                    "ssl-cert", "ssl-date", "http-title", "http-server-header",
+                    "irc-botnet-channels",
+                }
+                if sid_lower in _INFO_SCRIPTS:
                     continue
 
                 severity = categorize_nmap_vuln(script_id, output)
