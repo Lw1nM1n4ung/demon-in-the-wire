@@ -34,6 +34,7 @@ class Host:
     status: str = "up"
     ports: list[Port] = field(default_factory=list)
     web_endpoints: list[str] = field(default_factory=list)
+    web_titles: dict[str, str] = field(default_factory=dict)  # url → page title
     technologies: list[WebTech] = field(default_factory=list)
     os: str = ""  # OS detection from nmap -O (e.g. "Linux 5.15")
 

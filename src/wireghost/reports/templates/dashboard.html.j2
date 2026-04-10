@@ -84,6 +84,35 @@
   </div>
   {% endif %}
 
+  <!-- Web Services -->
+  {% set all_titles = [] %}
+  {% for host in hosts %}
+    {% for url, title in host.web_titles.items() %}
+      {% if title and title != "Error" and "301" not in title %}
+        {% if all_titles.append({"url": url, "title": title, "ip": host.ip}) %}{% endif %}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+  {% if all_titles %}
+  <div class="card">
+    <h2 class="section-title">Web Services <span class="count">{{ all_titles|length }}</span></h2>
+    <table class="exploits-table">
+      <thead>
+        <tr><th>URL</th><th>Title</th><th>Host</th></tr>
+      </thead>
+      <tbody>
+        {% for svc in all_titles %}
+        <tr>
+          <td><a href="{{ svc.url }}" target="_blank" style="color:#58a6ff;">{{ svc.url }}</a></td>
+          <td>{{ svc.title }}</td>
+          <td>{{ svc.ip }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <!-- Known Exploits -->
   {% if exploits %}
   <div class="card exploits-section">

@@ -89,7 +89,7 @@ async def _detect_technologies(
         if server:
             host.technologies.append(WebTech(name="Server", version=server, url=url))
         if title:
-            host.technologies.append(WebTech(name="Title", version=title, url=url))
+            host.web_titles[url] = title
 
     log.info("Tech detect %s: %d technologies found", host.ip, len(host.technologies))
 

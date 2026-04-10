@@ -117,6 +117,7 @@ class DashboardRenderer:
                         for t in getattr(h, "technologies", [])
                     ],
                     "os": getattr(h, "os", ""),
+                    "web_titles": getattr(h, "web_titles", {}),
                 }
             )
 

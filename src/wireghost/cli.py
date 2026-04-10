@@ -181,14 +181,19 @@ def report(
                         continue
                     try:
                         item = _json.loads(line)
+                        url = item.get("url", "")
                         for t in item.get("tech", []):
                             if ":" in t:
                                 name, ver = t.split(":", 1)
                             else:
                                 name, ver = t, ""
                             host.technologies.append(
-                                WebTech(name=name.strip(), version=ver.strip(), url=item.get("url", ""))
+                                WebTech(name=name.strip(), version=ver.strip(), url=url)
                             )
+                        # Page title
+                        title = item.get("title", "")
+                        if title and url:
+                            host.web_titles[url] = title
                     except _json.JSONDecodeError:
                         pass
 
