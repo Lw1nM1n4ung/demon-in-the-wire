@@ -42,7 +42,6 @@ async def run_nuclei(
         [
             "nuclei",
             "-l", str(targets_file),
-            "-as",
             "-jsonl",
             "-o", str(output_file),
             "-rl", "150",

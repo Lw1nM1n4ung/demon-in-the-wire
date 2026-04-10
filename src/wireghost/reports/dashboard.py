@@ -116,6 +116,7 @@ class DashboardRenderer:
                         }
                         for t in getattr(h, "technologies", [])
                     ],
+                    "os": getattr(h, "os", ""),
                 }
             )
 
