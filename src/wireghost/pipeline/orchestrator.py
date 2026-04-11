@@ -10,6 +10,7 @@ from wireghost.config import ScanConfig
 from wireghost.models.finding import Finding
 from wireghost.models.report import ScanReport
 from wireghost.models.scan import Host
+from wireghost.pipeline.cms_scan import scan_cms
 from wireghost.pipeline.discovery import discover_hosts
 from wireghost.pipeline.portscan import scan_host
 from wireghost.pipeline.service_enum import enumerate_services
@@ -88,12 +89,16 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         # Phase 4: Web detection
         await probe_host(host, config, tree, sem)
 
-        # Phase 4b: Service-specific enumeration
+        # Phase 4b: CMS-specific scanning (WPScan for WordPress, etc.)
+        cms_findings = await scan_cms(host, config, tree, sem)
+
+        # Phase 4c: Service-specific enumeration
         svc_findings = await enumerate_services(host, config, tree, sem)
 
         # Phase 5: Vulnerability scanning (nuclei + nmap concurrent)
         findings = await scan_host_vulns(host, config, tree, sem)
         findings.extend(svc_findings)
+        findings.extend(cms_findings)
 
         log.info(
             "[%s] Pipeline done: %d port(s), %d endpoint(s), %d finding(s)",
