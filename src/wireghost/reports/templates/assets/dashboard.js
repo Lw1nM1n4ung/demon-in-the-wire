@@ -1,4 +1,4 @@
-/* Wire_Ghost Interactive Dashboard */
+/* Wire_Ghost Interactive Dashboard — VA Report */
 (function () {
   "use strict";
 
@@ -12,7 +12,7 @@
   };
   var sevOrder = ["critical", "high", "medium", "low", "info"];
 
-  /* ── Severity Doughnut Chart ── */
+  /* -- Severity Doughnut Chart -- */
   function initSeverityChart() {
     if (typeof Chart === "undefined") return;
     var canvas = document.getElementById("severityChart");
@@ -42,7 +42,7 @@
         datasets: [{
           data: values,
           backgroundColor: colors,
-          borderColor: "#161b22",
+          borderColor: "#ffffff",
           borderWidth: 3,
           hoverBorderWidth: 0
         }]
@@ -54,8 +54,8 @@
           legend: {
             position: "bottom",
             labels: {
-              color: "#c9d1d9",
-              font: { size: 11, family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" },
+              color: "#495057",
+              font: { size: 11, family: "Calibri, 'Segoe UI', sans-serif" },
               padding: 16,
               usePointStyle: true,
               pointStyleWidth: 10
@@ -66,7 +66,7 @@
     });
   }
 
-  /* ── Source Horizontal Bar Chart ── */
+  /* -- Source Horizontal Bar Chart -- */
   function initSourceChart() {
     if (typeof Chart === "undefined") return;
     var canvas = document.getElementById("sourceChart");
@@ -118,15 +118,15 @@
           x: {
             beginAtZero: true,
             ticks: {
-              color: "#8b949e",
+              color: "#868e96",
               font: { size: 11 },
               stepSize: 1
             },
-            grid: { color: "rgba(48,54,61,0.5)" }
+            grid: { color: "rgba(222,226,230,0.5)" }
           },
           y: {
             ticks: {
-              color: "#c9d1d9",
+              color: "#212529",
               font: { size: 12, weight: "600" }
             },
             grid: { display: false }
@@ -136,17 +136,17 @@
     });
   }
 
-  /* ── State ── */
+  /* -- State -- */
   var sevActive = {};
   for (var si = 0; si < sevOrder.length; si++) {
-    // INFO hidden by default (too much noise — tech detection, headers, etc.)
+    // INFO hidden by default (too much noise)
     sevActive[sevOrder[si]] = sevOrder[si] !== "info";
   }
   var currentSource = "all";
   var currentSort = "severity";
   var searchQuery = "";
 
-  /* ── Severity filter toggles ── */
+  /* -- Severity filter toggles -- */
   function initSevFilters() {
     var buttons = document.querySelectorAll(".sev-btn");
     buttons.forEach(function (btn) {
@@ -159,7 +159,7 @@
     });
   }
 
-  /* ── Source filter ── */
+  /* -- Source filter -- */
   function initSourceFilter() {
     var sel = document.getElementById("sourceFilter");
     if (!sel) return;
@@ -169,7 +169,7 @@
     });
   }
 
-  /* ── Sort ── */
+  /* -- Sort -- */
   function initSort() {
     var sel = document.getElementById("sortSelect");
     if (!sel) return;
@@ -180,7 +180,7 @@
     });
   }
 
-  /* ── Search ── */
+  /* -- Search -- */
   function initSearch() {
     var input = document.getElementById("searchInput");
     if (!input) return;
@@ -190,7 +190,7 @@
     });
   }
 
-  /* ── Apply all filters ── */
+  /* -- Apply all filters -- */
   function applyFilters() {
     var cards = document.querySelectorAll(".finding-card");
     var visibleCount = 0;
@@ -214,7 +214,7 @@
     }
   }
 
-  /* ── Sort findings ── */
+  /* -- Sort findings -- */
   function sortFindings() {
     var container = document.getElementById("findingsList");
     if (!container) return;
@@ -238,9 +238,9 @@
     }
   }
 
-  /* ── Finding card click to collapse (all start open) ── */
+  /* -- Finding card click to collapse (all start open) -- */
   function initFindingCards() {
-    // All cards start open — mark them
+    // All cards start open
     document.querySelectorAll(".finding-card").forEach(function (card) {
       card.classList.add("open");
     });
@@ -258,7 +258,7 @@
     });
   }
 
-  /* ── Copy curl command ── */
+  /* -- Copy curl command -- */
   function initCopyButtons() {
     document.querySelectorAll(".copy-btn").forEach(function (btn) {
       btn.addEventListener("click", function (e) {
@@ -297,7 +297,7 @@
     }, 1500);
   }
 
-  /* ── Host panel toggle ── */
+  /* -- Host panel toggle -- */
   function initHostPanels() {
     document.querySelectorAll(".host-toggle").forEach(function (btn) {
       btn.addEventListener("click", function () {
@@ -312,7 +312,7 @@
     });
   }
 
-  /* ── Bootstrap ── */
+  /* -- Bootstrap -- */
   document.addEventListener("DOMContentLoaded", function () {
     initSeverityChart();
     initSourceChart();

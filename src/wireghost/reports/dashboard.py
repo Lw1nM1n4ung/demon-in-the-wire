@@ -19,6 +19,18 @@ if TYPE_CHECKING:
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 _ASSETS_DIR = _TEMPLATE_DIR / "assets"
 
+_DISCLAIMER = (
+    "Nothing contained in this document shall be construed as conferring "
+    "by implication, estoppels, or otherwise, any license or right to any "
+    "copyright, patent or trademark of the authors or any third party. "
+    "The document is provided on an 'AS IS' basis.\n\n"
+    "The findings in this report reflect the conditions found during the "
+    "assessment period (vulnerability / exploit reported to the date of "
+    "the report and cannot guarantee any future compliance). Security is "
+    "a continuous process and new vulnerabilities may be discovered after "
+    "this assessment."
+)
+
 
 class DashboardRenderer:
     """Render a ScanReport as a self-contained interactive HTML dashboard."""
@@ -62,6 +74,9 @@ class DashboardRenderer:
         # Build JSON blob for client-side JS
         scan_data = _build_scan_json(report, stats, source_counts)
 
+        # Group hosts by /24 subnet for DOCX-style sections
+        subnet_hosts = _group_hosts_by_subnet(report)
+
         # Prepare template-friendly finding dicts with HTML-escaped evidence
         from html import escape as html_escape
 
@@ -82,6 +97,7 @@ class DashboardRenderer:
                 "references": [html_escape(r) for r in f.references],
                 "template_id": html_escape(f.template_id),
                 "raw_output": html_escape(f.raw_output),
+                "full_url": html_escape(f.full_url),
             }
             for f in sorted_findings
         ]
@@ -130,6 +146,9 @@ class DashboardRenderer:
         # Separate known exploits (searchsploit findings)
         exploits = [f for f in findings_dicts if f["source"] == "searchsploit"]
 
+        # Build subnet data for Open Ports section (with full host objects)
+        subnet_hosts_data = _group_hosts_by_subnet_dicts(hosts_dicts)
+
         html = template.render(
             title=config.report_title,
             date=(report.scan_start or datetime.now()).strftime(
@@ -152,6 +171,10 @@ class DashboardRenderer:
             css=css,
             js=js,
             scan_json=json.dumps(scan_data),
+            disclaimer=_DISCLAIMER,
+            subnets=sorted(subnet_hosts.keys()),
+            subnet_hosts=subnet_hosts,
+            subnet_hosts_data=subnet_hosts_data,
         )
 
         out = reports_dir / "dashboard.html"
@@ -189,6 +212,36 @@ def _collect_technologies(report: ScanReport) -> list:
                 seen.add(key)
                 techs.append(t)
     return techs
+
+
+def _group_hosts_by_subnet(report: ScanReport) -> dict[str, list[str]]:
+    """Group host IPs by their /24 subnet prefix.
+
+    Returns a dict mapping subnet string (e.g. '10.0.0.0/24') to a list
+    of IP address strings.
+    """
+    subnets: dict[str, list[str]] = defaultdict(list)
+    for h in report.hosts:
+        parts = h.ip.rsplit(".", 1)
+        subnet = f"{parts[0]}.0/24" if len(parts) == 2 else h.ip
+        subnets[subnet].append(h.ip)
+    return dict(sorted(subnets.items()))
+
+
+def _group_hosts_by_subnet_dicts(
+    hosts_dicts: list[dict],
+) -> dict[str, list[dict]]:
+    """Group host dicts by their /24 subnet prefix.
+
+    Returns a dict mapping subnet string to list of host dicts (with
+    open_ports, ip, etc.) for the Open Ports template section.
+    """
+    subnets: dict[str, list[dict]] = defaultdict(list)
+    for h in hosts_dicts:
+        parts = h["ip"].rsplit(".", 1)
+        subnet = f"{parts[0]}.0/24" if len(parts) == 2 else h["ip"]
+        subnets[subnet].append(h)
+    return dict(sorted(subnets.items()))
 
 
 def _build_scan_json(

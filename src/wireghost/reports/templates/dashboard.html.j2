@@ -3,61 +3,99 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ title }} - Dashboard</title>
+<title>{{ title }} - Vulnerability Assessment Report</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>{{ css }}</style>
 </head>
 <body>
-<div class="dashboard">
+<div class="report">
 
-  <!-- Header -->
-  <div class="dash-header">
-    <div class="dash-header-left">
-      <h1>{{ title }}</h1>
-      <div class="subtitle">Security Assessment Dashboard</div>
+  <!-- ============================================================
+       COVER PAGE
+       ============================================================ -->
+  <div class="cover-page">
+    <div class="cover-logo">WG</div>
+    <h1 class="cover-title">{{ target }}</h1>
+    <h2 class="cover-subtitle">Vulnerability Assessment Report</h2>
+    <div class="cover-meta">
+      <p><strong>Prepared By:</strong> Security Team</p>
+      <p><strong>Date:</strong> {{ date }}</p>
+      <p><strong>Classification:</strong> Confidential</p>
     </div>
-    <div class="dash-header-right">
-      <div><strong>Target:</strong> {{ target }}</div>
-      <div><strong>Date:</strong> {{ date }}</div>
+    <div class="disclaimer">
+      <h3>Disclaimer</h3>
+      <p>{{ disclaimer }}</p>
     </div>
   </div>
 
-  <!-- Stats row -->
-  <div class="stats-row">
-    <div class="stat-card">
-      <div class="value">{{ hosts_count }}</div>
-      <div class="label">Hosts</div>
+  <!-- ============================================================
+       FLOATING CONTROLS TOOLBAR
+       ============================================================ -->
+  <div class="controls-toolbar">
+    <div class="sev-toggles">
+      <button class="sev-btn" data-sev="critical">Critical</button>
+      <button class="sev-btn" data-sev="high">High</button>
+      <button class="sev-btn" data-sev="medium">Medium</button>
+      <button class="sev-btn" data-sev="low">Low</button>
+      <button class="sev-btn off" data-sev="info">Info</button>
     </div>
-    <div class="stat-card">
-      <div class="value">{{ open_ports }}</div>
-      <div class="label">Open Ports</div>
-    </div>
-    <div class="stat-card">
-      <div class="value">{{ total_findings }}</div>
-      <div class="label">Findings</div>
-    </div>
-    <div class="stat-card">
-      <div class="value">{{ tech_count }}</div>
-      <div class="label">Technologies</div>
-    </div>
-    <div class="stat-card stat-critical">
-      <div class="value">{{ critical }}</div>
-      <div class="label">Critical</div>
-    </div>
-    <div class="stat-card stat-high">
-      <div class="value">{{ high }}</div>
-      <div class="label">High</div>
-    </div>
-    <div class="stat-card stat-medium">
-      <div class="value">{{ medium }}</div>
-      <div class="label">Medium</div>
-    </div>
+    <div class="controls-sep"></div>
+    <select id="sourceFilter" class="source-filter">
+      <option value="all">All Sources</option>
+      {% for src in sources %}
+      <option value="{{ src }}">{{ src }}</option>
+      {% endfor %}
+    </select>
+    <select id="sortSelect" class="sort-select">
+      <option value="severity">Sort: Severity</option>
+      <option value="host">Sort: Host</option>
+    </select>
+    <input id="searchInput" class="search-box" type="text" placeholder="Search findings (title, host, CVE...)">
   </div>
 
-  <!-- Executive Summary -->
-  <div class="exec-summary">
-    <h2 class="section-title">Executive Summary</h2>
+  <!-- ============================================================
+       1. EXECUTIVE SUMMARY
+       ============================================================ -->
+  <section class="report-section">
+    <h1 class="section-heading">1. Executive Summary</h1>
+    <p class="section-intro">
+      A comprehensive Vulnerability Assessment was conducted on <strong>{{ target }}</strong>.
+      The assessment identified <strong>{{ total_findings }}</strong> findings across
+      <strong>{{ hosts_count }}</strong> host(s) with <strong>{{ open_ports }}</strong> open port(s).
+    </p>
     <span class="risk-badge risk-{{ risk_level|lower }}">{{ risk_level }} RISK</span>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="value">{{ hosts_count }}</div>
+        <div class="label">Hosts</div>
+      </div>
+      <div class="stat-card">
+        <div class="value">{{ open_ports }}</div>
+        <div class="label">Open Ports</div>
+      </div>
+      <div class="stat-card">
+        <div class="value">{{ total_findings }}</div>
+        <div class="label">Findings</div>
+      </div>
+      <div class="stat-card">
+        <div class="value">{{ tech_count }}</div>
+        <div class="label">Technologies</div>
+      </div>
+      <div class="stat-card stat-critical">
+        <div class="value">{{ critical }}</div>
+        <div class="label">Critical</div>
+      </div>
+      <div class="stat-card stat-high">
+        <div class="value">{{ high }}</div>
+        <div class="label">High</div>
+      </div>
+      <div class="stat-card stat-medium">
+        <div class="value">{{ medium }}</div>
+        <div class="label">Medium</div>
+      </div>
+    </div>
+
     <div class="charts-row">
       <div class="chart-container">
         <h3>Severity Distribution</h3>
@@ -68,12 +106,83 @@
         <canvas id="sourceChart"></canvas>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- Technologies -->
+  <!-- ============================================================
+       2. TARGET SUBNETS
+       ============================================================ -->
+  <section class="report-section">
+    <h1 class="section-heading">2. Target Subnets</h1>
+    <p class="section-intro">Vulnerability Assessment was conducted on the following targets.</p>
+    <table class="report-table">
+      <thead>
+        <tr><th>Subnets</th><th>Zone</th></tr>
+      </thead>
+      <tbody>
+        {% for subnet in subnets %}
+        <tr>
+          <td>{{ subnet }}</td>
+          <td>Internal</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============================================================
+       3. IDENTIFIED LIVE HOSTS
+       ============================================================ -->
+  <section class="report-section">
+    <h1 class="section-heading">3. Identified Live Hosts</h1>
+    <p class="section-intro">The following IPs are alive in the subnets.</p>
+    <table class="report-table">
+      <thead>
+        <tr><th>Subnets</th><th>Hosts</th></tr>
+      </thead>
+      <tbody>
+        {% for subnet, host_list in subnet_hosts.items() %}
+        <tr>
+          <td>{{ subnet }}</td>
+          <td>{% for h in host_list %}{{ h }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="2">No Live Hosts</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============================================================
+       4. OPEN PORTS
+       ============================================================ -->
+  <section class="report-section">
+    <h1 class="section-heading">4. Open Ports</h1>
+    {% for subnet, host_list in subnet_hosts_data.items() %}
+    <h2 class="subsection-heading">4.{{ loop.index }}. Summarized open ports on {{ subnet }} subnet.</h2>
+    <table class="report-table">
+      <thead>
+        <tr><th>Hosts</th><th>Ports</th></tr>
+      </thead>
+      <tbody>
+        {% for h in host_list %}
+        <tr>
+          <td>{{ h.ip }}</td>
+          <td>{% for p in h.open_ports %}{{ p.number }}/{{ p.protocol }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not h.open_ports %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
+  </section>
+
+  <!-- ============================================================
+       DETECTED TECHNOLOGIES
+       ============================================================ -->
   {% if technologies %}
-  <div class="tech-section">
-    <h2 class="section-title">Detected Technologies <span class="count">{{ technologies|length }}</span></h2>
+  <section class="report-section">
+    <h1 class="section-heading">Detected Technologies <span class="count">{{ technologies|length }}</span></h1>
     <div class="tech-grid">
       {% for tech in technologies %}
       <span class="tech-badge">
@@ -81,10 +190,12 @@
       </span>
       {% endfor %}
     </div>
-  </div>
+  </section>
   {% endif %}
 
-  <!-- Web Services -->
+  <!-- ============================================================
+       WEB SERVICES
+       ============================================================ -->
   {% set all_titles = [] %}
   {% for host in hosts %}
     {% for url, title in host.web_titles.items() %}
@@ -94,31 +205,33 @@
     {% endfor %}
   {% endfor %}
   {% if all_titles %}
-  <div class="card">
-    <h2 class="section-title">Web Services <span class="count">{{ all_titles|length }}</span></h2>
-    <table class="exploits-table">
+  <section class="report-section">
+    <h1 class="section-heading">Web Services <span class="count">{{ all_titles|length }}</span></h1>
+    <table class="report-table">
       <thead>
         <tr><th>URL</th><th>Title</th><th>Host</th></tr>
       </thead>
       <tbody>
         {% for svc in all_titles %}
         <tr>
-          <td><a href="{{ svc.url }}" target="_blank" style="color:#58a6ff;">{{ svc.url }}</a></td>
+          <td><a href="{{ svc.url }}" target="_blank">{{ svc.url }}</a></td>
           <td>{{ svc.title }}</td>
           <td>{{ svc.ip }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-  </div>
+  </section>
   {% endif %}
 
-  <!-- Known Exploits -->
+  <!-- ============================================================
+       KNOWN EXPLOITS
+       ============================================================ -->
   {% if exploits %}
-  <div class="card exploits-section">
-    <h2 class="section-title">Known Exploits <span class="count">{{ exploits|length }}</span></h2>
-    <p style="color:#8b949e;margin-bottom:1rem;">Public exploits found in Exploit-DB matching detected software versions.</p>
-    <table class="exploits-table">
+  <section class="report-section">
+    <h1 class="section-heading">Known Exploits <span class="count">{{ exploits|length }}</span></h1>
+    <p class="section-intro">Public exploits found in Exploit-DB matching detected software versions.</p>
+    <table class="report-table">
       <thead>
         <tr><th>Severity</th><th>Host</th><th>Port</th><th>Detected Version</th><th>Exploit Title</th><th>EDB-ID</th><th>References</th></tr>
       </thead>
@@ -132,13 +245,13 @@
           <td>{{ e.title }}</td>
           <td>
             {% if e.template_id %}
-            <a href="https://www.exploit-db.com/exploits/{{ e.template_id|replace('EDB-', '') }}" target="_blank" style="color:#58a6ff;">{{ e.template_id }}</a>
+            <a href="https://www.exploit-db.com/exploits/{{ e.template_id|replace('EDB-', '') }}" target="_blank">{{ e.template_id }}</a>
             {% endif %}
           </td>
           <td>
             {% for ref in e.references %}
               {% if 'CVE-' in ref %}
-              <span class="meta-badge meta-cve">{{ ref }}</span>
+              <span class="meta-badge cve-badge">{{ ref }}</span>
               {% endif %}
             {% endfor %}
           </td>
@@ -146,34 +259,14 @@
         {% endfor %}
       </tbody>
     </table>
-  </div>
+  </section>
   {% endif %}
 
-  <!-- Findings -->
-  <div class="findings-section">
-    <h2 class="section-title">Vulnerability Findings <span class="count">{{ findings|length }}</span></h2>
-
-    <div class="controls">
-      <div class="sev-toggles">
-        <button class="sev-btn" data-sev="critical">Critical</button>
-        <button class="sev-btn" data-sev="high">High</button>
-        <button class="sev-btn" data-sev="medium">Medium</button>
-        <button class="sev-btn" data-sev="low">Low</button>
-        <button class="sev-btn off" data-sev="info">Info</button>
-      </div>
-      <div class="controls-sep"></div>
-      <select id="sourceFilter" class="source-filter">
-        <option value="all">All Sources</option>
-        {% for src in sources %}
-        <option value="{{ src }}">{{ src }}</option>
-        {% endfor %}
-      </select>
-      <select id="sortSelect" class="sort-select">
-        <option value="severity">Sort: Severity</option>
-        <option value="host">Sort: Host</option>
-      </select>
-      <input id="searchInput" class="search-box" type="text" placeholder="Search findings (title, host, CVE...)">
-    </div>
+  <!-- ============================================================
+       5. IDENTIFIED ISSUES
+       ============================================================ -->
+  <section class="report-section">
+    <h1 class="section-heading">5. Identified Issues <span class="count">{{ findings|length }}</span></h1>
 
     <div id="findingsList">
       {% for f in findings %}
@@ -186,7 +279,18 @@
           <span class="finding-meta">{{ f.host }}{% if f.port %}:{{ f.port }}{% endif %}</span>
         </div>
         <div class="finding-detail">
+          {% if f.host %}
+          <p class="finding-field"><strong>IP:</strong> {{ f.host }}</p>
+          {% endif %}
+          {% if f.port %}
+          <p class="finding-field"><strong>Port:</strong> {{ f.port }}</p>
+          {% endif %}
+          {% if f.full_url %}
+          <p class="finding-field"><strong>URL:</strong> <a href="{{ f.full_url }}" target="_blank">{{ f.full_url }}</a></p>
+          {% endif %}
+
           {% if f.description %}
+          <h3 class="vuln-summary-heading">Vulnerability Summary</h3>
           <div class="finding-description">{{ f.description }}</div>
           {% endif %}
 
@@ -235,11 +339,13 @@
     <div id="noResults" class="no-results" style="display:none">
       No findings match the current filters.
     </div>
-  </div>
+  </section>
 
-  <!-- Hosts -->
-  <div class="hosts-section">
-    <h2 class="section-title">Host Details <span class="count">{{ hosts|length }}</span></h2>
+  <!-- ============================================================
+       6. HOST DETAILS
+       ============================================================ -->
+  <section class="report-section">
+    <h1 class="section-heading">6. Host Details <span class="count">{{ hosts|length }}</span></h1>
     {% for host in hosts %}
     <div class="host-panel">
       <button class="host-toggle">
@@ -259,7 +365,7 @@
         </div>
         {% endif %}
         {% if host.open_ports %}
-        <table>
+        <table class="report-table">
           <thead>
             <tr><th>Port</th><th>Protocol</th><th>Service</th><th>Product</th><th>Version</th></tr>
           </thead>
@@ -276,16 +382,17 @@
           </tbody>
         </table>
         {% else %}
-        <p style="color: var(--text-secondary); font-size: 0.85rem; padding: 0.5rem 0;">No open ports.</p>
+        <p style="color: #868e96; font-size: 0.85rem; padding: 0.5rem 0;">No open ports.</p>
         {% endif %}
       </div>
     </div>
     {% endfor %}
-  </div>
+  </section>
 
-  <div class="dash-footer">
-    Wire_Ghost Security Assessment &mdash; Generated {{ date }}
-  </div>
+  <!-- ============================================================
+       END OF DOCUMENT
+       ============================================================ -->
+  <div class="end-marker">END OF DOCUMENT</div>
 
 </div>
 
