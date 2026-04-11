@@ -873,6 +873,68 @@ body::after {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
+<style>
+/* ═══ CINEMATIC ANIMATIONS ═══ */
+@keyframes revealUp{0%{opacity:0;transform:translateY(30px);filter:blur(4px)}100%{opacity:1;transform:translateY(0);filter:blur(0)}}
+@keyframes revealLeft{0%{opacity:0;transform:translateX(-20px)}100%{opacity:1;transform:translateX(0)}}
+@keyframes revealScale{0%{opacity:0;transform:scale(.92)}100%{opacity:1;transform:scale(1)}}
+@keyframes glitchIn{0%{opacity:0;transform:translateX(-5px);clip-path:inset(0 100% 0 0)}40%{opacity:1;transform:translateX(2px);clip-path:inset(0 20% 0 0)}60%{transform:translateX(-1px);clip-path:inset(0 5% 0 0)}100%{transform:translateX(0);clip-path:inset(0)}}
+@keyframes barGrow{0%{transform:scaleX(0)}100%{transform:scaleX(1)}}
+@keyframes glitch{0%{text-shadow:2px 0 var(--critical),-2px 0 var(--accent)}50%{text-shadow:-2px 2px var(--critical),2px -2px var(--accent)}100%{text-shadow:0 0 transparent}}
+@keyframes iconBounce{0%{transform:scale(1)}40%{transform:scale(1.15)}100%{transform:scale(1)}}
+@keyframes statusPulse{0%{transform:scale(1);box-shadow:0 0 0 0 currentColor}50%{transform:scale(1.2);box-shadow:0 0 0 4px transparent}100%{transform:scale(1);box-shadow:0 0 0 0 transparent}}
+@keyframes float1{0%,100%{transform:translate(0,0);opacity:0}10%{opacity:.15}90%{opacity:.15}100%{transform:translate(200px,-400px);opacity:0}}
+@keyframes float2{0%,100%{transform:translate(0,0);opacity:0}10%{opacity:.1}90%{opacity:.1}100%{transform:translate(-150px,-350px);opacity:0}}
+
+.topbar{animation:revealUp .6s cubic-bezier(.16,1,.3,1) both}
+.topbar-logo{animation:revealScale .5s cubic-bezier(.34,1.56,.64,1) .2s both}
+.topbar-title{animation:glitchIn .8s ease .3s both}
+.sidebar{animation:revealLeft .5s ease .1s both}
+.sidebar-item{opacity:0;animation:revealLeft .4s ease both;position:relative;overflow:hidden}
+.sidebar-section:nth-child(1) .sidebar-item:nth-child(2){animation-delay:.15s}
+.sidebar-section:nth-child(1) .sidebar-item:nth-child(3){animation-delay:.2s}
+.sidebar-section:nth-child(1) .sidebar-item:nth-child(4){animation-delay:.25s}
+.sidebar-section:nth-child(1) .sidebar-item:nth-child(5){animation-delay:.3s}
+.sidebar-section:nth-child(2) .sidebar-item:nth-child(2){animation-delay:.35s}
+.sidebar-section:nth-child(2) .sidebar-item:nth-child(3){animation-delay:.4s}
+.sidebar-section:nth-child(2) .sidebar-item:nth-child(4){animation-delay:.45s}
+.sidebar-item::after{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(0,212,106,.05),transparent);transition:left .5s ease}
+.sidebar-item:hover::after{left:100%}
+.page-header h1{animation:glitchIn .7s ease .4s both}
+.page-header p{animation:revealUp .5s ease .55s both}
+.btn-primary{animation:revealScale .4s cubic-bezier(.34,1.56,.64,1) .5s both;position:relative;overflow:hidden;transition:all .3s cubic-bezier(.16,1,.3,1)!important}
+.btn-primary:hover{transform:translateY(-2px)!important;box-shadow:0 4px 20px rgba(0,212,106,.35),0 0 40px rgba(0,212,106,.15)!important}
+.btn-primary::after{content:'';position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;background:rgba(255,255,255,.3);transform:translate(-50%,-50%);transition:width .6s,height .6s,opacity .6s;opacity:0}
+.btn-primary:active::after{width:300px;height:300px;opacity:0}
+.stats-row .stat-card{animation:revealUp .5s cubic-bezier(.16,1,.3,1) both;position:relative;overflow:hidden}
+.stats-row .stat-card:nth-child(1){animation-delay:.2s}.stats-row .stat-card:nth-child(2){animation-delay:.28s}.stats-row .stat-card:nth-child(3){animation-delay:.36s}.stats-row .stat-card:nth-child(4){animation-delay:.44s}.stats-row .stat-card:nth-child(5){animation-delay:.52s}
+.stat-card::after{content:'';position:absolute;top:0;left:-75%;width:50%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.03),transparent);transform:skewX(-20deg);transition:left .7s ease}
+.stat-card:hover::after{left:125%}
+.stat-card:hover .stat-value{text-shadow:0 0 20px currentColor}
+.stat-card.critical:hover .stat-value{animation:glitch .3s ease}
+.panel{animation:revealUp .6s cubic-bezier(.16,1,.3,1) .4s both}
+.scan-table tbody tr{opacity:0;animation:revealUp .4s ease both;transition:all .2s cubic-bezier(.16,1,.3,1)}
+.scan-table tbody tr:nth-child(1){animation-delay:.5s}.scan-table tbody tr:nth-child(2){animation-delay:.57s}.scan-table tbody tr:nth-child(3){animation-delay:.64s}.scan-table tbody tr:nth-child(4){animation-delay:.71s}.scan-table tbody tr:nth-child(5){animation-delay:.78s}
+.scan-table tbody tr:hover{transform:translateX(4px)}
+.sev-bar span{transform:scaleX(0);transform-origin:left;animation:barGrow .8s cubic-bezier(.16,1,.3,1) .9s both}
+.sev-progress-fill{transform:scaleX(0)!important;transform-origin:left;animation:barGrow 1s cubic-bezier(.16,1,.3,1) .6s both}
+.sev-item{opacity:0;animation:revealUp .4s ease both}
+.sev-item:nth-child(1){animation-delay:.5s}.sev-item:nth-child(2){animation-delay:.6s}.sev-item:nth-child(3){animation-delay:.7s}.sev-item:nth-child(4){animation-delay:.8s}.sev-item:nth-child(5){animation-delay:.9s}
+.activity-item{opacity:0;animation:revealLeft .4s ease both}
+.activity-item:nth-child(1){animation-delay:.6s}.activity-item:nth-child(2){animation-delay:.7s}.activity-item:nth-child(3){animation-delay:.8s}.activity-item:nth-child(4){animation-delay:.9s}
+.activity-item:hover .activity-icon{animation:iconBounce .4s ease}
+.scan-status.running .dot{animation:statusPulse 1.2s ease infinite}
+.modal-overlay.active{animation:fadeIn .2s ease}
+.modal-overlay.active .modal{animation:revealUp .4s cubic-bezier(.16,1,.3,1)}
+.sidebar-item:hover .sidebar-badge{transform:scale(1.1);box-shadow:0 0 8px rgba(255,59,92,.3)}
+.sidebar-badge{transition:all .3s}
+.topbar-user{transition:all .3s}
+.topbar-user:hover{transform:scale(1.1);border-color:var(--accent);box-shadow:0 0 12px rgba(0,212,106,.12)}
+.main::before,.main::after{content:'';position:fixed;width:4px;height:4px;background:var(--accent);border-radius:50%;pointer-events:none;z-index:0}
+.main::before{bottom:20%;left:40%;animation:float1 12s ease-in-out infinite}
+.main::after{bottom:30%;right:30%;animation:float2 15s ease-in-out infinite 3s}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}}
+</style>
 </head>
 <body>
 
