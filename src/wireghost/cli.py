@@ -63,6 +63,13 @@ def scan(
     skip_openvas: bool = typer.Option(
         True, "--skip-openvas/--no-skip-openvas", help="Skip/enable OpenVAS scanning"
     ),
+    nuclei_templates: Optional[str] = typer.Option(
+        None, "--nuclei-templates", help="Path to external nuclei template directory"
+    ),
+    nuclei_default_templates: bool = typer.Option(
+        True, "--nuclei-default-templates/--no-nuclei-default-templates",
+        help="Include default nuclei templates (disable to run external only)"
+    ),
     config_file: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to wireghost.yml config"
     ),
@@ -79,6 +86,8 @@ def scan(
         "tool_timeout": timeout,
         "verbose": verbose,
         "skip_openvas": skip_openvas,
+        "nuclei_templates": nuclei_templates,
+        "nuclei_default_templates": nuclei_default_templates,
     }
     if report_formats is not None:
         overrides["report_formats"] = [

@@ -9,3 +9,9 @@ build/
 output/
 Tools/
 .env
+*.sqlite3
+*.png
+*.tar.gz
+!templates/*.tar.gz
+.playwright-mcp/
+.claude/scheduled_tasks.lock

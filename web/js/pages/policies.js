@@ -93,6 +93,8 @@ WG.renderPolicies = function() {
         '<div class="form-toggle" onclick="this.querySelector(\'.toggle-track\').classList.toggle(\'on\')"><div class="toggle-track on" id="policyOsDetect"></div><span class="toggle-label">OS Detection</span></div>' +
       '</div>' +
       '<div class="form-group"><label class="form-label">Report Formats</label><input class="form-input" id="policyReportFmt" value="dashboard,docx,xlsx" placeholder="dashboard,docx,xlsx"></div>' +
+      '<div class="form-group"><label class="form-label">Nuclei External Templates (optional)</label><input class="form-input" id="policyNucleiTemplates" placeholder="/opt/nuclei-templates/custom/" style="font-family:var(--font-mono);font-size:0.82rem;"></div>' +
+      '<div class="form-toggle" onclick="this.querySelector(\'.toggle-track\').classList.toggle(\'on\')"><div class="toggle-track on" id="policyNucleiDefaults"></div><span class="toggle-label">Include default nuclei templates</span></div>' +
     '</div>' +
     '<div class="modal-footer"><button class="btn btn-secondary" onclick="WG.closeModal(\'policyModal\')">Cancel</button><button class="btn btn-primary" onclick="WG._savePolicy()">Save Policy</button></div></div></div>';
 };
@@ -121,6 +123,8 @@ WG.openPolicyEditor = function(id) {
     document.querySelectorAll('#policyTools [data-tool]').forEach(function(t) {
       t.classList.toggle('on', !!tools[t.dataset.tool]);
     });
+    document.getElementById('policyNucleiTemplates').value = (tools.nuclei_templates) || '';
+    document.getElementById('policyNucleiDefaults').classList.toggle('on', tools.nuclei_default_templates !== false);
   } else {
     title.textContent = 'New Policy';
     desc.textContent = 'Create a scan policy template';
@@ -135,6 +139,8 @@ WG.openPolicyEditor = function(id) {
     document.getElementById('policyVersionDetect').classList.add('on');
     document.getElementById('policyOsDetect').classList.add('on');
     document.querySelectorAll('#policyTools [data-tool]').forEach(function(t) { t.classList.add('on'); });
+    document.getElementById('policyNucleiTemplates').value = '';
+    document.getElementById('policyNucleiDefaults').classList.add('on');
   }
   WG.openModal('policyModal');
 };
@@ -146,6 +152,8 @@ WG._savePolicy = function() {
 
   var tools = {};
   document.querySelectorAll('#policyTools [data-tool]').forEach(function(t) { tools[t.dataset.tool] = t.classList.contains('on'); });
+  tools.nuclei_templates = (document.getElementById('policyNucleiTemplates').value || '').trim();
+  tools.nuclei_default_templates = document.getElementById('policyNucleiDefaults').classList.contains('on');
 
   var data = {
     name: name,
@@ -228,6 +236,10 @@ WG._launchWithPolicy = function(id) {
     document.querySelectorAll('#nsTools [data-tool]').forEach(function(t) {
       t.classList.toggle('on', !!tools[t.dataset.tool]);
     });
+    var nt = document.getElementById('nsNucleiTemplates');
+    if (nt) nt.value = (tools.nuclei_templates) || '';
+    var nd = document.getElementById('nsNucleiDefaults');
+    if (nd) nd.classList.toggle('on', tools.nuclei_default_templates !== false);
     WG.toast('Applied policy: ' + p.name, 'success');
   }, 150);
 };

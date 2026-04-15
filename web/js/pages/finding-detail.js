@@ -40,7 +40,7 @@ WG.renderFindingDetail = function(id) {
     '<div class="info-grid" style="margin-bottom:24px;">' +
       '<div class="info-item"><div class="info-label">Host</div><div class="info-value"><a onclick="WG.navigate(\'host\',{id:\'' + f.host + '\'})" class="host-tag">' + esc(f.host_ip) + '</a></div></div>' +
       '<div class="info-item"><div class="info-label">Port</div><div class="info-value mono">' + (f.port || '\u2014') + '/' + (f.protocol || 'tcp') + '</div></div>' +
-      '<div class="info-item"><div class="info-label">Source</div><div class="info-value"><span class="tag">' + f.source + '</span></div></div>' +
+      '<div class="info-item"><div class="info-label">Source</div><div class="info-value"><span class="tag">' + f.source + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</div></div>' +
       (f.cve ? '<div class="info-item"><div class="info-label">CVE</div><div class="info-value mono" style="color:var(--accent);">' + f.cve + '</div></div>' : '') +
       (f.cwe ? '<div class="info-item"><div class="info-label">CWE</div><div class="info-value mono">' + f.cwe + '</div></div>' : '') +
       (f.template_id ? '<div class="info-item"><div class="info-label">Template</div><div class="info-value mono" style="font-size:0.75rem;">' + f.template_id + '</div></div>' : '') +

@@ -44,6 +44,8 @@ def run_scan(self, scan_id):
             os_detect=scan.os_detect,
             service_enum=scan.service_enum,
             skip_nuclei=scan.skip_nuclei,
+            nuclei_templates=scan.nuclei_templates,
+            nuclei_default_templates=scan.nuclei_default_templates,
             output_dir=str(output_dir),
         )
 
@@ -295,6 +297,8 @@ def check_scheduled_scans():
             os_detect=policy.os_detect if policy else True,
             service_enum=policy.tools.get('service_enum', True) if policy and policy.tools else True,
             skip_nuclei=not policy.tools.get('nuclei', True) if policy and policy.tools else False,
+            nuclei_templates=policy.tools.get('nuclei_templates', '') if policy and policy.tools else '',
+            nuclei_default_templates=policy.tools.get('nuclei_default_templates', True) if policy and policy.tools else True,
             status='pending',
             created_by=sched.created_by,
         )

@@ -22,7 +22,7 @@ WG.renderFindings = function() {
     '<div class="filters-bar">' +
       '<input class="filter-input" placeholder="Search findings..." id="findingSearch" oninput="WG.filterFindings()">' +
       '<select class="filter-select" id="findingSevFilter" onchange="WG.filterFindings()"><option value="">All Severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select>' +
-      '<select class="filter-select" id="findingSourceFilter" onchange="WG.filterFindings()"><option value="">All Sources</option><option value="nuclei">Nuclei</option><option value="nmap_vuln">Nmap Vuln</option><option value="service_enum">Service Enum</option><option value="searchsploit">Searchsploit</option></select>' +
+      '<select class="filter-select" id="findingSourceFilter" onchange="WG.filterFindings()"><option value="">All Sources</option><option value="nuclei">Nuclei</option><option value="nuclei_external">Nuclei (External)</option><option value="nmap_vuln">Nmap Vuln</option><option value="service_enum">Service Enum</option><option value="searchsploit">Searchsploit</option></select>' +
     '</div>' +
     '<div class="panel"><table class="data-table" id="findingsTable"><thead><tr><th>Severity</th><th>Title</th><th>Host</th><th>Port</th><th>Source</th><th>CVE</th><th>CVSS</th></tr></thead><tbody>' +
     findings.sort(function(a, b) { return WG.sevOrder(a.severity) - WG.sevOrder(b.severity); }).map(function(f) {
@@ -33,7 +33,7 @@ WG.renderFindings = function() {
         '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
         '<td><span class="host-tag">' + esc(f.host_ip) + '</span></td>' +
         '<td class="mono">' + (f.port || '\u2014') + '</td>' +
-        '<td><span class="tag">' + f.source + '</span></td>' +
+        '<td><span class="tag">' + f.source + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
         '<td class="mono" style="color:var(--accent);">' + (f.cve || '\u2014') + '</td>' +
         '<td class="mono" style="color:' + cvssColor + ';">' + (f.cvss || '\u2014') + '</td></tr>';
     }).join('') +

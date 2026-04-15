@@ -62,6 +62,18 @@ WG.renderNewScan = function() {
           '</div>' +
         '</div>' +
 
+        /* Nuclei External Templates */
+        '<div class="panel" style="margin-bottom:16px;" id="nsNucleiPanel">' +
+          '<div class="panel-header"><div class="panel-title">Nuclei Templates</div></div>' +
+          '<div class="panel-body" style="display:flex;flex-direction:column;gap:10px;">' +
+            '<div class="form-group"><label class="form-label">External Template Directory (optional)</label>' +
+              '<input class="form-input" id="nsNucleiTemplates" placeholder="/opt/nuclei-templates/custom/" style="font-family:var(--font-mono);font-size:0.82rem;"></div>' +
+            '<div class="form-toggle" onclick="this.querySelector(\'.toggle-track\').classList.toggle(\'on\')">' +
+              '<div class="toggle-track on" id="nsNucleiDefaults"></div><span class="toggle-label">Include default templates</span></div>' +
+            '<div style="font-size:0.68rem;color:var(--text-dim);">When external templates are set and default templates are off, only your custom templates run.</div>' +
+          '</div>' +
+        '</div>' +
+
         /* Detection */
         '<div class="panel" style="margin-bottom:16px;">' +
           '<div class="panel-header"><div class="panel-title">Detection & Reporting</div></div>' +
@@ -183,6 +195,8 @@ WG._nsApplyPolicy = function(id) {
   document.querySelectorAll('#nsTools [data-tool]').forEach(function(t) {
     t.classList.toggle('on', !!p.tools[t.dataset.tool]);
   });
+  document.getElementById('nsNucleiTemplates').value = (p.tools && p.tools.nuclei_templates) || '';
+  document.getElementById('nsNucleiDefaults').classList.toggle('on', p.tools ? p.tools.nuclei_default_templates !== false : true);
   WG.toast('Applied policy: ' + p.name, 'success');
 };
 
@@ -211,6 +225,8 @@ WG._nsLaunch = function() {
     os_detect: document.getElementById('nsOsDetect').classList.contains('on'),
     service_enum: !!document.querySelector('#nsTools [data-tool="service_enum"].on'),
     skip_nuclei: !document.querySelector('#nsTools [data-tool="nuclei"].on'),
+    nuclei_templates: (document.getElementById('nsNucleiTemplates').value || '').trim(),
+    nuclei_default_templates: document.getElementById('nsNucleiDefaults').classList.contains('on'),
   };
 
   // Check if scheduled

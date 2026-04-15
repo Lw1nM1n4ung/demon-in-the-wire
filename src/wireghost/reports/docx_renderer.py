@@ -453,6 +453,15 @@ class DocxRenderer:
                 desc = finding.description or finding.raw_output or finding.title
                 doc.add_paragraph(desc)
 
+                if finding.source == "nuclei_external":
+                    fp_para = doc.add_paragraph()
+                    fp_run = fp_para.add_run(
+                        "Note: This finding was generated from an external nuclei template "
+                        "and may be a false positive. Manual verification is recommended."
+                    )
+                    fp_run.italic = True
+                    fp_run.font.color.rgb = RGBColor(0xF5, 0x9E, 0x0B)
+
                 # CVE/CWE/CVSS
                 if finding.cve:
                     cve_para = doc.add_paragraph()

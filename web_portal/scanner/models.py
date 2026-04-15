@@ -56,6 +56,8 @@ class Scan(models.Model):
     service_enum = models.BooleanField(default=True)
     skip_nuclei = models.BooleanField(default=False)
     skip_openvas = models.BooleanField(default=True)
+    nuclei_templates = models.CharField(max_length=500, blank=True)
+    nuclei_default_templates = models.BooleanField(default=True)
 
     # Results
     hosts_count = models.IntegerField(default=0)

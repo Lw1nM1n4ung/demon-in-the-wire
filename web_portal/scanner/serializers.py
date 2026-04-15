@@ -76,6 +76,8 @@ class ScanCreateSerializer(serializers.Serializer):
     service_enum = serializers.BooleanField(default=True)
     skip_nuclei = serializers.BooleanField(default=False)
     skip_openvas = serializers.BooleanField(default=True)
+    nuclei_templates = serializers.CharField(max_length=500, required=False, default='', allow_blank=True)
+    nuclei_default_templates = serializers.BooleanField(required=False, default=True)
 
     def validate_target(self, value):
         """Block SSRF targets: localhost, link-local, cloud metadata, non-routable."""

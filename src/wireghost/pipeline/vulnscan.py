@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wireghost.models.finding import Finding
@@ -19,6 +20,26 @@ if TYPE_CHECKING:
     from wireghost.utils.fs import OutputTree
 
 log = logging.getLogger("wireghost")
+
+
+def _collect_template_dirs(config: ScanConfig) -> list[Path]:
+    """Return the list of template directories nuclei should scan."""
+    dirs: list[Path] = []
+    if config.nuclei_templates:
+        dirs.append(Path(config.nuclei_templates))
+        if config.nuclei_default_templates:
+            default_dir = Path.home() / "nuclei-templates"
+            if default_dir.is_dir():
+                dirs.append(default_dir)
+    return dirs
+
+
+def _glob_templates(dirs: list[Path]) -> list[str]:
+    """Recursively collect all .yaml template files from *dirs*."""
+    templates: list[str] = []
+    for d in dirs:
+        templates.extend(str(p) for p in d.rglob("*.yaml"))
+    return sorted(set(templates))
 
 
 async def run_nuclei(
@@ -36,31 +57,126 @@ async def run_nuclei(
         "\n".join(host.web_endpoints) + "\n", encoding="utf-8"
     )
 
-    output_file = vuln_dir / "nuclei.json"
+    base_cmd = [
+        "nuclei",
+        "-l", str(targets_file),
+        "-jsonl",
+        "-rl", "150",
+        "-c", "25",
+        "-timeout", "10",
+        "-stats",
+        "-severity", "critical,high,medium,low",
+        "-etags", "brute-force,brute,login,fuzz",
+    ]
+
+    template_dirs = _collect_template_dirs(config)
+
+    # If external templates specified, check if batching is needed
+    if template_dirs:
+        all_templates = _glob_templates(template_dirs)
+        total = len(all_templates)
+        batch_size = config.nuclei_batch_size
+
+        if total > batch_size:
+            return await _run_nuclei_batched(
+                host, config, tree, vuln_dir, targets_file,
+                base_cmd, all_templates, batch_size,
+            )
+        else:
+            # Small enough — single run with -t dirs
+            cmd = list(base_cmd)
+            cmd.extend(["-o", str(vuln_dir / "nuclei.json")])
+            for d in template_dirs:
+                cmd.extend(["-t", str(d)])
+    else:
+        # No external templates — run with defaults (no -t flag)
+        cmd = list(base_cmd)
+        cmd.extend(["-o", str(vuln_dir / "nuclei.json")])
 
     result = await run_tool(
-        [
-            "nuclei",
-            "-l", str(targets_file),
-            "-jsonl",
-            "-o", str(output_file),
-            "-rl", "150",
-            "-c", "25",
-            "-timeout", "10",
-            "-stats",
-            "-severity", "critical,high,medium,low",
-            "-etags", "brute-force,brute,login,fuzz",
-        ],
+        cmd,
         timeout=int(config.tool_timeout),
         label=f"nuclei {host.ip}",
     )
-
     if result.returncode != 0:
         log.warning("Nuclei failed for %s (rc=%d)", host.ip, result.returncode)
 
-    findings = parse_nuclei_json(output_file)
+    findings = parse_nuclei_json(vuln_dir / "nuclei.json")
+    if config.nuclei_templates:
+        for f in findings:
+            f.source = "nuclei_external"
     log.info("Nuclei %s: %d finding(s)", host.ip, len(findings))
     return findings
+
+
+async def _run_nuclei_batched(
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    vuln_dir: Path,
+    targets_file: Path,
+    base_cmd: list[str],
+    all_templates: list[str],
+    batch_size: int,
+) -> list[Finding]:
+    """Run nuclei in batches to limit memory/CPU usage."""
+    total = len(all_templates)
+    batches = [
+        all_templates[i:i + batch_size]
+        for i in range(0, total, batch_size)
+    ]
+    num_batches = len(batches)
+    log.info(
+        "Nuclei %s: %d templates — splitting into %d batches of ~%d",
+        host.ip, total, num_batches, batch_size,
+    )
+
+    all_findings: list[Finding] = []
+    seen_ids: set[str] = set()
+
+    for idx, batch in enumerate(batches):
+        batch_num = idx + 1
+        log.info("Nuclei %s: batch %d/%d (%d templates)", host.ip, batch_num, num_batches, len(batch))
+
+        # Write template paths to a file — nuclei -t accepts a file
+        batch_file = vuln_dir / f"nuclei_batch_{idx}.txt"
+        batch_file.write_text("\n".join(batch) + "\n", encoding="utf-8")
+
+        out_file = vuln_dir / f"nuclei_batch_{idx}.json"
+        cmd = list(base_cmd)
+        cmd.extend(["-o", str(out_file), "-t", str(batch_file)])
+
+        result = await run_tool(
+            cmd,
+            timeout=int(config.tool_timeout),
+            label=f"nuclei {host.ip} batch {batch_num}/{num_batches}",
+        )
+        if result.returncode != 0:
+            log.warning("Nuclei batch %d/%d failed for %s (rc=%d)",
+                        batch_num, num_batches, host.ip, result.returncode)
+
+        # Parse, tag external, and dedup
+        findings = parse_nuclei_json(out_file)
+        for f in findings:
+            f.source = "nuclei_external"
+        for f in findings:
+            key = f"{f.template_id}:{f.host_ip}:{f.port}"
+            if key not in seen_ids:
+                seen_ids.add(key)
+                all_findings.append(f)
+
+        log.info("Nuclei %s: batch %d/%d — %d finding(s)", host.ip, batch_num, num_batches, len(findings))
+
+    # Merge all batch outputs into nuclei.json for report engine
+    merged = vuln_dir / "nuclei.json"
+    with open(merged, "w", encoding="utf-8") as out:
+        for idx in range(num_batches):
+            batch_file = vuln_dir / f"nuclei_batch_{idx}.json"
+            if batch_file.exists():
+                out.write(batch_file.read_text(encoding="utf-8"))
+
+    log.info("Nuclei %s: %d total finding(s) from %d batches", host.ip, len(all_findings), num_batches)
+    return all_findings
 
 
 async def run_nmap_vuln(

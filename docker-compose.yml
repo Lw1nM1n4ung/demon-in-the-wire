@@ -64,6 +64,7 @@ services:
       - scan_output:/data/output
       - report_assets:/data/assets
       - ./src:/app/src:ro
+      - ./templates:/opt/nuclei-template-archives:ro
     depends_on:
       db:
         condition: service_healthy

@@ -33,6 +33,9 @@ class ScanConfig:
     verbose: bool = False
     logo_path: Path | None = None
     skip_openvas: bool = True
+    nuclei_templates: str = ""
+    nuclei_default_templates: bool = True
+    nuclei_batch_size: int = 5000
 
     @classmethod
     def load(
@@ -111,6 +114,9 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "verbose": "verbose",
         "logo_path": "logo_path",
         "skip_openvas": "skip_openvas",
+        "nuclei_templates": "nuclei_templates",
+        "nuclei_default_templates": "nuclei_default_templates",
+        "nuclei_batch_size": "nuclei_batch_size",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -133,6 +139,9 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_VERBOSE": ("verbose", bool),
         "WIREGHOST_LOGO": ("logo_path", Path),
         "WIREGHOST_SKIP_OPENVAS": ("skip_openvas", bool),
+        "WIREGHOST_NUCLEI_TEMPLATES": ("nuclei_templates", str),
+        "WIREGHOST_NUCLEI_DEFAULT_TEMPLATES": ("nuclei_default_templates", bool),
+        "WIREGHOST_NUCLEI_BATCH_SIZE": ("nuclei_batch_size", int),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

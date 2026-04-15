@@ -1,0 +1,7 @@
+Place nuclei external template archives (.tar.gz) here.
+
+They are auto-extracted to /opt/nuclei-external-templates/ inside the
+worker container at startup.
+
+Use the "Nuclei Templates" field in New Scan or Scan Policies to point
+at /opt/nuclei-external-templates/ (or a subdirectory).
