@@ -1,0 +1,321 @@
+/* ═══════════════════════════════════════════════════
+   WIRE_GHOST — CYBERPUNK MODE
+   Sharp neon, high contrast, cool-toned
+   ═══════════════════════════════════════════════════ */
+
+/* ── Scan lines (thinner, less visible) ── */
+.cyberpunk::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0,0,0,0.03) 3px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* ── Neon border on panels ── */
+.cyberpunk .panel {
+  border-color: rgba(0,240,255,0.08);
+}
+.cyberpunk .panel:hover {
+  border-color: rgba(0,240,255,0.2);
+  box-shadow: 0 0 8px rgba(0,240,255,0.06);
+}
+
+/* ── Stat card neon edges ── */
+.cyberpunk .stat-card {
+  border-color: rgba(0,240,255,0.06);
+}
+.cyberpunk .stat-card:hover {
+  border-color: rgba(255,45,149,0.25);
+  box-shadow: 0 0 12px rgba(255,45,149,0.06);
+}
+.cyberpunk .stat-card::before {
+  background: linear-gradient(90deg, var(--cyber-pink), var(--cyber-cyan)) !important;
+  opacity: 1 !important;
+  height: 2px;
+}
+
+/* ── Headings — sharp, no blur ── */
+.cyberpunk .page-header-left h1 {
+  text-shadow: 0 0 6px rgba(255,45,149,0.15);
+  color: #f5eeff;
+}
+
+/* ── Topbar ── */
+.cyberpunk .topbar {
+  border-bottom-color: rgba(0,240,255,0.1);
+}
+
+/* ── Logo ── */
+.cyberpunk .topbar-logo {
+  background: linear-gradient(135deg, var(--cyber-pink), var(--cyber-cyan));
+}
+
+/* ── Title ── */
+.cyberpunk .topbar-title span {
+  color: var(--cyber-pink);
+}
+
+/* ── Sidebar ── */
+.cyberpunk .sidebar {
+  border-right-color: rgba(0,240,255,0.06);
+}
+.cyberpunk .sidebar-item.active {
+  background: rgba(255,45,149,0.08);
+  color: var(--cyber-pink);
+}
+.cyberpunk .sidebar-item.active::before {
+  background: linear-gradient(180deg, var(--cyber-pink), var(--cyber-cyan));
+}
+.cyberpunk .sidebar-item:hover {
+  background: rgba(0,240,255,0.04);
+}
+.cyberpunk .sidebar-badge {
+  background: rgba(255,45,149,0.12);
+  color: var(--cyber-pink);
+}
+
+/* ── Buttons ── */
+.cyberpunk .btn-primary {
+  background: linear-gradient(135deg, var(--cyber-pink), #cc0066);
+  box-shadow: 0 2px 8px rgba(255,45,149,0.2);
+}
+.cyberpunk .btn-primary:hover {
+  box-shadow: 0 4px 16px rgba(255,45,149,0.3);
+}
+
+/* ── Data table ── */
+.cyberpunk .data-table tbody tr:hover {
+  background: rgba(0,240,255,0.03);
+  box-shadow: inset 3px 0 0 var(--cyber-pink);
+}
+.cyberpunk .data-table th {
+  color: var(--cyber-cyan);
+}
+
+/* ── Severity badges ── */
+.cyberpunk .sev-badge.critical { box-shadow: 0 0 4px rgba(255,23,68,0.2); }
+.cyberpunk .sev-badge.high { box-shadow: 0 0 4px rgba(255,109,0,0.2); }
+
+/* ── Status badges ── */
+.cyberpunk .status-badge.running { box-shadow: 0 0 6px rgba(255,45,149,0.2); }
+.cyberpunk .status-badge.completed { box-shadow: 0 0 6px rgba(0,230,118,0.2); }
+
+/* ── Host tag ── */
+.cyberpunk .host-tag::before {
+  background: var(--cyber-cyan);
+}
+
+/* ── Tags ── */
+.cyberpunk .tag {
+  border-color: rgba(0,240,255,0.1);
+  color: var(--cyber-cyan);
+}
+
+/* ── Inputs ── */
+.cyberpunk .form-input:focus,
+.cyberpunk .form-select:focus {
+  border-color: var(--cyber-pink);
+  box-shadow: 0 0 0 2px rgba(255,45,149,0.1);
+}
+
+/* ── Toggle ── */
+.cyberpunk .toggle-track.on {
+  background: var(--cyber-pink);
+  border-color: var(--cyber-pink);
+}
+
+/* ── Tabs ── */
+.cyberpunk .tab.active::after {
+  background: linear-gradient(90deg, var(--cyber-pink), var(--cyber-cyan));
+}
+.cyberpunk .tab.active {
+  color: var(--cyber-pink);
+}
+
+/* ── Progress bar ── */
+.cyberpunk .progress-fill {
+  background: linear-gradient(90deg, var(--cyber-pink), var(--cyber-cyan));
+}
+
+/* ── Severity bars ── */
+.cyberpunk .sev-bar .c { box-shadow: 0 0 3px rgba(255,23,68,0.3); }
+.cyberpunk .sev-bar .h { box-shadow: 0 0 3px rgba(255,109,0,0.3); }
+.cyberpunk .sev-bar .m { box-shadow: 0 0 3px rgba(255,230,0,0.3); }
+.cyberpunk .sev-bar .l { box-shadow: 0 0 3px rgba(0,240,255,0.3); }
+
+/* ── Code blocks ── */
+.cyberpunk .code-block {
+  border-color: rgba(0,240,255,0.08);
+  background: rgba(5,0,12,0.9);
+}
+
+/* ── Toasts ── */
+.cyberpunk .toast {
+  border-color: rgba(0,240,255,0.1);
+}
+
+/* ── Modal ── */
+.cyberpunk .modal {
+  border-color: rgba(0,240,255,0.1);
+}
+
+/* ── User dropdown ── */
+.cyberpunk .user-dropdown {
+  border-color: rgba(0,240,255,0.1);
+}
+.cyberpunk .user-dropdown::before {
+  border-color: rgba(0,240,255,0.1);
+}
+.cyberpunk .user-dropdown-avatar {
+  border-color: var(--cyber-pink);
+}
+.cyberpunk .user-dropdown-role {
+  background: rgba(255,45,149,0.12);
+  color: var(--cyber-pink);
+}
+
+/* ── Avatar ── */
+.cyberpunk .topbar-avatar {
+  border-color: rgba(0,240,255,0.2);
+}
+.cyberpunk .topbar-avatar:hover {
+  border-color: var(--cyber-pink);
+  box-shadow: 0 0 8px rgba(255,45,149,0.3);
+}
+
+/* ── Scrollbar ── */
+.cyberpunk ::-webkit-scrollbar-thumb {
+  background: rgba(0,240,255,0.15);
+}
+.cyberpunk ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,45,149,0.3);
+}
+
+/* ── Scan line (override default) ── */
+body.cyberpunk::after {
+  background: linear-gradient(90deg, transparent, var(--cyber-cyan), transparent) !important;
+  opacity: 0.1 !important;
+}
+
+/* ═══════════════ GLITCH SYSTEM ═══════════════ */
+
+/* ── Page title glitch ── */
+@keyframes cyberGlitch {
+  0%, 85%, 100% { transform: none; text-shadow: 0 0 6px rgba(255,45,149,0.15); }
+  86% { transform: translateX(-3px) skewX(-2deg); text-shadow: 3px 0 var(--cyber-cyan), -3px 0 var(--cyber-pink); clip-path: inset(20% 0 30% 0); }
+  87% { transform: translateX(3px) skewX(1deg); text-shadow: -2px 0 var(--cyber-cyan), 2px 0 var(--cyber-pink); clip-path: inset(50% 0 10% 0); }
+  88% { transform: translateX(-1px); text-shadow: 1px 0 var(--cyber-cyan), -1px 0 var(--cyber-pink); clip-path: inset(10% 0 60% 0); }
+  89% { transform: translateX(2px) skewX(-1deg); text-shadow: -3px 0 var(--cyber-cyan), 3px 0 var(--cyber-pink); clip-path: inset(40% 0 20% 0); }
+  90% { transform: none; clip-path: none; }
+}
+
+.cyberpunk .page-header-left h1 {
+  animation: cyberGlitch 6s ease infinite;
+  position: relative;
+}
+
+/* ── Topbar title glitch ── */
+@keyframes topbarGlitch {
+  0%, 92%, 100% { transform: none; }
+  93% { transform: translateX(-1px); text-shadow: 2px 0 var(--cyber-cyan), -2px 0 var(--cyber-pink); }
+  94% { transform: translateX(1px); text-shadow: -2px 0 var(--cyber-cyan), 2px 0 var(--cyber-pink); }
+  95% { transform: none; }
+}
+
+.cyberpunk .topbar-title {
+  animation: topbarGlitch 10s ease infinite;
+}
+
+/* ── Stat value glitch on hover ── */
+@keyframes statGlitch {
+  0% { transform: none; }
+  20% { transform: translateX(-2px) skewX(-5deg); text-shadow: 2px 0 var(--cyber-cyan), -2px 0 var(--cyber-pink); }
+  40% { transform: translateX(2px) skewX(3deg); text-shadow: -2px 0 var(--cyber-cyan), 2px 0 var(--cyber-pink); }
+  60% { transform: translateX(-1px); text-shadow: 1px 0 var(--cyber-cyan); }
+  80% { transform: translateX(1px) skewX(-2deg); text-shadow: -1px 0 var(--cyber-pink); }
+  100% { transform: none; }
+}
+
+.cyberpunk .stat-card:hover .stat-value {
+  animation: statGlitch 0.4s ease;
+}
+
+/* ── Sidebar flicker ── */
+@keyframes sidebarFlicker {
+  0%, 95%, 100% { opacity: 1; }
+  96% { opacity: 0.5; }
+  97% { opacity: 1; }
+  98% { opacity: 0.7; }
+}
+
+.cyberpunk .sidebar-item.active {
+  animation: sidebarFlicker 5s ease infinite;
+}
+
+/* ── Table row glitch on hover ── */
+@keyframes rowGlitch {
+  0% { transform: translateX(3px); }
+  25% { transform: translateX(-1px); box-shadow: inset 3px 0 0 var(--cyber-cyan); }
+  50% { transform: translateX(1px); box-shadow: inset 3px 0 0 var(--cyber-pink); }
+  100% { transform: translateX(3px); }
+}
+
+.cyberpunk .data-table tbody tr:hover {
+  animation: rowGlitch 0.3s ease;
+}
+
+/* ── Button glitch on hover ── */
+@keyframes btnGlitch {
+  0%, 100% { transform: translateY(-2px); }
+  15% { transform: translateY(-2px) translateX(-2px) skewX(-2deg); box-shadow: 3px 0 0 var(--cyber-cyan), -3px 0 0 var(--cyber-pink), 0 4px 16px rgba(255,45,149,0.3); }
+  30% { transform: translateY(-2px) translateX(1px); }
+  45% { transform: translateY(-2px); }
+}
+
+.cyberpunk .btn-primary:hover {
+  animation: btnGlitch 0.5s ease;
+}
+
+/* ── Badge neon pulse ── */
+@keyframes badgeNeonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.cyberpunk .sidebar-badge {
+  animation: badgeNeonPulse 2s ease infinite;
+}
+
+/* ── Modal glitch entrance ── */
+@keyframes modalGlitchIn {
+  0% { opacity: 0; transform: translateY(20px) scale(0.97); }
+  30% { opacity: 1; transform: translateY(-2px) skewX(-1deg); }
+  50% { transform: translateY(1px) skewX(0.5deg); }
+  100% { transform: none; }
+}
+
+.cyberpunk .modal-overlay.active .modal {
+  animation: modalGlitchIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* ── Login/setup card glitch ── */
+@keyframes loginGlitch {
+  0%, 90%, 100% { transform: none; }
+  92% { transform: translateX(-1px); box-shadow: var(--shadow-lg), -2px 0 0 var(--cyber-cyan), 2px 0 0 var(--cyber-pink); }
+  94% { transform: translateX(1px); box-shadow: var(--shadow-lg), 2px 0 0 var(--cyber-cyan), -2px 0 0 var(--cyber-pink); }
+  96% { transform: none; }
+}
+
+.cyberpunk .login-card,
+.cyberpunk .setup-card {
+  border-color: rgba(0,240,255,0.1);
+  animation: loginGlitch 8s ease infinite;
+}

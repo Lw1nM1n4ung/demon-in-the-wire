@@ -1,7 +1,13 @@
-"""Phase 1 -- Host discovery via nmap ping-sweep and fping."""
+"""Phase 1 -- Host discovery via nmap ping-sweep and fping.
+
+Large CIDRs (/16 or bigger) are auto-partitioned into /24 subnets
+and scanned in parallel batches for faster discovery.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import logging
 import re
 from typing import TYPE_CHECKING
@@ -17,46 +23,112 @@ log = logging.getLogger("wireghost")
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
+# Subnets with more than 512 IPs (prefix < /24) get partitioned
+_PARTITION_THRESHOLD = 23
+
+
+def _partition_target(target: str) -> list[str]:
+    """Split large CIDRs into /24 subnets for parallel scanning.
+
+    - /16 → 256 /24 subnets
+    - /20 → 16 /24 subnets
+    - /24 or smaller → returned as-is
+    - Hostnames / single IPs → returned as-is
+    """
+    try:
+        net = ipaddress.ip_network(target, strict=False)
+        if net.prefixlen <= _PARTITION_THRESHOLD:
+            subnets = list(net.subnets(new_prefix=24))
+            log.info(
+                "Partitioning /%d target into %d /24 subnets",
+                net.prefixlen,
+                len(subnets),
+            )
+            return [str(s) for s in subnets]
+        return [target]
+    except ValueError:
+        # Not a valid CIDR — hostname or single IP
+        return [target]
+
+
+async def _scan_subnet(
+    subnet: str,
+    timeout: int,
+    live_ips: set[str],
+    semaphore: asyncio.Semaphore,
+    index: int,
+    total: int,
+) -> None:
+    """Scan a single subnet with nmap + fping, guarded by semaphore."""
+    async with semaphore:
+        if total > 1:
+            log.info("Scanning subnet %d/%d: %s", index, total, subnet)
+
+        # nmap ping sweep
+        nmap_result = await run_tool(
+            ["nmap", "-sn", subnet],
+            timeout=timeout,
+            label=f"nmap -sn {subnet}",
+        )
+        if nmap_result.returncode == 0:
+            for ip in _IPV4_RE.findall(nmap_result.stdout):
+                if is_valid_ipv4(ip):
+                    live_ips.add(ip)
+
+        # fping
+        fping_result = await run_tool(
+            ["fping", "-a", "-g", subnet],
+            timeout=timeout,
+            label=f"fping -a -g {subnet}",
+        )
+        if fping_result.returncode in (0, 1):
+            for ip in _IPV4_RE.findall(fping_result.stdout):
+                if is_valid_ipv4(ip):
+                    live_ips.add(ip)
+
 
 async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
     """Run nmap -sn and fping against *config.target*, merge and return live IPs.
 
-    The merged, deduplicated, sorted list is also written to
+    Large CIDRs (>/24) are automatically partitioned into /24 subnets
+    and scanned concurrently (limited by config.parallelism).
+
+    The merged, deduplicated, sorted list is written to
     ``<tree.live_host_dir>/live.txt``.
     """
     target = config.target
     timeout = int(config.tool_timeout)
 
+    # Partition large targets into /24 subnets
+    subnets = _partition_target(target)
+    total = len(subnets)
+
+    if total > 1:
+        log.info(
+            "Target %s partitioned into %d /24 subnets (parallelism=%d)",
+            target,
+            total,
+            config.parallelism,
+        )
+
     live_ips: set[str] = set()
+    semaphore = asyncio.Semaphore(config.parallelism)
 
-    # --- nmap ping sweep ---
-    nmap_result = await run_tool(
-        ["nmap", "-sn", target],
-        timeout=timeout,
-        label=f"nmap -sn {target}",
-    )
-    if nmap_result.returncode == 0:
-        for ip in _IPV4_RE.findall(nmap_result.stdout):
-            if is_valid_ipv4(ip):
-                live_ips.add(ip)
-
-    # --- fping ---
-    fping_result = await run_tool(
-        ["fping", "-a", "-g", target],
-        timeout=timeout,
-        label=f"fping -a -g {target}",
-    )
-    # fping returns 0 when all hosts reply, 1 when some are unreachable
-    if fping_result.returncode in (0, 1):
-        for ip in _IPV4_RE.findall(fping_result.stdout):
-            if is_valid_ipv4(ip):
-                live_ips.add(ip)
+    # Scan all subnets concurrently (semaphore-limited)
+    tasks = [
+        _scan_subnet(subnet, timeout, live_ips, semaphore, i + 1, total)
+        for i, subnet in enumerate(subnets)
+    ]
+    await asyncio.gather(*tasks, return_exceptions=True)
 
     sorted_ips = sorted(live_ips, key=lambda ip: tuple(int(o) for o in ip.split(".")))
 
     # Persist to disk
     live_txt = tree.live_host_dir / "live.txt"
-    live_txt.write_text("\n".join(sorted_ips) + "\n" if sorted_ips else "", encoding="utf-8")
+    live_txt.write_text(
+        "\n".join(sorted_ips) + "\n" if sorted_ips else "",
+        encoding="utf-8",
+    )
 
-    log.info("Discovery found %d live host(s)", len(sorted_ips))
+    log.info("Discovery found %d live host(s) across %d subnet(s)", len(sorted_ips), total)
     return sorted_ips

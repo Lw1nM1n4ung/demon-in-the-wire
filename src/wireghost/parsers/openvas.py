@@ -1,6 +1,6 @@
 """Parser for OpenVAS/Greenbone XML report output."""
 from __future__ import annotations
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET  # safe XML parser (prevents XXE)
 from pathlib import Path
 from wireghost.models.finding import Finding
 from wireghost.models.severity import Severity

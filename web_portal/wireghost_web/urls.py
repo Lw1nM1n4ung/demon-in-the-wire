@@ -1,16 +1,57 @@
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from scanner.views import ScanViewSet, HostViewSet, FindingViewSet, dashboard_stats, download_report
+from scanner.views import (
+    ScanViewSet, HostViewSet, FindingViewSet,
+    ScanPolicyViewSet, ScheduledScanViewSet,
+    dashboard_stats, download_report, report_config, upload_logo,
+)
+from scanner.auth_views import (
+    auth_login, auth_logout, auth_csrf, auth_me, auth_users,
+    auth_user_create, auth_user_update, auth_user_delete,
+    site_config, check_username, setup_admin, site_setup_complete, user_preferences,
+    list_sessions, revoke_session, revoke_all_sessions,
+    list_api_keys, create_api_key, revoke_api_key,
+    audit_log,
+)
 
 router = DefaultRouter()
 router.register(r'scans', ScanViewSet)
 router.register(r'hosts', HostViewSet)
 router.register(r'findings', FindingViewSet)
+router.register(r'policies', ScanPolicyViewSet)
+router.register(r'schedules', ScheduledScanViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/dashboard/', dashboard_stats, name='dashboard-stats'),
-    path('api/reports/<int:report_id>/download/', download_report, name='download-report'),
+    path('api/reports/<uuid:report_id>/download/', download_report, name='download-report'),
+    path('api/report-config/', report_config, name='report-config'),
+    path('api/report-config/logo/', upload_logo, name='upload-logo'),
+    # Auth
+    path('api/auth/login/', auth_login, name='auth-login'),
+    path('api/auth/logout/', auth_logout, name='auth-logout'),
+    path('api/auth/csrf/', auth_csrf, name='auth-csrf'),
+    path('api/auth/me/', auth_me, name='auth-me'),
+    path('api/auth/users/', auth_users, name='auth-users'),
+    path('api/auth/users/create/', auth_user_create, name='auth-user-create'),
+    path('api/auth/users/<uuid:user_id>/', auth_user_update, name='auth-user-update'),
+    path('api/auth/users/<uuid:user_id>/delete/', auth_user_delete, name='auth-user-delete'),
+    # Site config & user preferences
+    path('api/site-config/', site_config, name='site-config'),
+    path('api/auth/check-username/', check_username, name='check-username'),
+    path('api/auth/setup-admin/', setup_admin, name='setup-admin'),
+    path('api/site-config/setup-complete/', site_setup_complete, name='site-setup-complete'),
+    path('api/preferences/', user_preferences, name='user-preferences'),
+    # Sessions
+    path('api/sessions/', list_sessions, name='list-sessions'),
+    path('api/sessions/revoke/', revoke_session, name='revoke-session'),
+    path('api/sessions/revoke-all/', revoke_all_sessions, name='revoke-all-sessions'),
+    # API Keys
+    path('api/api-keys/', list_api_keys, name='list-api-keys'),
+    path('api/api-keys/create/', create_api_key, name='create-api-key'),
+    path('api/api-keys/<uuid:key_id>/revoke/', revoke_api_key, name='revoke-api-key'),
+    # Audit Log
+    path('api/audit-log/', audit_log, name='audit-log'),
 ]

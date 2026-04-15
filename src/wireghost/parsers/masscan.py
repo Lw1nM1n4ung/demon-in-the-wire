@@ -1,6 +1,6 @@
 """Parser for masscan XML output."""
 from __future__ import annotations
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET  # safe XML parser (prevents XXE)
 from collections import defaultdict
 from pathlib import Path
 from wireghost.models.scan import Host, Port

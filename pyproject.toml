@@ -15,6 +15,7 @@ dependencies = [
     "jinja2>=3.1",
     "aiohttp>=3.9",
     "pyyaml>=6.0",
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]

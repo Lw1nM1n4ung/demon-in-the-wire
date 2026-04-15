@@ -1,0 +1,97 @@
+/* ═══════════════════════════════════════════════════
+   WIRE_GHOST — DESIGN TOKENS
+   Tactical Operations / Dark Command Center
+   ═══════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surfaces ── */
+  --bg-void: #06080d;
+  --bg-primary: #0a0e17;
+  --bg-panel: #0f1420;
+  --bg-card: #141a28;
+  --bg-hover: #1a2235;
+  --bg-input: #111827;
+  --bg-elevated: #1e2538;
+
+  /* ── Borders ── */
+  --border-dim: rgba(255,255,255,0.04);
+  --border-soft: rgba(255,255,255,0.08);
+  --border-active: rgba(59,130,246,0.4);
+  --border-accent: rgba(59,130,246,0.25);
+
+  /* ── Text ── */
+  --text-primary: #e8ecf4;
+  --text-secondary: #8892a4;
+  --text-dim: #5a6478;
+  --text-bright: #ffffff;
+  --text-muted: #3d4654;
+
+  /* ── Accent ── */
+  --accent: #3b82f6;
+  --accent-dim: rgba(59,130,246,0.12);
+  --accent-glow: rgba(59,130,246,0.3);
+  --accent-solid: #2563eb;
+
+  /* ── Severity ── */
+  --critical: #ff3b5c;
+  --critical-dim: rgba(255,59,92,0.12);
+  --critical-bg: rgba(255,59,92,0.06);
+  --high: #ff6b35;
+  --high-dim: rgba(255,107,53,0.12);
+  --high-bg: rgba(255,107,53,0.06);
+  --medium: #ffb800;
+  --medium-dim: rgba(255,184,0,0.12);
+  --medium-bg: rgba(255,184,0,0.06);
+  --low: #38bdf8;
+  --low-dim: rgba(56,189,248,0.12);
+  --low-bg: rgba(56,189,248,0.06);
+  --info: #818cf8;
+  --info-dim: rgba(129,140,248,0.12);
+  --info-bg: rgba(129,140,248,0.06);
+  --success: #34d399;
+  --success-dim: rgba(52,211,153,0.12);
+
+  /* ── Typography ── */
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* ── Spacing / Radius ── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.25);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.35);
+  --shadow-glow: 0 0 40px rgba(59,130,246,0.08);
+
+  /* ── Transitions ── */
+  --transition-fast: 0.15s ease;
+  --transition-med: 0.25s ease;
+  --transition-slow: 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 14px; }
+
+body {
+  font-family: var(--font-display);
+  background: var(--bg-void);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }

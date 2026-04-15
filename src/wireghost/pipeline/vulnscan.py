@@ -49,6 +49,7 @@ async def run_nuclei(
             "-timeout", "10",
             "-stats",
             "-severity", "critical,high,medium,low",
+            "-etags", "brute-force,brute,login,fuzz",
         ],
         timeout=int(config.tool_timeout),
         label=f"nuclei {host.ip}",
@@ -81,7 +82,7 @@ async def run_nmap_vuln(
     result = await run_tool(
         [
             "nmap",
-            "--script=vuln,auth,default",
+            "--script=vuln,default",
             "-p", port_csv,
             "-Pn",
             "-oX", str(xml_path),

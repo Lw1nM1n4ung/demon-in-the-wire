@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Scan, Host, Port, Finding, Technology, Report
+from django.contrib.auth.admin import UserAdmin
+from .models import User, Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan
+
+admin.site.register(User, UserAdmin)
 
 
 @admin.register(Scan)
@@ -29,3 +32,20 @@ class ReportAdmin(admin.ModelAdmin):
 
 admin.site.register(Port)
 admin.site.register(Technology)
+
+
+@admin.register(ReportConfig)
+class ReportConfigAdmin(admin.ModelAdmin):
+    list_display = ['report_title', 'company_name', 'brand_color', 'updated_at']
+
+
+@admin.register(ScanPolicy)
+class ScanPolicyAdmin(admin.ModelAdmin):
+    list_display = ['name', 'scan_type', 'is_default', 'created_at']
+    list_filter = ['scan_type', 'is_default']
+
+
+@admin.register(ScheduledScan)
+class ScheduledScanAdmin(admin.ModelAdmin):
+    list_display = ['name', 'target', 'frequency', 'enabled', 'next_run']
+    list_filter = ['frequency', 'enabled']

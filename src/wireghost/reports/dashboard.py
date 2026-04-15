@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from wireghost.models.severity import SEVERITY_ORDER, Severity
 
@@ -47,7 +47,7 @@ class DashboardRenderer:
 
         env = Environment(
             loader=FileSystemLoader(str(_TEMPLATE_DIR)),
-            autoescape=False,  # we embed raw CSS / JS / JSON
+            autoescape=select_autoescape(default_for_string=True, default=True),
         )
         template = env.get_template("dashboard.html.j2")
 
