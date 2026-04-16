@@ -95,13 +95,13 @@ WG.renderLogin = function() {
         '<div style="display:flex;flex-direction:column;gap:16px;margin-top:24px;">' +
           '<div class="form-group">' +
             '<label class="form-label">Username</label>' +
-            '<input class="form-input" id="loginUser" type="text" placeholder="Username" autofocus>' +
+            '<input class="form-input" id="loginUser" type="text" placeholder="Username" autofocus onkeydown="if(event.key===\'Enter\'){document.getElementById(\'loginPass\').focus();}">' +
           '</div>' +
           '<div class="form-group">' +
             '<label class="form-label">Password</label>' +
-            '<input class="form-input" id="loginPass" type="password" placeholder="Password">' +
+            '<input class="form-input" id="loginPass" type="password" placeholder="Password" onkeydown="if(event.key===\'Enter\')WG.handleLogin();">' +
           '</div>' +
-          '<div id="loginError" style="display:none;color:var(--critical);font-size:0.82rem;text-align:center;"></div>' +
+          '<div id="loginError" style="display:none;color:var(--critical);font-size:0.82rem;text-align:center;padding:8px;background:rgba(255,59,92,0.08);border-radius:var(--radius-md);"></div>' +
           '<button class="btn btn-primary" id="loginBtn" style="width:100%;justify-content:center;padding:11px;" onclick="WG.handleLogin()">Sign In</button>' +
         '</div>' +
         '<div style="margin-top:16px;text-align:center;">' +

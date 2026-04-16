@@ -123,13 +123,15 @@ WG._testDbConnection = function() {
   var el = document.getElementById('setupDbStatus');
   el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;"><div class="spinner" style="width:16px;height:16px;"></div><span class="mono" style="font-size:0.78rem;color:var(--text-dim);">Testing connection...</span></div>';
 
-  // Try the real API
-  WG.api('/dashboard/').then(function(res) {
-    if (res) {
+  // Hit site-config (public endpoint) to verify API + DB are reachable
+  fetch(WG.API_BASE + '/site-config/').then(function(res) {
+    if (res.ok) {
       el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--success-dim);border-radius:var(--radius-md);"><span style="color:var(--success);font-weight:600;font-size:0.82rem;">&#10003; Connected to database</span></div>';
     } else {
-      el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--medium-dim);border-radius:var(--radius-md);"><span style="color:var(--medium);font-weight:600;font-size:0.82rem;">&#9888; API not reachable — will use demo mode</span></div>';
+      el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--medium-dim);border-radius:var(--radius-md);"><span style="color:var(--medium);font-weight:600;font-size:0.82rem;">&#9888; API returned error (' + res.status + ')</span></div>';
     }
+  }).catch(function() {
+    el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--medium-dim);border-radius:var(--radius-md);"><span style="color:var(--medium);font-weight:600;font-size:0.82rem;">&#9888; API not reachable — will use demo mode</span></div>';
   });
 };
 
@@ -148,7 +150,7 @@ WG._setupAdmin = function() {
         '<div class="form-group"><label class="form-label">Password</label><input class="form-input" id="setupAdminPass" type="password" placeholder="Strong password"></div>' +
         '<div class="form-group"><label class="form-label">Confirm Password</label><input class="form-input" id="setupAdminPass2" type="password" placeholder="Confirm"></div>' +
       '</div>' +
-      '<div id="setupAdminError" style="display:none;color:var(--critical);font-size:0.78rem;"></div>' +
+      '<div id="setupAdminError" style="display:none;color:var(--critical);font-size:0.82rem;padding:10px 14px;background:rgba(255,59,92,0.08);border-radius:var(--radius-md);"></div>' +
     '</div>' +
     '<div class="setup-footer">' +
       '<button class="btn btn-ghost" onclick="WG._setupPrev()">Back</button>' +
