@@ -28,16 +28,16 @@ WG.renderScanDetail = function(id) {
   return '' +
     '<div class="breadcrumbs"><a onclick="WG.navigate(\'scans\')">Scans</a><span class="sep">/</span><span>' + esc(scan.name) + '</span></div>' +
     '<div class="page-header">' +
-      '<div class="page-header-left"><h1>' + esc(scan.name) + '</h1><p>' + esc(scan.target) + ' &mdash; ' + scan.scan_type + ' scan</p></div>' +
+      '<div class="page-header-left"><h1>' + esc(scan.name) + '</h1><p>' + esc(scan.target) + ' &mdash; ' + esc(scan.scan_type) + ' scan</p></div>' +
       '<div class="page-header-actions">' +
         (scan.status === 'running' ? '<button class="btn btn-danger btn-sm" onclick="WG.cancelScan(\'' + id + '\')">Cancel Scan</button>' : '') +
         (scan.status === 'completed' ? '<button class="btn btn-secondary btn-sm" onclick="WG.toast(\'Rescan queued\',\'info\')">Rescan</button>' : '') +
       '</div>' +
     '</div>' +
     '<div class="info-grid" style="margin-bottom:24px;">' +
-      '<div class="info-item"><div class="info-label">Status</div><div class="info-value"><span class="status-badge ' + scan.status + '"><span class="dot"></span> ' + scan.status + '</span></div></div>' +
+      '<div class="info-item"><div class="info-label">Status</div><div class="info-value"><span class="status-badge ' + esc(scan.status) + '"><span class="dot"></span> ' + esc(scan.status) + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Target</div><div class="info-value"><span class="host-tag">' + esc(scan.target) + '</span></div></div>' +
-      '<div class="info-item"><div class="info-label">Type</div><div class="info-value"><span class="tag">' + scan.scan_type + '</span></div></div>' +
+      '<div class="info-item"><div class="info-label">Type</div><div class="info-value"><span class="tag">' + esc(scan.scan_type) + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Started</div><div class="info-value mono">' + WG.fmtDate(scan.started_at) + '</div></div>' +
       '<div class="info-item"><div class="info-label">Duration</div><div class="info-value mono">' + WG.fmtDuration(scan.duration_seconds) + '</div></div>' +
       '<div class="info-item"><div class="info-label">Parallelism</div><div class="info-value mono">' + scan.parallelism + '</div></div>' +
@@ -86,8 +86,8 @@ WG._scanFindingsTab = function(findings) {
         '<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
         '<td><span class="host-tag">' + esc(f.host_ip) + '</span></td>' +
         '<td class="mono">' + (f.port || '\u2014') + '</td>' +
-        '<td><span class="tag">' + f.source + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
-        '<td class="mono" style="color:var(--accent);">' + (f.cve || '\u2014') + '</td></tr>';
+        '<td><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
+        '<td class="mono" style="color:var(--accent);">' + esc(f.cve || '\u2014') + '</td></tr>';
     }).join('') +
     '</tbody></table></div>';
 };
@@ -98,7 +98,7 @@ WG._scanReportsTab = function(reports) {
   return '<div class="panel"><table class="data-table"><thead><tr><th>Format</th><th>File</th><th>Size</th><th>Generated</th><th></th></tr></thead><tbody>' +
     reports.map(function(r) {
       return '<tr>' +
-        '<td><span class="tag">' + r.format.toUpperCase() + '</span></td>' +
+        '<td><span class="tag">' + esc(r.format.toUpperCase()) + '</span></td>' +
         '<td class="mono" style="font-size:0.75rem;">' + esc(r.file_path.split('/').pop()) + '</td>' +
         '<td class="mono">' + WG.fmtBytes(r.file_size) + '</td>' +
         '<td class="mono">' + WG.fmtDate(r.created_at) + '</td>' +

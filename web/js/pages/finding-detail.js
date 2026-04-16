@@ -40,10 +40,10 @@ WG.renderFindingDetail = function(id) {
     '<div class="info-grid" style="margin-bottom:24px;">' +
       '<div class="info-item"><div class="info-label">Host</div><div class="info-value"><a onclick="WG.navigate(\'host\',{id:\'' + f.host + '\'})" class="host-tag">' + esc(f.host_ip) + '</a></div></div>' +
       '<div class="info-item"><div class="info-label">Port</div><div class="info-value mono">' + (f.port || '\u2014') + '/' + (f.protocol || 'tcp') + '</div></div>' +
-      '<div class="info-item"><div class="info-label">Source</div><div class="info-value"><span class="tag">' + f.source + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</div></div>' +
-      (f.cve ? '<div class="info-item"><div class="info-label">CVE</div><div class="info-value mono" style="color:var(--accent);">' + f.cve + '</div></div>' : '') +
-      (f.cwe ? '<div class="info-item"><div class="info-label">CWE</div><div class="info-value mono">' + f.cwe + '</div></div>' : '') +
-      (f.template_id ? '<div class="info-item"><div class="info-label">Template</div><div class="info-value mono" style="font-size:0.75rem;">' + f.template_id + '</div></div>' : '') +
+      '<div class="info-item"><div class="info-label">Source</div><div class="info-value"><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</div></div>' +
+      (f.cve ? '<div class="info-item"><div class="info-label">CVE</div><div class="info-value mono" style="color:var(--accent);">' + esc(f.cve) + '</div></div>' : '') +
+      (f.cwe ? '<div class="info-item"><div class="info-label">CWE</div><div class="info-value mono">' + esc(f.cwe) + '</div></div>' : '') +
+      (f.template_id ? '<div class="info-item"><div class="info-label">Template</div><div class="info-value mono" style="font-size:0.75rem;">' + esc(f.template_id) + '</div></div>' : '') +
       (f.full_url ? '<div class="info-item"><div class="info-label">URL</div><div class="info-value mono" style="font-size:0.75rem;word-break:break-all;">' + esc(f.full_url) + '</div></div>' : '') +
     '</div>' +
 
@@ -66,6 +66,6 @@ WG.renderFindingDetail = function(id) {
 
     (f.tags ?
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">' +
-      f.tags.split(',').map(function(t) { return '<span class="tag">' + t.trim() + '</span>'; }).join('') +
+      f.tags.split(',').map(function(t) { return '<span class="tag">' + esc(t.trim()) + '</span>'; }).join('') +
       '</div>' : '');
 };

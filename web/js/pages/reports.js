@@ -15,7 +15,7 @@ WG.renderReports = function() {
       var scan = scans.find(function(s) { return s.id === r.scan; });
       return '<tr>' +
         '<td><a onclick="WG.navigate(\'scan\',{id:\'' + r.scan + '\'})">' + esc(scan ? scan.name : 'Scan ' + r.scan) + '</a></td>' +
-        '<td><span class="tag">' + r.format.toUpperCase() + '</span></td>' +
+        '<td><span class="tag">' + esc(r.format.toUpperCase()) + '</span></td>' +
         '<td class="mono" style="font-size:0.75rem;">' + esc(r.file_path.split('/').pop()) + '</td>' +
         '<td class="mono">' + WG.fmtBytes(r.file_size) + '</td>' +
         '<td class="mono">' + WG.fmtDate(r.created_at) + '</td>' +

@@ -129,8 +129,8 @@ WG._buildDashboard = function() {
             '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
             '<td><span class="host-tag">' + esc(f.host_ip) + '</span></td>' +
             '<td class="mono">' + (f.port || '\u2014') + '</td>' +
-            '<td><span class="tag">' + f.source + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
-            '<td class="mono" style="color:var(--accent);">' + (f.cve || '\u2014') + '</td></tr>';
+            '<td><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
+            '<td class="mono" style="color:var(--accent);">' + esc(f.cve || '\u2014') + '</td></tr>';
         }).join('') +
         '</tbody></table></div>'
     : '');

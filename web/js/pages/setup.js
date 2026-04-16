@@ -102,13 +102,13 @@ WG._setupDatabase = function() {
     '<p class="setup-desc">Connect to your MySQL database</p>' +
     '<div style="display:flex;flex-direction:column;gap:14px;margin-top:16px;">' +
       '<div class="form-row">' +
-        '<div class="form-group"><label class="form-label">Host</label><input class="form-input" id="setupDbHost" value="127.0.0.1" placeholder="127.0.0.1"></div>' +
-        '<div class="form-group"><label class="form-label">Port</label><input class="form-input" id="setupDbPort" value="3306" placeholder="3306"></div>' +
+        '<div class="form-group"><label class="form-label">Host</label><input class="form-input" id="setupDbHost" placeholder="Database host"></div>' +
+        '<div class="form-group"><label class="form-label">Port</label><input class="form-input" id="setupDbPort" placeholder="3306"></div>' +
       '</div>' +
-      '<div class="form-group"><label class="form-label">Database Name</label><input class="form-input" id="setupDbName" value="wireghost" placeholder="wireghost"></div>' +
+      '<div class="form-group"><label class="form-label">Database Name</label><input class="form-input" id="setupDbName" placeholder="Database name"></div>' +
       '<div class="form-row">' +
-        '<div class="form-group"><label class="form-label">Username</label><input class="form-input" id="setupDbUser" value="wireghost" placeholder="wireghost"></div>' +
-        '<div class="form-group"><label class="form-label">Password</label><input class="form-input" id="setupDbPass" type="password" value="wireghost_pass" placeholder="Password"></div>' +
+        '<div class="form-group"><label class="form-label">Username</label><input class="form-input" id="setupDbUser" placeholder="Database user"></div>' +
+        '<div class="form-group"><label class="form-label">Password</label><input class="form-input" id="setupDbPass" type="password" placeholder="Database password"></div>' +
       '</div>' +
       '<div id="setupDbStatus"></div>' +
       '<button class="btn btn-secondary btn-sm" onclick="WG._testDbConnection()" style="align-self:flex-start;">Test Connection</button>' +
