@@ -245,13 +245,6 @@ body[data-theme="light"] .tab.active .count {
   color: var(--accent);
 }
 
-/* ── Severity distribution ── */
-body[data-theme="light"] .sev-dist-item {
-  border-bottom-color: rgba(0,0,0,0.04);
-}
-body[data-theme="light"] .sev-dist-bar {
-  background: #eef1f6;
-}
 
 /* ── Activity items ── */
 body[data-theme="light"] .activity-item {

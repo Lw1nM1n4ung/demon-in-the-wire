@@ -2,16 +2,15 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from scanner.views import (
-    ScanViewSet, HostViewSet, FindingViewSet,
+    ScanViewSet, HostViewSet, FindingViewSet, AssetViewSet,
     ScanPolicyViewSet, ScheduledScanViewSet,
     dashboard_stats, download_report, report_config, upload_logo,
 )
 from scanner.auth_views import (
     auth_login, auth_logout, auth_csrf, auth_me, auth_users,
     auth_user_create, auth_user_update, auth_user_delete,
-    site_config, check_username, setup_admin, site_setup_complete, user_preferences,
+    site_config, update_site_config, check_username, setup_admin, site_setup_complete, user_preferences,
     list_sessions, revoke_session, revoke_all_sessions,
-    list_api_keys, create_api_key, revoke_api_key,
     audit_log,
 )
 
@@ -19,6 +18,7 @@ router = DefaultRouter()
 router.register(r'scans', ScanViewSet)
 router.register(r'hosts', HostViewSet)
 router.register(r'findings', FindingViewSet)
+router.register(r'assets', AssetViewSet)
 router.register(r'policies', ScanPolicyViewSet)
 router.register(r'schedules', ScheduledScanViewSet)
 
@@ -40,6 +40,7 @@ urlpatterns = [
     path('api/auth/users/<uuid:user_id>/delete/', auth_user_delete, name='auth-user-delete'),
     # Site config & user preferences
     path('api/site-config/', site_config, name='site-config'),
+    path('api/site-config/update/', update_site_config, name='site-config-update'),
     path('api/auth/check-username/', check_username, name='check-username'),
     path('api/auth/setup-admin/', setup_admin, name='setup-admin'),
     path('api/site-config/setup-complete/', site_setup_complete, name='site-setup-complete'),
@@ -48,10 +49,6 @@ urlpatterns = [
     path('api/sessions/', list_sessions, name='list-sessions'),
     path('api/sessions/revoke/', revoke_session, name='revoke-session'),
     path('api/sessions/revoke-all/', revoke_all_sessions, name='revoke-all-sessions'),
-    # API Keys
-    path('api/api-keys/', list_api_keys, name='list-api-keys'),
-    path('api/api-keys/create/', create_api_key, name='create-api-key'),
-    path('api/api-keys/<uuid:key_id>/revoke/', revoke_api_key, name='revoke-api-key'),
     # Audit Log
     path('api/audit-log/', audit_log, name='audit-log'),
 ]

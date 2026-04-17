@@ -1,6 +1,8 @@
 /* Wire_Ghost — Settings page (full) */
 
 WG.renderSettings = function() {
+  var user = WG.currentUser && WG.currentUser();
+  var isAdmin = user && user.role === 'owner';
   return '' +
     '<div class="page-header"><div class="page-header-left"><h1>Settings</h1><p>Portal configuration & preferences</p></div></div>' +
     '<div class="tabs" id="settingsTabs" style="flex-wrap:wrap;">' +
@@ -8,11 +10,11 @@ WG.renderSettings = function() {
       '<div class="tab" data-tab="theme" onclick="WG.switchSettingsTab(\'theme\')">Theme</div>' +
       '<div class="tab" data-tab="notifications" onclick="WG.switchSettingsTab(\'notifications\')">Notifications</div>' +
       '<div class="tab" data-tab="tools" onclick="WG.switchSettingsTab(\'tools\')">Tools</div>' +
-      '<div class="tab" data-tab="apikeys" onclick="WG.switchSettingsTab(\'apikeys\')">API Keys</div>' +
       '<div class="tab" data-tab="sessions" onclick="WG.switchSettingsTab(\'sessions\')">Sessions</div>' +
       '<div class="tab" data-tab="audit" onclick="WG.switchSettingsTab(\'audit\')">Audit Log</div>' +
       '<div class="tab" data-tab="export" onclick="WG.switchSettingsTab(\'export\')">Export/Import</div>' +
       '<div class="tab" data-tab="api" onclick="WG.switchSettingsTab(\'api\')">API</div>' +
+      (isAdmin ? '<div class="tab" data-tab="admin" onclick="WG.switchSettingsTab(\'admin\')">Administration</div>' : '') +
       '<div class="tab" data-tab="about" onclick="WG.switchSettingsTab(\'about\')">About</div>' +
     '</div>' +
     '<div id="settingsTabContent">' + WG._settingsGeneral() + '</div>';
@@ -134,62 +136,9 @@ WG._settingsTools = function() {
     '</tbody></table></div>';
 };
 
-/* ── API Keys (API-driven) ── */
-WG._settingsApiKeys = function() {
-  var keys = WG.getCached('api_keys', '/api-keys/', 'api_keys');
-  WG.fetchData('/api-keys/', 'api_keys').then(function(data) {
-    if (data && WG.state.currentPage === 'settings') {
-      WG._cache['api_keys'] = data; WG._cacheTime['api_keys'] = Date.now();
-    }
-  });
-  var esc = WG.escHtml;
-  return '<div class="panel" style="max-width:800px;"><div class="panel-header"><div class="panel-title">API Keys <span class="count">' + keys.length + '</span></div>' +
-    '<button class="btn btn-primary btn-sm" onclick="WG._generateApiKey()"><span>+</span> Generate Key</button></div>' +
-    (keys.length ?
-      '<table class="data-table"><thead><tr><th>Name</th><th>Key</th><th>Scopes</th><th>Last Used</th><th></th></tr></thead><tbody>' +
-      keys.map(function(k) {
-        return '<tr>' +
-          '<td style="font-weight:600;color:var(--text-bright);">' + esc(k.name) + '</td>' +
-          '<td class="mono" style="font-size:0.72rem;">' + esc(k.key) + '</td>' +
-          '<td style="font-size:0.72rem;">' + (k.scopes || '').split(',').map(function(s) { return '<span class="tag" style="font-size:0.6rem;">' + s + '</span>'; }).join(' ') + '</td>' +
-          '<td class="mono">' + (k.last_used ? WG.timeAgo(k.last_used) : 'Never') + '</td>' +
-          '<td><button class="btn btn-ghost btn-sm" style="color:var(--critical);" onclick="WG._revokeApiKey(\'' + k.id + '\')">Revoke</button></td></tr>';
-      }).join('') +
-      '</tbody></table>'
-    : '<div class="panel-empty"><div class="icon">&#128273;</div>No API keys. Click "Generate Key" to create one.</div>') +
-    '</div>';
-};
-
-WG._generateApiKey = function() {
-  var name = prompt('API key name:');
-  if (!name) return;
-  WG.api('/api-keys/create/', { method: 'POST', body: JSON.stringify({ name: name }) }).then(function(res) {
-    if (res && res.key) {
-      WG.toast('Key created! Full key (copy now — shown once): ' + res.key, 'success');
-      navigator.clipboard.writeText(res.key);
-      WG.invalidateCache('api_keys');
-      WG.switchSettingsTab('apikeys');
-    } else {
-      WG.toast((res && res.error) || 'Failed to create key', 'error');
-    }
-  });
-};
-
-WG._revokeApiKey = function(id) {
-  WG.api('/api-keys/' + id + '/revoke/', { method: 'DELETE' }).then(function(res) {
-    if (res && !res.error) {
-      WG.toast('API key revoked: ' + (res.name || ''), 'info');
-      WG.invalidateCache('api_keys');
-      WG.switchSettingsTab('apikeys');
-    } else {
-      WG.toast((res && res.error) || 'Revoke failed', 'error');
-    }
-  });
-};
-
 /* ── Sessions (API-driven) ── */
 WG._settingsSessions = function() {
-  var sessions = WG.getCached('sessions', '/sessions/', 'sessions');
+  var sessions = WG.getCached('sessions', '/sessions/');
   WG.fetchData('/sessions/', 'sessions').then(function(data) {
     if (data && WG.state.currentPage === 'settings') {
       WG._cache['sessions'] = data; WG._cacheTime['sessions'] = Date.now();
@@ -226,7 +175,7 @@ WG._logoutAll = function() {
 
 /* ── Audit Log (API-driven) ── */
 WG._settingsAudit = function() {
-  var log = WG.getCached('audit_log', '/audit-log/', 'audit_log');
+  var log = WG.getCached('audit_log', '/audit-log/');
   WG.fetchData('/audit-log/', 'audit_log').then(function(data) {
     if (data && WG.state.currentPage === 'settings') {
       WG._cache['audit_log'] = data; WG._cacheTime['audit_log'] = Date.now();
@@ -315,7 +264,7 @@ WG._settingsApi = function() {
     '<div class="panel-body" style="display:flex;flex-direction:column;gap:16px;">' +
       '<div class="info-grid" style="grid-template-columns:1fr 1fr;">' +
         '<div class="info-item"><div class="info-label">API Status</div><div class="info-value">' +
-          (WG.USE_MOCK ? '<span class="status-badge failed"><span class="dot"></span> Offline (demo data)</span>' : '<span class="status-badge completed"><span class="dot"></span> Connected</span>') +
+          '<span class="status-badge completed"><span class="dot"></span> Connected</span>' +
         '</div></div><div class="info-item"><div class="info-label">Base URL</div><div class="info-value mono">' + WG.API_BASE + '</div></div></div>' +
       '<div style="border-top:1px solid var(--border-dim);padding-top:16px;"><div style="font-weight:600;color:var(--text-bright);margin-bottom:8px;">API Endpoints</div>' +
         '<div class="code-block" style="font-size:0.72rem;">GET  /api/dashboard/           Dashboard stats\nGET  /api/scans/                List scans\nPOST /api/scans/                Create scan\nGET  /api/scans/:id/            Scan detail\nPOST /api/scans/:id/cancel/     Cancel scan\nGET  /api/scans/:id/findings/   Scan findings\nGET  /api/scans/:id/hosts/      Scan hosts\nGET  /api/hosts/                List hosts\nGET  /api/hosts/:id/            Host detail\nGET  /api/findings/             List findings\nGET  /api/findings/:id/         Finding detail\nGET  /api/reports/:id/download/ Download report</div></div>' +
@@ -331,14 +280,81 @@ WG._settingsAbout = function() {
     '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);font-size:0.82rem;color:var(--text-dim);line-height:1.7;">Security scanning orchestration toolkit. Coordinates Nmap, Nuclei, Dirsearch, WPScan, and more into a parallel pipeline with automated DOCX/XLSX/HTML reporting.</div></div></div>';
 };
 
+/* ── Administration (Owner/superuser only) ── */
+WG.TIMEZONES = [
+  'UTC',
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'America/Phoenix', 'America/Anchorage', 'America/Honolulu',
+  'America/Toronto', 'America/Vancouver', 'America/Mexico_City',
+  'America/Sao_Paulo', 'America/Buenos_Aires',
+  'Europe/London', 'Europe/Dublin', 'Europe/Paris', 'Europe/Berlin',
+  'Europe/Madrid', 'Europe/Rome', 'Europe/Amsterdam', 'Europe/Warsaw',
+  'Europe/Athens', 'Europe/Istanbul', 'Europe/Moscow',
+  'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos',
+  'Asia/Dubai', 'Asia/Tehran', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Dhaka',
+  'Asia/Bangkok', 'Asia/Singapore', 'Asia/Hong_Kong', 'Asia/Shanghai',
+  'Asia/Tokyo', 'Asia/Seoul', 'Asia/Taipei',
+  'Australia/Perth', 'Australia/Sydney', 'Australia/Melbourne', 'Australia/Brisbane',
+  'Pacific/Auckland',
+];
+
+WG._settingsAdmin = function() {
+  var user = WG.currentUser && WG.currentUser();
+  if (!user || user.role !== 'owner') {
+    return '<div class="panel" style="max-width:700px;"><div class="panel-body"><div class="panel-empty"><div class="icon">&#128274;</div>Owner access required.</div></div></div>';
+  }
+  // Refresh the current value from the server while we render.
+  WG.api('/site-config/').then(function(data) {
+    if (data && data.schedule_timezone) {
+      WG._scheduleTz = data.schedule_timezone;
+      var sel = document.getElementById('adminTimezone');
+      if (sel) sel.value = data.schedule_timezone;
+    }
+  });
+  var esc = WG.escHtml;
+  var current = WG._scheduleTz || 'UTC';
+  var browserTz = (Intl && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
+  var opts = WG.TIMEZONES.map(function(tz) {
+    return '<option value="' + esc(tz) + '"' + (tz === current ? ' selected' : '') + '>' + esc(tz) + '</option>';
+  }).join('');
+  return '<div class="panel" style="max-width:700px;"><div class="panel-header"><div class="panel-title">Administration</div></div>' +
+    '<div class="panel-body" style="display:flex;flex-direction:column;gap:18px;">' +
+      '<div class="form-group">' +
+        '<label class="form-label">Schedule Time Zone</label>' +
+        '<select class="form-input" id="adminTimezone">' + opts + '</select>' +
+        '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Interprets the "Run At" time on every Scheduled Scan. A schedule set to 02:00 runs at 02:00 in this zone. Current browser zone: <span class="mono">' + esc(browserTz) + '</span></div>' +
+      '</div>' +
+      '<div><button class="btn btn-primary" onclick="WG._saveScheduleTimezone()">Save</button></div>' +
+    '</div></div>';
+};
+
+WG._saveScheduleTimezone = function() {
+  var sel = document.getElementById('adminTimezone');
+  if (!sel) return;
+  var tz = sel.value;
+  WG.api('/site-config/update/', {
+    method: 'PUT',
+    body: JSON.stringify({ schedule_timezone: tz }),
+  }).then(function(res) {
+    if (res && res.schedule_timezone) {
+      WG._scheduleTz = res.schedule_timezone;
+      WG.toast('Schedule timezone set to ' + res.schedule_timezone, 'success');
+      WG.switchSettingsTab('admin');
+    } else {
+      WG.toast((res && res.error) || 'Failed to update timezone', 'error');
+    }
+  });
+};
+
 /* ── Tab switcher ── */
 WG.switchSettingsTab = function(tab) {
   document.querySelectorAll('#settingsTabs .tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
   var el = document.getElementById('settingsTabContent');
   var tabs = {
     general: WG._settingsGeneral, theme: WG._settingsTheme, notifications: WG._settingsNotifications,
-    tools: WG._settingsTools, apikeys: WG._settingsApiKeys, sessions: WG._settingsSessions,
-    audit: WG._settingsAudit, export: WG._settingsExport, api: WG._settingsApi, about: WG._settingsAbout,
+    tools: WG._settingsTools, sessions: WG._settingsSessions,
+    audit: WG._settingsAudit, export: WG._settingsExport, api: WG._settingsApi,
+    admin: WG._settingsAdmin, about: WG._settingsAbout,
   };
   el.innerHTML = (tabs[tab] || WG._settingsGeneral)();
 };

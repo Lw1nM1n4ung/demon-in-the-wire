@@ -1,8 +1,8 @@
 /* Wire_Ghost — Hosts list page */
 
 WG.renderHosts = function() {
-  var hosts = WG.getCached('hosts', '/hosts/', 'hosts');
-  var scans = WG.getCached('scans', '/scans/', 'scans');
+  var hosts = WG.getCached('hosts', '/hosts/');
+  var scans = WG.getCached('scans', '/scans/');
   WG.fetchData('/hosts/', 'hosts').then(function(data) {
     if (data && data.length && WG.state.currentPage === 'hosts') {
       WG._cache['hosts'] = data; WG._cacheTime['hosts'] = Date.now();

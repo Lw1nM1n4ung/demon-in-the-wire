@@ -1,7 +1,7 @@
 /* Wire_Ghost — Scan Queue page */
 
 WG.renderScanQueue = function() {
-  var scans = WG.getCached('scans', '/scans/', 'scans');
+  var scans = WG.getCached('scans', '/scans/');
   var esc = WG.escHtml;
 
   var running = scans.filter(function(s) { return s.status === 'running'; });
@@ -95,7 +95,7 @@ WG.renderScanQueue = function() {
 };
 
 WG._cancelAllRunning = function() {
-  var scans = WG.getCached('scans', '/scans/', 'scans');
+  var scans = WG.getCached('scans', '/scans/');
   scans.forEach(function(s) {
     if (s.status === 'running') {
       WG.api('/scans/' + s.id + '/cancel/', { method: 'POST' });
@@ -108,7 +108,7 @@ WG._cancelAllRunning = function() {
 };
 
 WG._removeFromQueue = function(id) {
-  var scans = WG.getMock('scans');
+  var scans = [];
   var idx = scans.findIndex(function(s) { return s.id === id; });
   if (idx !== -1) { scans.splice(idx, 1); }
   WG.api('/scans/' + id + '/', { method: 'DELETE' });

@@ -1,5 +1,23 @@
 from rest_framework import serializers
-from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan
+from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset
+
+
+class AssetListSerializer(serializers.ModelSerializer):
+    """Lean serializer for the Asset inventory table on the dashboard."""
+    class Meta:
+        model = Asset
+        fields = [
+            'id', 'ip', 'port', 'protocol', 'hostname', 'os',
+            'service_name', 'service_product', 'service_version',
+            'first_seen', 'last_seen', 'status', 'risk_score',
+            'findings_count', 'critical_count', 'high_count',
+        ]
+
+
+class AssetSerializer(AssetListSerializer):
+    """Detail serializer — same fields today, reserved for future expansion."""
+    class Meta(AssetListSerializer.Meta):
+        pass
 
 
 class PortSerializer(serializers.ModelSerializer):

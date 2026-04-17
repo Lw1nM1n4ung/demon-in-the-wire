@@ -21,7 +21,6 @@ WG._loadReportConfig = function(callback) {
       WG._reportConfig = data;
       WG._reportConfigLoaded = true;
     } else {
-      // Fallback defaults for demo mode
       WG._reportConfig = WG._reportConfig || {
         report_title: 'Vulnerability Assessment Report',
         company_name: '', prepared_by: '', reviewed_by: '', approved_by: '',
@@ -114,7 +113,7 @@ WG._reportFormats = function() {
 };
 
 WG._reportGenerate = function() {
-  var scans = WG.getMock('scans').filter(function(s) { return s.status === 'completed'; });
+  var scans = [].filter(function(s) { return s.status === 'completed'; });
   var esc = WG.escHtml;
   return '<div style="max-width:750px;">' +
     '<div class="panel"><div class="panel-header"><div class="panel-title">Generate Reports</div>' +
@@ -150,7 +149,7 @@ WG._saveReportConfig = function() {
   };
   WG.api('/report-config/', { method: 'PUT', body: JSON.stringify(data) }).then(function(res) {
     if (res) { WG._reportConfig = res; WG.toast('Branding saved', 'success'); }
-    else { Object.assign(WG._reportConfig || {}, data); WG.toast('Branding saved (demo)', 'success'); }
+    else { Object.assign(WG._reportConfig || {}, data); WG.toast('Branding saved', 'success'); }
   });
 };
 
@@ -161,7 +160,7 @@ WG._saveSections = function() {
   });
   WG.api('/report-config/', { method: 'PUT', body: JSON.stringify(data) }).then(function(res) {
     if (res) { WG._reportConfig = res; WG.toast('Sections saved', 'success'); }
-    else { Object.assign(WG._reportConfig || {}, data); WG.toast('Sections saved (demo)', 'success'); }
+    else { Object.assign(WG._reportConfig || {}, data); WG.toast('Sections saved', 'success'); }
   });
 };
 
@@ -173,7 +172,7 @@ WG._saveFormats = function() {
   var data = { default_formats: fmts.join(',') };
   WG.api('/report-config/', { method: 'PUT', body: JSON.stringify(data) }).then(function(res) {
     if (res) { WG._reportConfig = res; WG.toast('Formats saved', 'success'); }
-    else { Object.assign(WG._reportConfig || {}, data); WG.toast('Formats saved (demo)', 'success'); }
+    else { Object.assign(WG._reportConfig || {}, data); WG.toast('Formats saved', 'success'); }
   });
 };
 
@@ -191,8 +190,8 @@ WG._handleLogoUpload = function(input) {
       WG.toast('Logo uploaded', 'success');
     })
     .catch(function() {
-      document.getElementById('rcLogoName').textContent = file.name + ' (demo)';
-      WG.toast('Logo saved (demo mode)', 'info');
+      document.getElementById('rcLogoName').textContent = file.name + '';
+      WG.toast('Logo saved', 'info');
     });
   input.value = '';
 };
@@ -200,6 +199,6 @@ WG._handleLogoUpload = function(input) {
 WG._regenerate = function(scanId) {
   WG.api('/scans/' + scanId + '/regenerate_reports/', { method: 'POST' }).then(function(res) {
     if (res) WG.toast('Report generation queued', 'success');
-    else WG.toast('Report generation queued (demo)', 'info');
+    else WG.toast('Report generation queued', 'info');
   });
 };

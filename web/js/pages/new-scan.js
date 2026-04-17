@@ -1,7 +1,7 @@
 /* Wire_Ghost — New Scan (full page) */
 
 WG.renderNewScan = function() {
-  var policies = (typeof WG.MOCK_POLICIES !== 'undefined') ? WG.MOCK_POLICIES : [];
+  var policies = [];
   var esc = WG.escHtml;
 
   return '' +
@@ -183,7 +183,7 @@ WG._nsUpdateType = function(type) {
 };
 
 WG._nsApplyPolicy = function(id) {
-  var p = (typeof WG.MOCK_POLICIES !== 'undefined') ? WG.MOCK_POLICIES.find(function(x) { return x.id === id; }) : null;
+  var p = (typeof [] !== 'undefined') ? [].find(function(x) { return x.id === id; }) : null;
   if (!p) return;
   document.getElementById('nsScanType').value = p.scan_type;
   document.getElementById('nsPortRange').value = p.port_range;
@@ -235,8 +235,8 @@ WG._nsLaunch = function() {
     var freq = document.getElementById('nsScheduleFreq').value;
     var time = document.getElementById('nsScheduleTime').value;
     targets.forEach(function(t) {
-      WG.MOCK_SCHEDULES.push({
-        id: WG.MOCK_SCHEDULES.length + 1,
+      [].push({
+        id: [].length + 1,
         name: name || 'Scheduled: ' + t,
         target: t,
         frequency: freq,
@@ -269,19 +269,4 @@ WG._nsLaunch = function() {
       }
     });
   });
-
-  // Also add to mock for demo mode
-  if (WG.USE_MOCK) {
-    targets.forEach(function(t) {
-      WG.MOCK.scans.unshift({
-        id: WG.MOCK.scans.length + 1, name: name || t, target: t,
-        scan_type: scanData.scan_type, status: 'running', hosts_count: 0, ports_count: 0,
-        findings_count: 0, critical_count: 0, high_count: 0, medium_count: 0, low_count: 0, info_count: 0,
-        duration_seconds: 0, created_at: new Date().toISOString(), started_at: new Date().toISOString(),
-        completed_at: null, parallelism: scanData.parallelism, report_formats: scanData.report_formats,
-      });
-    });
-    WG.toast(targets.length + ' scan(s) launched (demo)', 'success');
-    WG.navigate('scans');
-  }
 };

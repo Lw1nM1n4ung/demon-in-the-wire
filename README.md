@@ -1,175 +1,164 @@
 # Wire_Ghost
 
-Automated security scanning orchestration toolkit. Chains multiple tools into an 8-phase async pipeline -- discovers hosts, scans ports (with fallback scanners), detects web services and CMS platforms, enumerates services, runs vulnerability scans, maps known exploits, and generates multi-format reports.
+Automated security-scanning orchestration toolkit with a full web portal. Chains nmap, nuclei, naabu, masscan, httpx, wpscan, and searchsploit into an 8-phase async pipeline — discovers hosts, scans ports (with fallback scanners), detects web services and CMS platforms, enumerates services, runs vulnerability scans, maps known exploits, and generates reports. Ships with a Django REST API + JS SPA portal for scan management, Attack Surface Management dashboard, scheduled scans, and role-based access control.
 
-**v2.0.0** | Python 3.11+ | Docker
+**v2.0** · Python 3.11+ · Docker · MySQL · Redis · Celery
+
+---
 
 ## Features
 
-- **8-phase async pipeline** -- discovery, port scan, web detect, CMS scan, service enum, vuln scan, exploit detection, reporting
-- **Scanner fallback chain** -- nmap → naabu → masscan (auto-fallback when a scanner finds no ports)
-- **18-service enumeration** -- SSH, FTP, Redis, MongoDB, MySQL, PostgreSQL, SMTP, VNC, RDP, LDAP, Memcached, Elasticsearch, Docker API, Telnet, and more (pure Python, no brute force)
-- **CMS detection** -- auto-triggers WPScan when WordPress is detected
-- **External nuclei templates** -- configurable template directories with batched execution (5000/batch) to limit resource usage
-- **Version-aware exploit detection** -- searchsploit per detected software version, linked to Exploit-DB
-- **4 report formats** -- HTML, DOCX, XLSX, Interactive Dashboard
-- **Interactive dashboard** -- Chart.js charts, severity filtering, real-time search, CVE/CWE/CVSS badges, HTTP request/response evidence, curl reproduce commands
-- **Web portal** -- Django REST API + SPA frontend with authentication, scan management, scheduled scans, scan policies, report builder
-- **Docker Compose stack** -- MySQL, Redis, Celery workers, Nginx reverse proxy
-- **Pre-built Docker image** -- `callmedemon/wireghost` on Docker Hub
-- **Layered configuration** -- CLI flags > environment variables (WIREGHOST_*) > wireghost.yml > defaults
+**Scanning pipeline**
+- 8-phase async pipeline — discovery, port scan, web detect, CMS scan, service enum, vuln scan, exploit detection, reporting
+- Scanner fallback chain — nmap → naabu → masscan (auto-fallback when a scanner finds no ports)
+- 18-service enumeration — SSH, FTP, Redis, MongoDB, MySQL, PostgreSQL, SMTP, VNC, RDP, LDAP, Memcached, Elasticsearch, Docker API, Telnet, and more (pure Python, no brute force)
+- CMS detection — auto-triggers WPScan when WordPress is detected
+- External nuclei templates — configurable template directories with batched execution (5000/batch) to limit resource usage
+- Version-aware exploit detection — searchsploit per detected software version, linked to Exploit-DB
 
-## Pipeline
+**Web portal**
+- Django REST API + vanilla-JS SPA, served by nginx, orchestrated via Docker Compose (MySQL + Redis + Celery worker + Celery beat)
+- **Attack Surface Management dashboard** — KPIs (total assets, critical exposures, newly-discovered, CVEs, attack-surface score), severity trend (30-day stacked area chart), risk-by-source donut, newly-discovered list, top exposures, top technologies, filterable asset inventory. Chart.js vendored locally (CSP-safe).
+- **Asset model** — deduped `(ip, port, protocol)` inventory with `first_seen` / `last_seen` and computed `risk_score` (0-100), populated by every scan
+- Setup wizard — first-launch admin creation flow, site branding, tool check
+- Scan management — launch, list, cancel, re-run; per-scan detail view
+- Scan policies — reusable configuration templates
+- Scheduled scans — daily / weekly / biweekly / monthly, with timezone-aware "Run At" times (Owner picks the zone)
+- Reports page + report builder — DOCX, XLSX, HTML, interactive dashboard
+- Network topology — D3 force-directed graph per scan
 
+**Access control**
+- **Three roles** — Owner (one account, created by setup wizard), Engineer (operator), Viewer (read-only: Dashboard + Findings only)
+- **Data-driven permissions** — 15 permission codes stored in MySQL, mapped to roles via a `RolePermission` table; Owner uniqueness enforced at both endpoint and model-save time
+- Session auth with CSRF (Django `SameSite=Lax`); Nginx blocks `/admin` + dotfiles; strict Content-Security-Policy
+
+**Reports**
+- DOCX — professional Word document (cover page, executive summary, target subnets, live hosts, open ports, identified issues, host details)
+- XLSX — Excel workbook with host/port summary and detailed port sheets
+- HTML — self-contained static report
+- Dashboard — interactive per-scan Chart.js dashboard (severity stats, findings table, CVE/CWE/CVSS badges, HTTP request/response evidence, curl reproduce commands)
+
+---
+
+## System requirements
+
+### Minimum (small lab, single /24)
+
+| Resource | Value |
+|----------|-------|
+| CPU | 4 cores |
+| RAM | 8 GB |
+| Disk | 40 GB SSD (templates, scan output, reports) |
+| OS | Linux (Ubuntu 22.04+ / Debian 12+ tested); macOS for dev only |
+| Network | Outbound HTTPS for tool/feed updates; inbound TCP 9995 for the portal |
+
+### Recommended (regular /16 scans, multiple concurrent)
+
+| Resource | Value |
+|----------|-------|
+| CPU | 8 cores |
+| RAM | 16 GB |
+| Disk | 100 GB NVMe |
+| Network | 1 Gbps |
+
+### Software — Docker Compose path (recommended)
+
+| Tool | Version |
+|------|---------|
+| Docker Engine | 24+ |
+| Docker Compose v2 | 2.20+ |
+| A POSIX shell | bash or zsh |
+
+**That's it.** Every other dependency — Python, Django, Celery, MySQL, Redis, nginx, nmap, nuclei, naabu, masscan, httpx, searchsploit, scannerctl, fping — ships inside the compose stack.
+
+### Software — CLI-only / bare-metal path
+
+If you want to run `wireghost scan` without the portal:
+
+| Tool | Version | Required? |
+|------|---------|-----------|
+| Python | 3.11+ | ✓ |
+| pip | any modern | ✓ |
+| nmap | 7.80+ | ✓ |
+| fping | 5+ | ✓ |
+| nuclei | v3+ | recommended |
+| naabu | v2+ | optional (fallback scanner) |
+| masscan | 1.3+ | optional (second fallback) |
+| httpx (ProjectDiscovery) | any | optional (tech detection) |
+| wpscan | 3.8+ | optional (WordPress CMS) |
+| searchsploit | any | optional (exploit DB lookup) |
+| scannerctl | 23+ | optional (OpenVAS vuln scripts) |
+
+Debian/Ubuntu install line for the core deps:
+
+```bash
+sudo apt install nmap fping masscan
 ```
-Phase 1: Host Discovery        nmap -sn + fping → merge + dedupe
-Phase 2: Port Scanning         nmap -sV -sC -O → naabu → masscan (fallback chain)
-Phase 3: Web Detection         async HTTP/HTTPS probing + httpx tech-detect
-Phase 4: CMS Scanning          WordPress detection → WPScan (auto-trigger)
-Phase 5: Service Enumeration   18 services, pure Python (no brute force)
-Phase 6: Vuln Scanning         nuclei + nmap --script=vuln (parallel per host)
-Phase 7: Exploit Detection     searchsploit per detected version → Exploit-DB
-Phase 8: Report Generation     DOCX, XLSX, HTML, Interactive Dashboard
-```
 
-If nmap finds no open ports on a host, the tool automatically falls back to **naabu**, then **masscan**. As soon as any scanner finds ports, the normal pipeline continues.
+Python deps (declared in `pyproject.toml`): `typer`, `rich`, `python-docx`, `openpyxl`, `jinja2`, `aiohttp`, `pyyaml`, `defusedxml`.
 
-## Quick Start
+### Network ports
 
-### CLI
+| Port | Direction | Purpose |
+|------|-----------|---------|
+| 9995/tcp | inbound (host → portal) | Web portal (nginx) |
+| 8000/tcp | loopback only | Django API (gunicorn) |
+| 6379/tcp | loopback only | Redis |
+| 3306/tcp | container-only by default | MySQL (host mapping disabled to avoid conflicts) |
+| outbound HTTPS | egress | Nuclei templates, searchsploit DB, OpenVAS NASL updates |
+
+---
+
+## Quick start — Docker Compose (recommended)
 
 ```bash
 git clone https://github.com/Lw1nM1n4ung/demon-in-the-wire.git
 cd demon-in-the-wire
-pip install -e .
-wireghost scan 192.168.1.0/24
+
+# Secrets
+cp .env.example .env
+# Edit .env and fill in: DJANGO_SECRET_KEY, MYSQL_ROOT_PASSWORD, MYSQL_PASSWORD, REDIS_PASSWORD
+# Generate a Django key: python3 -c "import secrets; print(secrets.token_urlsafe(50))"
+
+# Launch
+docker compose up -d
 ```
 
-### Docker (standalone scanner)
+Portal is live at **http://localhost:9995**.
+
+First visit runs the setup wizard — create the Owner account, set site branding, done. The Owner can then create Engineer and Viewer users from the Users page.
+
+### Standalone scanner (Docker)
 
 ```bash
 docker pull callmedemon/wireghost
 docker run --net=host -v $(pwd)/output:/data/output callmedemon/wireghost scan 192.168.1.0/24
 ```
 
-### Docker Compose (full stack with web portal)
+---
 
-```bash
-cp .env.example .env       # fill in passwords and secret key
-docker compose up -d       # starts MySQL, Redis, API, worker, beat, portal
-```
-
-Web portal at **http://localhost:9995** -- create an account on first launch.
-
-## Install
+## Quick start — CLI (bare-metal)
 
 ```bash
 git clone https://github.com/Lw1nM1n4ung/demon-in-the-wire.git
 cd demon-in-the-wire
 pip install -e ".[dev]"
-```
 
-### System Dependencies
-
-**Required:** `nmap`, `fping`
-
-**Optional (auto-detected):** `nuclei`, `naabu`, `masscan`, `httpx`, `wpscan`, `searchsploit`, `scannerctl`
-
-```bash
-# Debian/Ubuntu
-sudo apt install nmap fping masscan
-
-# nuclei (ProjectDiscovery)
-go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-
-# naabu (ProjectDiscovery)
-go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
-
-# httpx (ProjectDiscovery)
-go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-
-# searchsploit (Exploit-DB)
-git clone https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb
-ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
-
-# wpscan (WordPress scanner)
-gem install wpscan
-```
-
-## Usage
-
-### Full Scan
-
-```bash
 wireghost scan 192.168.1.0/24
 ```
 
-### With Options
+---
+
+## CLI reference
 
 ```bash
-wireghost scan 10.0.0.0/24 \
-    --output-dir ./results \
-    --parallelism 20 \
-    --formats html,docx,dashboard \
-    --timeout 1800 \
-    --verbose
+wireghost scan <target>                    # Run full pipeline
+wireghost report <scan-dir>                # Regenerate reports from existing output
+wireghost update [--tools | --feeds | --self]   # Update binaries, vuln feeds, or wireghost itself
+wireghost config [show | init]             # Show resolved config / create wireghost.yml
 ```
 
-### External Nuclei Templates
-
-```bash
-# Run both default + external templates
-wireghost scan 10.0.0.1 --nuclei-templates /path/to/templates/
-
-# Run external templates only (skip defaults)
-wireghost scan 10.0.0.1 --nuclei-templates /path/to/templates/ --no-nuclei-default-templates
-```
-
-Large template sets (37K+) are automatically batched into chunks of 5000 to limit CPU/RAM usage.
-
-### Generate Reports from Existing Scan Data
-
-```bash
-wireghost report ./output/192.168.1.0_24 --formats dashboard,docx,xlsx
-```
-
-### Update Tools & Feeds
-
-```bash
-wireghost update            # update everything
-wireghost update --tools    # nuclei, naabu, httpx binaries + apt packages
-wireghost update --feeds    # nuclei templates + searchsploit db + OpenVAS NASL
-wireghost update --self     # git pull + pip install
-```
-
-### Configuration
-
-```bash
-wireghost config init       # create wireghost.yml from template
-wireghost config show       # display resolved configuration
-```
-
-Edit `wireghost.yml` to set defaults:
-
-```yaml
-output_dir: ./output
-parallelism: 10
-skip_nuclei: false
-skip_vuln: false
-tool_timeout: 3600
-report_formats:
-  - html
-  - docx
-  - xlsx
-report_title: "Security Assessment Summary Report"
-verbose: false
-```
-
-Config priority: **CLI flags > environment variables (`WIREGHOST_*`) > wireghost.yml > defaults**.
-
-## CLI Reference
-
-### `wireghost scan <target>`
+### `wireghost scan` flags
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -186,121 +175,153 @@ Config priority: **CLI flags > environment variables (`WIREGHOST_*`) > wireghost
 | `-v, --verbose` | Debug logging | off |
 | `-c, --config PATH` | Path to wireghost.yml | auto-detect |
 
-### `wireghost report <scan-dir>`
+### External nuclei templates
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-o, --output PATH` | Report output directory | `<scan-dir>/reports` |
-| `-f, --formats TEXT` | Report formats | `html,docx,xlsx` |
-| `--title TEXT` | Report title | auto |
+```bash
+# Run both default + external templates
+wireghost scan 10.0.0.1 --nuclei-templates /path/to/templates/
 
-### `wireghost update`
+# Run external templates only
+wireghost scan 10.0.0.1 --nuclei-templates /path/to/templates/ --no-nuclei-default-templates
+```
 
-| Flag | Description |
-|------|-------------|
-| `--tools` | Update security tool binaries |
-| `--feeds` | Update vulnerability feeds |
-| `--self` | Update wireghost (git pull + pip install) |
-| *(no flags)* | Update everything |
+Large template sets (37K+) are automatically batched into chunks of 5000.
 
-### `wireghost config [show|init]`
+For Docker Compose: drop `.tar.gz` archives into `templates/` and they'll be extracted into the api container on start.
 
-## Web Portal
+---
 
-Django REST API backend + JavaScript SPA frontend. Managed entirely through Docker Compose.
+## Web portal
 
 ### Pages
 
-Dashboard, Scans, Scan Detail, Findings, Finding Detail, Hosts, Host Detail, Reports, Report Builder, New Scan, Scan Policies, Scheduled Scans, Scan Queue, Settings, Users, Network Topology
+Dashboard (ASM view) · Scans · Scan Detail · Findings · Finding Detail · Hosts · Host Detail · Topology · New Scan · Scan Queue · Scheduled Scans · Scan Policies · Reports · Report Builder · Settings · Users (Owner only)
 
-### API Endpoints
+### Roles
+
+| Role | Can do |
+|------|--------|
+| **Owner** | Everything. Exactly **one** Owner per install, created by the setup wizard. Cannot be deleted. Cannot be demoted. |
+| **Engineer** | Run/cancel scans, manage scan policies and schedules, view all hosts/findings/assets, download reports, upload branding logo, manage their own API keys. Cannot manage users or site config. |
+| **Viewer** | Read-only: Dashboard + Findings. Cannot see Scans / Hosts / Reports pages; deep-links are silently redirected to Dashboard. |
+
+### Permission model
+
+Backed by `Permission` + `RolePermission` tables in MySQL. **15 named permission codes** (e.g. `scan:write`, `user:manage`, `site:config`, `audit:view`) are seeded by migration. Every endpoint consults `request.user.has_permission(code)` — no hardcoded role strings in the business logic. Changing what a role can do = editing a migration, not a code file.
+
+### Key API endpoints
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/dashboard/` | Aggregate scan statistics |
+| `GET /api/dashboard/` | ASM KPIs + trend + top exposures + technologies |
+| `GET /api/assets/` | Deduped asset inventory (filterable by status / min_risk / has_cve / service) |
 | `GET/POST /api/scans/` | List and create scans |
 | `GET /api/scans/<id>/` | Scan detail with hosts and findings |
 | `GET /api/hosts/` | Discovered hosts |
 | `GET /api/findings/` | Vulnerability findings (filterable) |
-| `POST /api/auth/login/` | User authentication |
-| `GET/POST /api/site-config/` | Site configuration |
-| `GET /api/report-config/` | Report customization |
+| `GET/POST /api/policies/` | Scan policies |
+| `GET/POST /api/schedules/` | Scheduled scans |
+| `POST /api/auth/login/` | User authentication (session cookie) |
+| `GET/POST /api/site-config/` | Site configuration (setup state, `schedule_timezone`) |
+| `PUT /api/site-config/update/` | Update site config (Owner only) |
+| `GET /api/audit-log/` | Audit trail (Owner only) |
+| `GET/POST /api/auth/users/` | User management (Owner only) |
 
 Full API documentation in [API.md](API.md).
 
-## Docker
+---
 
-### Pre-built Image
+## Configuration
 
-```bash
-docker pull callmedemon/wireghost
-docker run --net=host -v $(pwd)/output:/data/output callmedemon/wireghost scan <target>
+Two layers:
+
+### `.env` — secrets + deployment
+
+Required at the repo root before `docker compose up`:
+
+```env
+DJANGO_SECRET_KEY=<generate with: python3 -c "import secrets; print(secrets.token_urlsafe(50))">
+MYSQL_ROOT_PASSWORD=<pick>
+MYSQL_PASSWORD=<pick>
+REDIS_PASSWORD=<pick>
+WIREGHOST_HOST=localhost      # or your public hostname for ALLOWED_HOSTS
 ```
 
-The Docker image includes all tools pre-installed: nmap, nuclei, naabu, masscan, httpx, fping, searchsploit, scannerctl.
+### `wireghost.yml` — scan defaults (CLI path)
 
-### Docker Compose Stack
-
-```bash
-cp .env.example .env       # fill in MYSQL_PASSWORD, REDIS_PASSWORD, DJANGO_SECRET_KEY
-docker compose up -d
+```yaml
+output_dir: ./output
+parallelism: 10
+skip_nuclei: false
+skip_vuln: false
+tool_timeout: 3600
+report_formats: [html, docx, xlsx]
+report_title: "Security Assessment Summary Report"
+verbose: false
 ```
 
-| Service | Image | Description | Port |
-|---------|-------|-------------|------|
-| `db` | mysql:8.0 | MySQL database | 3306 (localhost) |
-| `redis` | redis:7-alpine | Celery broker + result backend | 6379 (localhost) |
-| `api` | web_portal/Dockerfile | Django REST API (Gunicorn) | 8000 (localhost) |
-| `worker` | web_portal/Dockerfile | Celery worker (scan execution) | -- |
-| `beat` | web_portal/Dockerfile | Celery Beat (scheduled scans) | -- |
-| `portal` | nginx:alpine | Web portal (Nginx reverse proxy) | **9995** |
-| `wireghost` | callmedemon/wireghost | Standalone scanner (tools profile) | host network |
+Config priority: **CLI flags > `WIREGHOST_*` env vars > `wireghost.yml` > defaults.**
 
-### External Nuclei Templates
+---
 
-Place `.tar.gz` template archives in the `templates/` directory. They are automatically extracted when Docker containers start.
+## Architecture
 
-```bash
-ls templates/
-# filtered-templates.tar.gz   new-templates.tar.gz   README
+```
+┌ CLI (wireghost) ───────────────────────────────┐
+│  Typer cmds: scan / report / update / config   │
+│      │                                         │
+│      └─► pipeline.orchestrator.run_pipeline    │
+└────────────────────────┬───────────────────────┘
+                         │   same async pipeline
+┌ Docker Compose stack ──┴───────────────────────┐
+│                                                │
+│  nginx:9995 ──► django api:8000 ──► mysql      │
+│         ▲              │                       │
+│         │              └─► celery worker ──┐   │
+│         │                                  │   │
+│         │              celery beat ────────┼───┤
+│         │                                  │   │
+│  static web/ SPA       redis ◄─────────────┘   │
+└────────────────────────────────────────────────┘
 ```
 
-### Standalone Tool Containers
+`pipeline.orchestrator.run_pipeline()` is the single async entry point for both the CLI and the Celery `run_scan` task. Scans persist into Django ORM; the ASM dashboard and Asset inventory read from the same tables.
 
-```bash
-docker compose run --rm wireghost scan 10.0.0.0/24
-docker compose run --rm nmap -sV -p- 10.0.0.1
-docker compose run --rm nuclei -u http://10.0.0.1
+### Pipeline phases
+
+```
+1  Host Discovery        nmap -sn + fping → merge + dedupe
+2  Port Scanning         nmap -sV -sC -O → naabu → masscan (fallback chain)
+3  Web Detection         async HTTP/HTTPS probing + httpx tech-detect
+4  CMS Scanning          WordPress detection → WPScan
+5  Service Enumeration   18 services, pure Python (no brute force)
+6  Vuln Scanning         nuclei + nmap --script=vuln (parallel per host)
+7  Exploit Detection     searchsploit per detected version → Exploit-DB
+8  Report Generation     DOCX, XLSX, HTML, Interactive Dashboard
+9  Asset Sync            upsert `Asset` rows keyed by (ip, port, protocol)
 ```
 
-## Reports
+---
 
-| Format | File | Description |
-|--------|------|-------------|
-| **HTML** | `summary.html` | Static self-contained report with severity stats, findings table, host details |
-| **Dashboard** | `dashboard.html` | Interactive report -- Chart.js severity/source charts, severity filter toggles, real-time search, sort by severity/host, CVE/CWE/CVSS badges, HTTP request/response evidence, curl reproduce commands, expandable host panels, known exploits table, detected technologies, web services, print-friendly |
-| **DOCX** | `security_report.docx` | Professional Word document -- cover page, executive summary, target subnets, live hosts, open ports, identified issues with evidence, host details |
-| **XLSX** | `ports_summary.xlsx` | Excel workbook with host/port summary and detailed port sheets |
-
-## Output Structure
+## Output structure (CLI)
 
 ```
 output/<target>/
     all/
-        live_host/live.txt         # Discovered IPs
-        web/web.txt                # Web service URLs
+        live_host/live.txt       # Discovered IPs
+        web/web.txt              # Web service URLs
     ips/<IP>/
-        nmap_xml/portscan.xml      # Nmap scan results
+        nmap_xml/portscan.xml
         web/
-            endpoints.txt          # Detected web endpoints
-            tech_detect.json       # Technology detection (httpx)
-            nuclei.json            # Nuclei web findings
+            endpoints.txt
+            tech_detect.json
+            nuclei.json
         vuln/
-            nmap_vuln.xml          # Nmap vuln script output
-            nuclei.json            # Nuclei vuln findings
-            searchsploit_*.json    # Exploit-DB matches
-        service_enum/              # Service enumeration results
-        cms/                       # CMS scan results (WPScan)
+            nmap_vuln.xml
+            nuclei.json
+            searchsploit_*.json
+        service_enum/
+        cms/
     reports/
         summary.html
         dashboard.html
@@ -308,42 +329,85 @@ output/<target>/
         ports_summary.xlsx
 ```
 
-## Architecture
+When run from the portal, output lives under `/data/output/<target>/` inside the api/worker container (via a Docker named volume `scan_output`).
 
-```
-src/wireghost/
-    cli.py                  # Typer CLI (scan, report, config, update)
-    config.py               # ScanConfig with YAML/env/CLI layering
-    models/                 # Typed dataclasses: Severity, Host, Port, Finding, ScanReport
-    parsers/                # nmap, nuclei, naabu, masscan, openvas, searchsploit, wpscan
-    pipeline/
-        orchestrator.py     # Async pipeline coordinator
-        discovery.py        # Host discovery (nmap -sn + fping)
-        portscan.py         # Port scanning with fallback chain
-        webdetect.py        # Web service detection + httpx tech-detect
-        cms_scan.py         # CMS detection + WPScan
-        service_enum.py     # 18-service enumeration (pure Python)
-        vulnscan.py         # nuclei + nmap --script=vuln + searchsploit
-    reports/
-        engine.py           # Report dispatcher
-        html_renderer.py    # Static HTML report
-        dashboard.py        # Interactive dashboard (Jinja2 + Chart.js)
-        docx_renderer.py    # Professional DOCX report
-        xlsx_renderer.py    # Excel workbook
-    utils/                  # Subprocess runner, network helpers, output tree, logging
+---
 
-web_portal/                 # Django REST API + Celery tasks
-web/                        # Frontend SPA (HTML/CSS/JS)
-```
+## Security model
 
-All parsers produce the same typed model objects. All renderers consume a single `ScanReport`. No duplication.
+- **Authentication:** Django session cookie only (HttpOnly, SameSite=Lax). No JWTs, no client-sent auth headers.
+- **Role = persisted field** on `scanner_user`, not derived from flags or hashes. `User.save()` enforces Owner uniqueness at the ORM layer.
+- **Permissions live in MySQL**, not code. Response manipulation on the client cannot grant access — every API call consults the DB-backed `has_permission(code)` check.
+- **CSRF:** enabled for all mutating requests. SameSite=Lax on session + CSRF cookies.
+- **Content-Security-Policy** via nginx: `script-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `img-src 'self' data:`, `frame-ancestors 'none'`.
+- **Django admin is blocked** at the nginx layer (`/admin` → 404) and dotfiles return 404.
+- **Static assets pinned** with `?v=N` cache-bust so updates land immediately after a deploy.
+
+---
 
 ## Tests
 
 ```bash
+# Django + portal (46 tests)
+docker compose exec api python manage.py test scanner.tests
+
+# CLI pipeline
 python -m pytest tests/ -v
 ```
 
+---
+
+## Project layout
+
+```
+src/wireghost/                  # Python package (pipeline, parsers, renderers)
+    cli.py                      # Typer CLI entry point
+    config.py                   # ScanConfig (layered: yaml → env → overrides)
+    models/                     # Severity, Host, Port, Finding, ScanReport
+    parsers/                    # nmap, nuclei, naabu, masscan, openvas, searchsploit, wpscan
+    pipeline/                   # orchestrator + phase modules
+    reports/                    # html, docx, xlsx, dashboard renderers
+    utils/                      # fs, log, process, updater, network helpers
+
+web_portal/                     # Django REST API
+    scanner/models.py           # User, Scan, Host, Port, Finding, Asset, Permission, ...
+    scanner/views.py            # ViewSets + function views with HasPerm gates
+    scanner/auth_views.py       # Auth, user management, site-config, audit log
+    scanner/tasks.py            # Celery: run_scan, check_scheduled_scans, generate_report
+    wireghost_web/              # Django project config, Celery, URLs
+    scanner/migrations/         # 10 migrations (incl. permission seed, asset backfill)
+
+web/                            # Static SPA (no framework; vanilla JS + Chart.js + D3)
+    index.html
+    css/                        # variables, layout, components, animations, light, cyberpunk
+    js/
+        lib/                    # chart.umd.min.js, d3.v7.min.js (vendored)
+        pages/                  # one module per page
+        api.js / auth.js / router.js / components.js / state.js / theme.js / utils.js
+
+docker-compose.yml              # db, redis, api, worker, beat, portal (+ tools profile)
+Dockerfile                      # Standalone scanner image (tools preinstalled)
+web_portal/Dockerfile           # Django/Celery image
+nginx.conf                      # Portal reverse proxy + CSP
+wireghost.example.yml           # Scan defaults template
+.env.example                    # Required secrets template
+```
+
+---
+
+## Updating tools and feeds
+
+```bash
+wireghost update            # update everything
+wireghost update --tools    # nuclei, naabu, httpx binaries + apt packages
+wireghost update --feeds    # nuclei templates + searchsploit db + OpenVAS NASL
+wireghost update --self     # git pull + pip install
+```
+
+Inside the compose stack, the api container downloads nuclei templates and NASL feeds at image build time; rebuild with `docker compose build --no-cache api` to refresh.
+
+---
+
 ## License
 
-For authorized security testing, penetration testing engagements, and educational purposes only.
+For authorized security testing, penetration testing engagements, and educational use only. See [LICENSE](LICENSE) if present in the repo.

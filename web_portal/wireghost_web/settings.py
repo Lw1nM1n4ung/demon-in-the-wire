@@ -174,13 +174,21 @@ STATICFILES_DIRS = [BASE_DIR / 'web']
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Cache (Redis — shared across gunicorn workers for rate limiting)
+# Cache (Redis — shared across gunicorn workers for rate limiting and permission caching)
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
         'LOCATION': os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
     }
 }
+# In test runs, substitute a local in-memory cache so tests don't depend on a live Redis.
+if 'test' in sys.argv:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'wireghost-tests',
+        }
+    }
 
 # Celery
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://:wireghost_redis_secret@localhost:6379/0')

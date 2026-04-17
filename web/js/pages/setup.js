@@ -19,6 +19,10 @@ WG.checkSetupFromServer = function() {
         WG.navigate('setup');
       }
     }
+    // Cache schedule timezone for the Settings → Administration tab default.
+    if (data && data.schedule_timezone) {
+      WG._scheduleTz = data.schedule_timezone;
+    }
   });
 };
 
@@ -131,7 +135,7 @@ WG._testDbConnection = function() {
       el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--medium-dim);border-radius:var(--radius-md);"><span style="color:var(--medium);font-weight:600;font-size:0.82rem;">&#9888; API returned error (' + res.status + ')</span></div>';
     }
   }).catch(function() {
-    el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--medium-dim);border-radius:var(--radius-md);"><span style="color:var(--medium);font-weight:600;font-size:0.82rem;">&#9888; API not reachable — will use demo mode</span></div>';
+    el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--medium-dim);border-radius:var(--radius-md);"><span style="color:var(--medium);font-weight:600;font-size:0.82rem;">&#9888; API not reachable</span></div>';
   });
 };
 
@@ -314,7 +318,7 @@ WG._setupComplete = function() {
       '<div style="text-align:left;background:var(--bg-card);border-radius:var(--radius-lg);padding:16px 20px;display:flex;flex-direction:column;gap:10px;">' +
         '<div class="setup-summary-row"><span class="setup-summary-label">Admin</span><span class="mono">' + WG.escHtml(admin.username || 'admin') + '</span></div>' +
         (branding.company_name ? '<div class="setup-summary-row"><span class="setup-summary-label">Company</span><span>' + WG.escHtml(branding.company_name) + '</span></div>' : '') +
-        '<div class="setup-summary-row"><span class="setup-summary-label">Database</span><span class="mono">' + (WG.USE_MOCK ? 'Demo Mode' : 'MySQL Connected') + '</span></div>' +
+        '<div class="setup-summary-row"><span class="setup-summary-label">Database</span><span class="mono">' + 'MySQL Connected' + '</span></div>' +
         '<div class="setup-summary-row"><span class="setup-summary-label">Tools</span><span class="mono">7/8 available</span></div>' +
       '</div>' +
     '</div>' +

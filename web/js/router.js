@@ -1,5 +1,29 @@
 /* Wire_Ghost — Router & initialization */
 
+/* Pages allowed for each role. Owner has access to everything. */
+WG._VIEWER_PAGES = { dashboard: 1, findings: 1, finding: 1, settings: 1, login: 1, setup: 1 };
+WG._ENGINEER_BLOCKED = { users: 1 };
+
+WG._canVisit = function(page) {
+  var user = WG.currentUser && WG.currentUser();
+  var role = (user && user.role) || '';
+  if (role === 'owner') return true;
+  if (role === 'engineer') return !WG._ENGINEER_BLOCKED[page];
+  // Viewer (or unknown): whitelist
+  return !!WG._VIEWER_PAGES[page];
+};
+
+WG._applySidebarRole = function() {
+  var user = WG.currentUser && WG.currentUser();
+  var role = (user && user.role) || '';
+  document.querySelectorAll('[data-role]').forEach(function(el) {
+    var req = el.getAttribute('data-role');
+    var ok = (req === 'owner' && role === 'owner')
+          || (req === 'engineer+' && (role === 'owner' || role === 'engineer'));
+    el.style.display = ok ? '' : 'none';
+  });
+};
+
 WG.navigate = function(page, params) {
   params = params || {};
   var hash = params.id ? '#' + page + '/' + params.id : '#' + page;
@@ -38,6 +62,12 @@ WG.render = function() {
 
   // If logged in but on login page, redirect to dashboard
   if (WG.isLoggedIn() && route.page === 'login') {
+    window.location.hash = '#dashboard';
+    return;
+  }
+
+  // Role-based page gate: silently redirect to dashboard if role can't visit this page.
+  if (WG.isLoggedIn() && !WG._canVisit(route.page)) {
     window.location.hash = '#dashboard';
     return;
   }
@@ -92,6 +122,9 @@ WG.render = function() {
     if (urole) urole.textContent = user.role || '';
   }
 
+  // Apply role-based sidebar visibility (hide nav items the user isn't allowed to see).
+  WG._applySidebarRole();
+
   // Update sidebar active state
   document.querySelectorAll('.sidebar-item[data-page]').forEach(function(el) {
     el.classList.toggle('active', el.dataset.page === route.page);
@@ -118,6 +151,10 @@ WG.render = function() {
 
   var renderFn = pages[route.page] || WG.renderDashboard;
   var main = document.getElementById('mainContent');
+
+  // Destroy any lingering Chart.js instances from the previous page so the
+  // canvas nodes are garbage-collected with the replaced DOM.
+  if (WG._destroyCharts) WG._destroyCharts();
 
   // Smooth page transition
   main.style.animation = 'none';
@@ -175,12 +212,7 @@ function _initEvents() {
   // Check API connectivity (use unauthenticated endpoint)
   WG.api('/auth/csrf/').then(function(data) {
     var el = document.getElementById('topbarStatus');
-    if (data && data.csrf) {
-      WG.USE_MOCK = false;
-      if (el) el.textContent = 'API Connected';
-    } else {
-      if (el) el.textContent = 'Demo Mode';
-    }
+    if (el) el.textContent = (data && data.csrf) ? 'Connected' : 'Disconnected';
   });
 
   // Check setup state from server

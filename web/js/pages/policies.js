@@ -1,16 +1,8 @@
 /* Wire_Ghost — Scan Policies (API-backed with mock fallback) */
 
-WG.MOCK_POLICIES = [
-  { id: '0196aaab-0001-7000-8000-000000000001', name: 'Full Assessment', description: 'All scanners enabled — maximum depth and coverage', scan_type: 'full', parallelism: 10, timeout: 3600, port_range: '1-65535', tools: { nmap: true, nuclei: true, dirsearch: true, searchsploit: true, wpscan: true, service_enum: true, openvas: false }, version_detect: true, os_detect: true, severity_filter: 'all', report_formats: 'dashboard,docx,xlsx', is_default: true, created_at: '2026-03-15T10:00:00Z' },
-  { id: '0196aaab-0001-7000-8000-000000000002', name: 'Quick Recon', description: 'Fast port scan + nuclei critical/high only for rapid triage', scan_type: 'quick', parallelism: 20, timeout: 1800, port_range: '1-10000', tools: { nmap: true, nuclei: true, dirsearch: false, searchsploit: false, wpscan: false, service_enum: false, openvas: false }, version_detect: true, os_detect: false, severity_filter: 'critical,high', report_formats: 'dashboard', is_default: false, created_at: '2026-03-20T14:00:00Z' },
-  { id: '0196aaab-0001-7000-8000-000000000003', name: 'Web Application', description: 'Web-focused scanning with directory brute force and CMS detection', scan_type: 'web', parallelism: 10, timeout: 5400, port_range: '80,443,8080,8443,8000,3000', tools: { nmap: true, nuclei: true, dirsearch: true, searchsploit: false, wpscan: true, service_enum: false, openvas: false }, version_detect: true, os_detect: false, severity_filter: 'all', report_formats: 'dashboard,docx', is_default: false, created_at: '2026-04-01T09:00:00Z' },
-  { id: '0196aaab-0001-7000-8000-000000000004', name: 'Service Audit', description: 'Service enumeration — check default creds, banners, misconfigs', scan_type: 'service', parallelism: 5, timeout: 2400, port_range: '1-65535', tools: { nmap: true, nuclei: false, dirsearch: false, searchsploit: true, wpscan: false, service_enum: true, openvas: false }, version_detect: true, os_detect: true, severity_filter: 'all', report_formats: 'dashboard,xlsx', is_default: false, created_at: '2026-04-05T11:00:00Z' },
-  { id: '0196aaab-0001-7000-8000-000000000005', name: 'Stealth Scan', description: 'SYN scan only, no scripts, low parallelism for quiet recon', scan_type: 'port', parallelism: 2, timeout: 7200, port_range: '1-10000', tools: { nmap: true, nuclei: false, dirsearch: false, searchsploit: false, wpscan: false, service_enum: false, openvas: false }, version_detect: false, os_detect: false, severity_filter: 'all', report_formats: 'xlsx', is_default: false, created_at: '2026-04-08T16:00:00Z' },
-];
-
 WG._getPolicies = function() {
-  var data = WG.getCached('policies', '/policies/', 'policies');
-  return (data && data.length) ? data : WG.MOCK_POLICIES;
+  var data = WG.getCached('policies', '/policies/');
+  return data || [];
 };
 
 WG.renderPolicies = function() {

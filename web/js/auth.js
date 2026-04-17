@@ -31,7 +31,7 @@ WG.verifySession = function() {
       var name = data.name || data.username;
       WG.setSession({
         id: data.id, username: data.username, name: name,
-        email: data.email || '', role: data.role || 'analyst',
+        email: data.email || '', role: data.role || 'engineer',
         avatar: name.split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().substring(0, 2),
       });
       return true;
@@ -52,13 +52,12 @@ WG.login = async function(username, password) {
     });
     if (res.ok) {
       var data = await res.json();
-      WG.USE_MOCK = false;
       var statusEl = document.getElementById('topbarStatus');
-      if (statusEl) statusEl.textContent = 'API Connected';
+      if (statusEl) statusEl.textContent = 'Connected';
       var name = data.name || data.username;
       WG.setSession({
         id: data.id, username: data.username, name: name,
-        email: data.email || '', role: data.role || 'analyst',
+        email: data.email || '', role: data.role || 'engineer',
         avatar: name.split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().substring(0, 2),
       });
       return true;
@@ -68,12 +67,6 @@ WG.login = async function(username, password) {
     return false;
   }
 };
-
-/* Mock data fallbacks for settings tabs */
-WG.MOCK_USERS = WG.MOCK_USERS || [];
-WG.MOCK_SESSIONS = WG.MOCK_SESSIONS || [];
-WG.MOCK_API_KEYS = WG.MOCK_API_KEYS || [];
-WG.MOCK_AUDIT_LOG = WG.MOCK_AUDIT_LOG || [];
 
 WG.logout = function() {
   fetch(WG.API_BASE + '/auth/logout/', { method: 'POST', credentials: 'include' }).catch(function() {});

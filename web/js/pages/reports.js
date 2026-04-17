@@ -1,8 +1,8 @@
 /* Wire_Ghost — Reports page */
 
 WG.renderReports = function() {
-  var reports = WG.getMock('reports');
-  var scans = WG.getCached('scans', '/scans/', 'scans');
+  var reports = [];
+  var scans = WG.getCached('scans', '/scans/');
   // Collect reports from scans that have nested reports
   if (!reports.length && scans.length) {
     scans.forEach(function(s) { if (s.reports) reports = reports.concat(s.reports.map(function(r) { r.scan = s.id; return r; })); });

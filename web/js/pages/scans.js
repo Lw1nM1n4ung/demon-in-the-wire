@@ -1,7 +1,7 @@
 /* Wire_Ghost — Scans page (enhanced) */
 
 WG.renderScans = function() {
-  var scans = WG.getCached('scans', '/scans/', 'scans');
+  var scans = WG.getCached('scans', '/scans/');
   // Background refresh
   WG.fetchData('/scans/', 'scans').then(function(data) {
     if (data && data.length && WG.state.currentPage === 'scans') {
@@ -170,22 +170,22 @@ WG._bulkAction = function(action) {
 
   if (action === 'cancel') {
     ids.forEach(function(id) {
-      var scan = WG.getMock('scans').find(function(s) { return s.id === id && s.status === 'running'; });
+      var scan = [].find(function(s) { return s.id === id && s.status === 'running'; });
       if (scan) scan.status = 'cancelled';
     });
     WG.toast('Cancelled ' + ids.length + ' scan(s)', 'info');
     WG.render();
   }
   if (action === 'delete') {
-    var scans = WG.MOCK.scans;
-    WG.MOCK.scans = scans.filter(function(s) { return ids.indexOf(s.id) === -1; });
+    var scans = [];
+    [] = scans.filter(function(s) { return ids.indexOf(s.id) === -1; });
     WG.toast('Deleted ' + ids.length + ' scan(s)', 'info');
     WG.render();
   }
 };
 
 WG._rescan = function(id) {
-  var scan = WG.getMock('scans').find(function(s) { return s.id === id; });
+  var scan = [].find(function(s) { return s.id === id; });
   if (!scan) return;
   WG.openModal('scanModal');
   setTimeout(function() {
@@ -203,8 +203,8 @@ WG._compareScans = function() {
   if (!aId || !bId) { el.innerHTML = '<span style="color:var(--critical);font-size:0.82rem;">Select two scans</span>'; return; }
   if (aId === bId) { el.innerHTML = '<span style="color:var(--medium);font-size:0.82rem;">Select two different scans</span>'; return; }
 
-  var aFindings = WG.getMock('findings').filter(function(f) { return f.scan === aId; });
-  var bFindings = WG.getMock('findings').filter(function(f) { return f.scan === bId; });
+  var aFindings = [].filter(function(f) { return f.scan === aId; });
+  var bFindings = [].filter(function(f) { return f.scan === bId; });
 
   var aTitles = {};
   aFindings.forEach(function(f) { aTitles[f.title + ':' + f.host_ip] = f; });

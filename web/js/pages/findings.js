@@ -1,7 +1,7 @@
 /* Wire_Ghost — Global findings page */
 
 WG.renderFindings = function() {
-  var findings = WG.getCached('findings', '/findings/', 'findings');
+  var findings = WG.getCached('findings', '/findings/');
   WG.fetchData('/findings/', 'findings').then(function(data) {
     if (data && data.length && WG.state.currentPage === 'findings') {
       WG._cache['findings'] = data; WG._cacheTime['findings'] = Date.now();
@@ -56,7 +56,6 @@ WG.filterFindings = function() {
   // Also fetch filtered from API if connected (debounced)
   clearTimeout(WG._findingsFilterTimer);
   WG._findingsFilterTimer = setTimeout(function() {
-    if (WG.USE_MOCK) return;
     var params = [];
     if (sev) params.push('severity=' + sev);
     if (source) params.push('source=' + source);

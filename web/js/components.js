@@ -17,21 +17,6 @@ WG.sevBarHtml = function(scan) {
     '</div>';
 };
 
-WG.sevDistHtml = function(items, total) {
-  return items.map(function(s) {
-    var pct = total ? (s.count / total * 100).toFixed(1) : 0;
-    return '<div class="sev-dist-item">' +
-      '<span class="sev-dot ' + s.cls + '"></span>' +
-      '<span class="sev-dist-name">' + s.name + '</span>' +
-      '<span class="sev-dist-count">' + s.count + '</span>' +
-      '<span class="sev-dist-pct">' + pct + '%</span>' +
-      '</div>' +
-      '<div style="padding:0 0 8px;">' +
-      '<div class="sev-dist-bar"><div class="sev-dist-bar-fill" style="width:' + pct + '%;background:' + s.color + ';"></div></div>' +
-      '</div>';
-  }).join('');
-};
-
 /* Global search handler */
 WG.handleGlobalSearch = function(query) {
   var results = document.getElementById('searchResults');
@@ -39,14 +24,17 @@ WG.handleGlobalSearch = function(query) {
   var q = query.toLowerCase();
   var esc = WG.escHtml;
 
-  var mf = WG.getMock('findings').filter(function(f) {
-    return f.title.toLowerCase().includes(q) || f.host_ip.includes(q) || (f.cve || '').toLowerCase().includes(q);
+  // Search the in-memory cache populated by recent page visits. Sections stay
+  // empty if a category hasn't been loaded yet in this session.
+  var _arr = function(k) { var v = WG._cache[k]; return Array.isArray(v) ? v : []; };
+  var mf = _arr('findings').filter(function(f) {
+    return (f.title || '').toLowerCase().includes(q) || (f.host_ip || '').includes(q) || (f.cve || '').toLowerCase().includes(q);
   }).slice(0, 5);
-  var mh = WG.getMock('hosts').filter(function(h) {
-    return h.ip.includes(q) || (h.hostname || '').toLowerCase().includes(q);
+  var mh = _arr('hosts').filter(function(h) {
+    return (h.ip || '').includes(q) || (h.hostname || '').toLowerCase().includes(q);
   }).slice(0, 5);
-  var ms = WG.getMock('scans').filter(function(s) {
-    return s.name.toLowerCase().includes(q) || s.target.includes(q);
+  var ms = _arr('scans').filter(function(s) {
+    return (s.name || '').toLowerCase().includes(q) || (s.target || '').includes(q);
   }).slice(0, 3);
 
   var html = '';
@@ -101,20 +89,12 @@ WG.launchScan = function() {
   };
 
   WG.api('/scans/', { method: 'POST', body: JSON.stringify(scanData) }).then(function(res) {
-    if (res) {
+    if (res && res.id) {
       WG.toast('Scan launched: ' + target, 'success');
+      WG.invalidateCache('scans');
       WG.navigate('scan', { id: res.id });
     } else {
-      var newId = WG.MOCK.scans.length + 1;
-      WG.MOCK.scans.unshift({
-        id: newId, name: scanData.name, target: scanData.target, scan_type: scanData.scan_type,
-        status: 'pending', hosts_count: 0, ports_count: 0, findings_count: 0,
-        critical_count: 0, high_count: 0, medium_count: 0, low_count: 0, info_count: 0,
-        duration_seconds: 0, created_at: new Date().toISOString(),
-        started_at: null, completed_at: null, parallelism: scanData.parallelism, report_formats: scanData.report_formats,
-      });
-      WG.toast('Scan queued (demo mode): ' + target, 'success');
-      WG.navigate('scans');
+      WG.toast((res && res.error) || 'Scan launch failed', 'error');
     }
   });
 
@@ -125,22 +105,20 @@ WG.launchScan = function() {
 
 WG.cancelScan = function(id) {
   WG.api('/scans/' + id + '/cancel/', { method: 'POST' }).then(function(res) {
-    if (!res && !WG.USE_MOCK) { WG.toast('Cancel failed', 'error'); return; }
-    var scan = WG.MOCK.scans.find(function(s) { return s.id === id; });
-    if (scan) scan.status = 'cancelled';
+    if (!res) { WG.toast('Cancel failed', 'error'); return; }
     WG.toast('Scan cancelled', 'info');
+    WG.invalidateCache('scans');
     WG.render();
   });
 };
 
 WG.downloadReport = function(id) {
-  if (WG.USE_MOCK) { WG.toast('Download unavailable in demo mode', 'info'); return; }
   window.open(WG.API_BASE + '/reports/' + id + '/download/', '_blank');
 };
 
 WG.testApi = function() {
   WG.api('/dashboard/').then(function(res) {
     if (res) WG.toast('API connected', 'success');
-    else WG.toast('API unreachable — using demo data', 'error');
+    else WG.toast('API unreachable', 'error');
   });
 };

@@ -9,9 +9,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from scanner.authentication import CsrfExemptAuth
 
-from scanner.models import SiteConfig, UserPreference, ApiKey, AuditLog
+from scanner.models import SiteConfig, UserPreference, AuditLog
 import re
-import secrets
 
 class InputValidationError(Exception):
     """Raised when whitelist validation fails."""
@@ -25,7 +24,6 @@ _PATTERNS = {
     'company':  re.compile(r"^[a-zA-Z0-9 &.,'\-()]+$"),
     'title':    re.compile(r"^[a-zA-Z0-9 &.,:'\-()]+$"),
     'color':    re.compile(r'^#[0-9a-fA-F]{6}$'),
-    'key_name': re.compile(r'^[a-zA-Z0-9 _\-]+$'),
     'text':     re.compile(r"^[a-zA-Z0-9 &.,;:'\-()@#/\n\r]+$"),
 }
 
@@ -50,7 +48,7 @@ _LOGIN_MAX = 10  # max attempts per window
 
 def _serialize_user(u):
     """Serialize a Django User to dict."""
-    role = 'admin' if u.is_superuser else ('analyst' if u.is_staff else 'viewer')
+    role = getattr(u, 'role', None) or 'viewer'
     name = u.get_full_name() or u.username
     avatar = ''.join([w[0] for w in name.split()[:2]]).upper() or 'U'
     return {
@@ -125,18 +123,18 @@ def auth_me(request):
 
 @api_view(['GET'])
 def auth_users(request):
-    """List all users (admin only)."""
-    if not request.user.is_superuser:
-        return Response({'error': 'Admin only'}, status=403)
+    """List all users. Requires user:manage permission."""
+    if not request.user.has_permission('user:manage'):
+        return Response({'error': 'Not authorized'}, status=403)
     users = [_serialize_user(u) for u in User.objects.all().order_by('-date_joined')]
     return Response(users)
 
 
 @api_view(['POST'])
 def auth_user_create(request):
-    """Create a new user (admin only)."""
-    if not request.user.is_superuser:
-        return Response({'error': 'Admin only'}, status=403)
+    """Create a new user. Requires user:manage permission."""
+    if not request.user.has_permission('user:manage'):
+        return Response({'error': 'Not authorized'}, status=403)
 
     try:
         username = _wl(request.data.get('username', '').strip(), 'username', 150)
@@ -160,29 +158,35 @@ def auth_user_create(request):
     except Exception as e:
         return Response({'error': '; '.join(e.messages)}, status=400)
 
+    if role not in ('engineer', 'viewer'):
+        return Response({'error': 'Role must be engineer or viewer. Owner is fixed to the setup account.'}, status=400)
+
     parts = name.split(' ', 1) if name else [username, '']
     user = User.objects.create_user(
         username=username, password=password, email=email,
         first_name=parts[0], last_name=parts[1] if len(parts) > 1 else '',
     )
     user.is_active = (status == 'active')
-    user.is_superuser = (role == 'admin')
-    user.is_staff = (role in ('admin', 'analyst'))
-    user.save()
+    user.role = role
+    user.save()  # save() syncs is_superuser / is_staff to role
 
     return Response(_serialize_user(user), status=201)
 
 
 @api_view(['PUT'])
 def auth_user_update(request, user_id):
-    """Update a user (admin only)."""
-    if not request.user.is_superuser:
-        return Response({'error': 'Admin only'}, status=403)
+    """Update a user. Requires user:manage permission."""
+    if not request.user.has_permission('user:manage'):
+        return Response({'error': 'Not authorized'}, status=403)
 
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=404)
+
+    # Protect the Owner account from role change.
+    if user.role == 'owner' and 'role' in request.data and request.data['role'] != 'owner':
+        return Response({'error': "The Owner's role cannot be changed."}, status=400)
 
     try:
         if 'name' in request.data:
@@ -208,9 +212,10 @@ def auth_user_update(request, user_id):
             return Response({'error': '; '.join(e.messages)}, status=400)
         user.set_password(request.data['password'])
     if 'role' in request.data:
-        role = request.data['role']
-        user.is_superuser = (role == 'admin')
-        user.is_staff = (role in ('admin', 'analyst'))
+        new_role = request.data['role']
+        if new_role not in ('engineer', 'viewer'):
+            return Response({'error': 'Role must be engineer or viewer. Owner is fixed.'}, status=400)
+        user.role = new_role
     if 'status' in request.data:
         user.is_active = (request.data['status'] == 'active')
 
@@ -220,9 +225,9 @@ def auth_user_update(request, user_id):
 
 @api_view(['DELETE'])
 def auth_user_delete(request, user_id):
-    """Delete a user (admin only, cannot delete self)."""
-    if not request.user.is_superuser:
-        return Response({'error': 'Admin only'}, status=403)
+    """Delete a user. Requires user:manage permission. Cannot delete self."""
+    if not request.user.has_permission('user:manage'):
+        return Response({'error': 'Not authorized'}, status=403)
 
     if str(request.user.id) == str(user_id):
         return Response({'error': 'Cannot delete yourself'}, status=400)
@@ -231,6 +236,9 @@ def auth_user_delete(request, user_id):
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=404)
+
+    if user.role == 'owner':
+        return Response({'error': 'Cannot delete the Owner account.'}, status=400)
 
     name = user.get_full_name() or user.username
     user.delete()
@@ -248,6 +256,39 @@ def site_config(request):
         'setup_complete': config.setup_complete,
         'setup_completed_at': config.setup_completed_at.isoformat() if config.setup_completed_at else None,
         'setup_completed_by': config.setup_completed_by,
+        'schedule_timezone': config.schedule_timezone,
+    })
+
+
+@api_view(['PUT'])
+def update_site_config(request):
+    """Update site-wide config. Requires site:config permission."""
+    if not request.user.has_permission('site:config'):
+        return Response({'error': 'Not authorized'}, status=403)
+
+    config = SiteConfig.get()
+    changed = []
+
+    if 'schedule_timezone' in request.data:
+        from zoneinfo import available_timezones
+        tz = str(request.data.get('schedule_timezone', ''))[:64]
+        if tz not in available_timezones():
+            return Response({'error': f'Unknown timezone: {tz}'}, status=400)
+        if tz != config.schedule_timezone:
+            config.schedule_timezone = tz
+            changed.append(f'schedule_timezone={tz}')
+
+    if changed:
+        config.save()
+        ip = request.META.get('REMOTE_ADDR', '')
+        actor = request.user.get_full_name() or request.user.username
+        AuditLog.log(actor, 'siteconfig.update', '; '.join(changed), 'config', ip)
+
+    return Response({
+        'setup_complete': config.setup_complete,
+        'setup_completed_at': config.setup_completed_at.isoformat() if config.setup_completed_at else None,
+        'setup_completed_by': config.setup_completed_by,
+        'schedule_timezone': config.schedule_timezone,
     })
 
 
@@ -305,6 +346,8 @@ def setup_admin(request):
         username=username, password=password, email=email,
         first_name=parts[0], last_name=parts[1] if len(parts) > 1 else '',
     )
+    user.role = 'owner'
+    user.save()
 
     # Atomically mark setup complete in the same transaction as admin creation
     config = SiteConfig.get()
@@ -458,68 +501,13 @@ def revoke_all_sessions(request):
     return Response({'status': 'ok', 'revoked': count})
 
 
-# ═══════════════ API Keys ═══════════════
-
-@api_view(['GET'])
-def list_api_keys(request):
-    """List API keys for current user (admin sees all)."""
-    if request.user.is_superuser:
-        keys = ApiKey.objects.all()
-    else:
-        keys = ApiKey.objects.filter(user=request.user)
-    return Response([{
-        'id': str(k.id), 'name': k.name,
-        'key': k.key[:10] + '...' + k.key[-4:],  # masked
-        'scopes': k.scopes,
-        'last_used': k.last_used.isoformat() if k.last_used else None,
-        'created_at': k.created_at.isoformat(),
-        'user': k.user.username,
-    } for k in keys])
-
-
-@api_view(['POST'])
-def create_api_key(request):
-    """Generate a new API key."""
-    try:
-        name = _wl(request.data.get('name', '').strip(), 'key_name', 100)
-    except InputValidationError as e:
-        return Response({'error': str(e)}, status=400)
-    if not name:
-        return Response({'error': 'Name required'}, status=400)
-    VALID_SCOPES = {'scans:read', 'scans:write', 'findings:read', 'hosts:read', 'dashboard:read', 'reports:read'}
-    raw_scopes = request.data.get('scopes', 'scans:read,findings:read')
-    scopes = ','.join(s for s in raw_scopes.split(',') if s.strip() in VALID_SCOPES) or 'scans:read,findings:read'
-    key = 'wg_sk_' + secrets.token_hex(24)
-    api_key = ApiKey.objects.create(user=request.user, name=name, key=key, scopes=scopes)
-    AuditLog.log(request.user.get_full_name() or request.user.username, 'apikey.create', f'Created API key: {name}', 'admin')
-    return Response({
-        'id': str(api_key.id), 'name': name, 'key': key,  # show full key only on creation
-        'scopes': scopes, 'created_at': api_key.created_at.isoformat(),
-    }, status=201)
-
-
-@api_view(['DELETE'])
-def revoke_api_key(request, key_id):
-    """Revoke (delete) an API key."""
-    try:
-        key = ApiKey.objects.get(id=key_id)
-        if not request.user.is_superuser and key.user != request.user:
-            return Response({'error': 'Not authorized'}, status=403)
-        name = key.name
-        key.delete()
-        AuditLog.log(request.user.get_full_name() or request.user.username, 'apikey.revoke', f'Revoked API key: {name}', 'admin')
-        return Response({'status': 'revoked', 'name': name})
-    except ApiKey.DoesNotExist:
-        return Response({'error': 'Key not found'}, status=404)
-
-
 # ═══════════════ Audit Log ═══════════════
 
 @api_view(['GET'])
 def audit_log(request):
-    """List audit log entries (admin only)."""
-    if not request.user.is_superuser:
-        return Response({'error': 'Admin only'}, status=403)
+    """List audit log entries. Requires audit:view permission."""
+    if not request.user.has_permission('audit:view'):
+        return Response({'error': 'Not authorized'}, status=403)
 
     log_type = request.query_params.get('type', '')
     try:

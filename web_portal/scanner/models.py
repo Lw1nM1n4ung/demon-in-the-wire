@@ -17,10 +17,116 @@ SITE_CONFIG_UUID = uuid.UUID('00000000-0000-7000-8000-000000000002')
 # ═══════════════ Custom User ═══════════════
 
 class User(AbstractUser):
+    ROLE_OWNER = 'owner'
+    ROLE_ENGINEER = 'engineer'
+    ROLE_VIEWER = 'viewer'
+    ROLE_CHOICES = [
+        (ROLE_OWNER, 'Owner'),
+        (ROLE_ENGINEER, 'Engineer'),
+        (ROLE_VIEWER, 'Viewer'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_VIEWER)
 
     class Meta:
         db_table = 'scanner_user'
+
+    @property
+    def is_owner(self):
+        return self.role == self.ROLE_OWNER
+
+    @property
+    def is_engineer(self):
+        return self.role == self.ROLE_ENGINEER
+
+    @property
+    def is_viewer(self):
+        return self.role == self.ROLE_VIEWER
+
+    def has_permission(self, code):
+        """Does this user's role grant the given permission code?
+
+        Uses a per-role Redis cache (1 hour TTL) to avoid a DB lookup on
+        every request. Cache is invalidated implicitly via TTL; callers
+        that mutate RolePermission should call `User.invalidate_perm_cache(role)`.
+        """
+        from django.core.cache import cache
+        key = f'perms:{self.role}'
+        perms = cache.get(key)
+        if perms is None:
+            perms = set(
+                RolePermission.objects.filter(role=self.role)
+                                       .values_list('permission__code', flat=True)
+            )
+            cache.set(key, perms, 3600)
+        return code in perms
+
+    @classmethod
+    def invalidate_perm_cache(cls, role=None):
+        """Drop cached permission sets for one role (or all if role is None)."""
+        from django.core.cache import cache
+        if role:
+            cache.delete(f'perms:{role}')
+        else:
+            for r, _ in cls.ROLE_CHOICES:
+                cache.delete(f'perms:{r}')
+
+    def save(self, *args, **kwargs):
+        # Reconcile role when callers use Django's built-in create_superuser/create_user
+        # with is_superuser=True: treat the intent as Owner (only for newly-created rows
+        # so that role changes on existing users aren't silently overridden).
+        # NOTE: `self.pk is None` doesn't work here because UUIDField default runs at
+        # instance construction time; use Django's adding flag instead.
+        is_new = getattr(self._state, 'adding', self.pk is None)
+        if is_new and self.is_superuser and self.role == self.ROLE_VIEWER:
+            self.role = self.ROLE_OWNER
+
+        # Enforce: at most one Owner ever.
+        if self.role == self.ROLE_OWNER:
+            from django.core.exceptions import ValidationError
+            clashes = type(self).objects.filter(role=self.ROLE_OWNER).exclude(pk=self.pk)
+            if clashes.exists():
+                raise ValidationError('Only one Owner account is permitted.')
+
+        # Keep Django's built-in flags mirrored to the role so Django admin and
+        # any legacy is_superuser/is_staff checks behave consistently.
+        self.is_superuser = (self.role == self.ROLE_OWNER)
+        self.is_staff = self.role in (self.ROLE_OWNER, self.ROLE_ENGINEER)
+        super().save(*args, **kwargs)
+
+
+# ═══════════════ Permissions (data-driven RBAC) ═══════════════
+
+class Permission(models.Model):
+    """A single named capability (e.g. 'scan:write'). Mapped to roles via RolePermission."""
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    code = models.CharField(max_length=64, unique=True)
+    name = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['code']
+
+    def __str__(self):
+        return self.code
+
+
+class RolePermission(models.Model):
+    """Which permissions each role holds. Seeded by migration; edit via migration only."""
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    role = models.CharField(max_length=16, choices=User.ROLE_CHOICES)
+    permission = models.ForeignKey(Permission, on_delete=models.CASCADE, related_name='role_assignments')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = (('role', 'permission'),)
+        indexes = [models.Index(fields=['role'])]
+        ordering = ['role', 'permission__code']
+
+    def __str__(self):
+        return f"{self.role} → {self.permission.code}"
 
 
 # ═══════════════ Scanner Models ═══════════════
@@ -234,6 +340,8 @@ class SiteConfig(models.Model):
     setup_complete = models.BooleanField(default=False)
     setup_completed_at = models.DateTimeField(null=True, blank=True)
     setup_completed_by = models.CharField(max_length=255, blank=True)
+    # IANA zone used to interpret ScheduledScan.time (e.g. "02:00" means 02:00 in this zone).
+    schedule_timezone = models.CharField(max_length=64, default='UTC')
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -277,23 +385,6 @@ class UserPreference(models.Model):
     def for_user(cls, user):
         obj, _ = cls.objects.get_or_create(user=user)
         return obj
-
-
-class ApiKey(models.Model):
-    """API keys for programmatic access."""
-    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='api_keys')
-    name = models.CharField(max_length=255)
-    key = models.CharField(max_length=64, unique=True)
-    scopes = models.CharField(max_length=500, default='scans:read,findings:read')
-    last_used = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"{self.name} ({self.user.username})"
 
 
 class AuditLog(models.Model):
@@ -378,3 +469,57 @@ class ScheduledScan(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.frequency})"
+
+
+# ═══════════════ Attack Surface — Asset aggregate ═══════════════
+
+class Asset(models.Model):
+    """Deduped inventory of (ip, port, protocol) seen across every scan.
+
+    One row per unique network asset. Populated by `_sync_assets` after each
+    scan writes its findings. Drives the ASM dashboard's KPIs and trend panels.
+    """
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('closed', 'Closed'),
+        ('filtered', 'Filtered'),
+        ('inactive', 'Inactive'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    ip = models.CharField(max_length=45)           # IPv4 or IPv6 text form
+    port = models.IntegerField(null=True, blank=True)
+    protocol = models.CharField(max_length=8, default='tcp')
+
+    hostname = models.CharField(max_length=255, blank=True)
+    os = models.CharField(max_length=128, blank=True)
+    service_name = models.CharField(max_length=64, blank=True)
+    service_product = models.CharField(max_length=128, blank=True)
+    service_version = models.CharField(max_length=64, blank=True)
+
+    first_seen = models.DateTimeField()
+    last_seen = models.DateTimeField()
+    last_scan = models.ForeignKey(
+        Scan, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assets_last_scanned',
+    )
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='open')
+    risk_score = models.IntegerField(default=0)        # 0..100
+    findings_count = models.IntegerField(default=0)
+    critical_count = models.IntegerField(default=0)
+    high_count = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = (('ip', 'port', 'protocol'),)
+        indexes = [
+            models.Index(fields=['last_seen']),
+            models.Index(fields=['first_seen']),
+            models.Index(fields=['status']),
+            models.Index(fields=['risk_score']),
+            models.Index(fields=['ip']),
+        ]
+        ordering = ['-risk_score', '-last_seen']
+
+    def __str__(self):
+        return f"{self.ip}:{self.port}/{self.protocol}"

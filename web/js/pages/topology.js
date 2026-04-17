@@ -26,7 +26,7 @@ WG._topoState = { colorMode: 'service', simulation: null, svg: null, data: null,
 /* ═══════════════ PAGE RENDER ═══════════════ */
 
 WG.renderTopology = function(scanId) {
-  var scans = WG.getCached('scans', '/scans/', 'scans');
+  var scans = WG.getCached('scans', '/scans/');
   var esc = WG.escHtml;
   var completedScans = scans.filter(function(s) { return s.status === 'completed'; });
 
@@ -115,8 +115,6 @@ WG._topoLoadScan = function(scanId) {
   WG.api('/scans/' + scanId + '/topology/').then(function(data) {
     if (data && data.nodes) {
       WG._topoRenderGraph(data);
-    } else if (WG.MOCK && WG.MOCK['topology_' + scanId]) {
-      WG._topoRenderGraph(WG.MOCK['topology_' + scanId]);
     } else {
       if (empty) empty.textContent = 'No topology data available for this scan';
     }

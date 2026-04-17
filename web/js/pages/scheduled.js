@@ -2,15 +2,9 @@
    Note: All user-supplied values are escaped via WG.escHtml() before rendering.
    innerHTML is used for the SPA rendering pattern consistent with the rest of the app. */
 
-WG.MOCK_SCHEDULES = [
-  { id: '0196aaac-0001-7000-8000-000000000001', name: 'Weekly Internal Audit', target: '192.168.1.0/24', frequency: 'weekly', time: '02:00', scan_type: 'full', enabled: true, last_run: '2026-04-07T02:00:00Z', next_run: '2026-04-14T02:00:00Z', created_at: '2026-03-01T10:00:00Z' },
-  { id: '0196aaac-0001-7000-8000-000000000002', name: 'Daily DMZ Check', target: '10.20.150.0/24', frequency: 'daily', time: '06:00', scan_type: 'quick', enabled: true, last_run: '2026-04-11T06:00:00Z', next_run: '2026-04-12T06:00:00Z', created_at: '2026-03-15T14:00:00Z' },
-  { id: '0196aaac-0001-7000-8000-000000000003', name: 'Monthly Full Assessment', target: '172.16.0.0/16', frequency: 'monthly', time: '01:00', scan_type: 'full', enabled: false, last_run: '2026-03-01T01:00:00Z', next_run: '2026-04-01T01:00:00Z', created_at: '2026-02-01T09:00:00Z' },
-];
-
 WG._getSchedules = function() {
-  var data = WG.getCached('schedules', '/schedules/', 'schedules');
-  return (data && data.length) ? data : WG.MOCK_SCHEDULES;
+  var data = WG.getCached('schedules', '/schedules/');
+  return data || [];
 };
 
 WG._calcNextRun = function(freq, time) {

@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wire_Ghost</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/variables.css?v=3">
-<link rel="stylesheet" href="css/layout.css?v=3">
-<link rel="stylesheet" href="css/components.css?v=3">
-<link rel="stylesheet" href="css/animations.css?v=3">
-<link rel="stylesheet" href="css/light.css?v=3">
-<link rel="stylesheet" href="css/cyberpunk.css?v=3">
+<link rel="stylesheet" href="css/variables.css?v=8">
+<link rel="stylesheet" href="css/layout.css?v=8">
+<link rel="stylesheet" href="css/components.css?v=8">
+<link rel="stylesheet" href="css/animations.css?v=8">
+<link rel="stylesheet" href="css/light.css?v=8">
+<link rel="stylesheet" href="css/cyberpunk.css?v=8">
 
 
 </head>
@@ -44,7 +44,7 @@
             <div>
               <div class="user-dropdown-name" id="topbarUserName">User</div>
               <div class="user-dropdown-email" id="topbarUserEmail">user@wireghost.local</div>
-              <div class="user-dropdown-role" id="topbarUserRole">admin</div>
+              <div class="user-dropdown-role" id="topbarUserRole"></div>
             </div>
           </div>
           <div class="user-dropdown-sep"></div>
@@ -72,26 +72,26 @@
     <div class="sidebar-section">
       <div class="sidebar-label">Overview</div>
       <a class="sidebar-item active" data-page="dashboard"><span class="icon">&#9673;</span> Dashboard</a>
-      <a class="sidebar-item" data-page="scans"><span class="icon">&#8862;</span> Scans <span class="sidebar-badge" id="sidebarScansBadge">0</span></a>
-      <a class="sidebar-item" data-page="findings"><span class="icon">&#9888;</span> Findings <span class="sidebar-badge" id="sidebarFindingsBadge">0</span></a>
-      <a class="sidebar-item" data-page="hosts"><span class="icon">&#9678;</span> Hosts</a>
-      <a class="sidebar-item" data-page="topology"><span class="icon">&#9740;</span> Topology</a>
+      <a class="sidebar-item" data-page="scans" data-role="engineer+"><span class="icon">&#8862;</span> Scans <span class="sidebar-badge" id="sidebarScansBadge" style="display:none;"></span></a>
+      <a class="sidebar-item" data-page="findings"><span class="icon">&#9888;</span> Findings <span class="sidebar-badge" id="sidebarFindingsBadge" style="display:none;"></span></a>
+      <a class="sidebar-item" data-page="hosts" data-role="engineer+"><span class="icon">&#9678;</span> Hosts</a>
+      <a class="sidebar-item" data-page="topology" data-role="engineer+"><span class="icon">&#9740;</span> Topology</a>
     </div>
-    <div class="sidebar-section">
+    <div class="sidebar-section" data-role="engineer+">
       <div class="sidebar-label">Scanning</div>
-      <a class="sidebar-item" data-page="new-scan"><span class="icon">&#9654;</span> New Scan</a>
-      <a class="sidebar-item" data-page="scan-queue"><span class="icon">&#9776;</span> Scan Queue</a>
-      <a class="sidebar-item" data-page="scheduled"><span class="icon">&#8635;</span> Scheduled Scans</a>
-      <a class="sidebar-item" data-page="policies"><span class="icon">&#9881;</span> Scan Policies</a>
+      <a class="sidebar-item" data-page="new-scan" data-role="engineer+"><span class="icon">&#9654;</span> New Scan</a>
+      <a class="sidebar-item" data-page="scan-queue" data-role="engineer+"><span class="icon">&#9776;</span> Scan Queue</a>
+      <a class="sidebar-item" data-page="scheduled" data-role="engineer+"><span class="icon">&#8635;</span> Scheduled Scans</a>
+      <a class="sidebar-item" data-page="policies" data-role="engineer+"><span class="icon">&#9881;</span> Scan Policies</a>
     </div>
-    <div class="sidebar-section">
+    <div class="sidebar-section" data-role="engineer+">
       <div class="sidebar-label">Reports</div>
-      <a class="sidebar-item" data-page="reports"><span class="icon">&#128196;</span> Reports</a>
-      <a class="sidebar-item" data-page="report-builder"><span class="icon">&#128295;</span> Report Engine</a>
+      <a class="sidebar-item" data-page="reports" data-role="engineer+"><span class="icon">&#128196;</span> Reports</a>
+      <a class="sidebar-item" data-page="report-builder" data-role="engineer+"><span class="icon">&#128295;</span> Report Engine</a>
     </div>
-    <div class="sidebar-section">
+    <div class="sidebar-section" data-role="owner">
       <div class="sidebar-label">Admin</div>
-      <a class="sidebar-item" data-page="users"><span class="icon">&#128100;</span> Users</a>
+      <a class="sidebar-item" data-page="users" data-role="owner"><span class="icon">&#128100;</span> Users</a>
     </div>
     <div class="sidebar-spacer"></div>
     <div class="sidebar-footer">
@@ -197,33 +197,33 @@
 <div class="toast-container" id="toasts"></div>
 
 <!-- ═══ SCRIPTS ═══ -->
-<script src="js/lib/d3.v7.min.js"></script>
-<script src="js/state.js"></script>
-<script src="js/theme.js"></script>
-<script src="js/utils.js"></script>
-<script src="js/auth.js"></script>
-<script src="js/mock.js"></script>
-<script src="js/api.js"></script>
-<script src="js/components.js"></script>
-<script src="js/pages/dashboard.js"></script>
-<script src="js/pages/scans.js"></script>
-<script src="js/pages/scan-detail.js"></script>
-<script src="js/pages/hosts.js"></script>
-<script src="js/pages/host-detail.js"></script>
-<script src="js/pages/findings.js"></script>
-<script src="js/pages/finding-detail.js"></script>
-<script src="js/pages/reports.js"></script>
-<script src="js/pages/policies.js"></script>
-<script src="js/pages/users.js"></script>
-<script src="js/pages/setup.js"></script>
+<script src="js/lib/d3.v7.min.js?v=8"></script>
+<script src="js/lib/chart.umd.min.js?v=8"></script>
+<script src="js/state.js?v=8"></script>
+<script src="js/theme.js?v=8"></script>
+<script src="js/utils.js?v=8"></script>
+<script src="js/auth.js?v=8"></script>
+<script src="js/api.js?v=8"></script>
+<script src="js/components.js?v=8"></script>
+<script src="js/pages/dashboard.js?v=8"></script>
+<script src="js/pages/scans.js?v=8"></script>
+<script src="js/pages/scan-detail.js?v=8"></script>
+<script src="js/pages/hosts.js?v=8"></script>
+<script src="js/pages/host-detail.js?v=8"></script>
+<script src="js/pages/findings.js?v=8"></script>
+<script src="js/pages/finding-detail.js?v=8"></script>
+<script src="js/pages/reports.js?v=8"></script>
+<script src="js/pages/policies.js?v=8"></script>
+<script src="js/pages/users.js?v=8"></script>
+<script src="js/pages/setup.js?v=8"></script>
 
-<script src="js/pages/new-scan.js"></script>
-<script src="js/pages/scan-queue.js"></script>
-<script src="js/pages/scheduled.js"></script>
-<script src="js/pages/report-builder.js"></script>
-<script src="js/pages/settings.js"></script>
-<script src="js/pages/topology.js"></script>
-<script src="js/router.js"></script>
+<script src="js/pages/new-scan.js?v=8"></script>
+<script src="js/pages/scan-queue.js?v=8"></script>
+<script src="js/pages/scheduled.js?v=8"></script>
+<script src="js/pages/report-builder.js?v=8"></script>
+<script src="js/pages/settings.js?v=8"></script>
+<script src="js/pages/topology.js?v=8"></script>
+<script src="js/router.js?v=8"></script>
 
 </body>
 </html>

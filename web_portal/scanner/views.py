@@ -3,36 +3,54 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan
+from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology
 
 
-class IsStaffOrReadOnly(IsAuthenticated):
-    """Allow read for any authenticated user, write only for staff/admin."""
-    def has_permission(self, request, view):
-        if not super().has_permission(request, view):
-            return False
-        if request.method in ('GET', 'HEAD', 'OPTIONS'):
-            return True
-        return request.user.is_staff or request.user.is_superuser
+def HasPerm(code):
+    """DRF permission factory — grants access iff request.user.has_permission(code).
+
+    Reads from the data-driven Permission/RolePermission tables, cached per role.
+    """
+    class _HasPerm(IsAuthenticated):
+        def has_permission(self, request, view):
+            if not super().has_permission(request, view):
+                return False
+            return request.user.has_permission(code)
+    _HasPerm.__name__ = f'HasPerm_{code}'
+    return _HasPerm
+
+
+def HasMethodPerm(read_code, write_code):
+    """DRF permission factory that picks the permission code by HTTP method.
+
+    Safe methods (GET/HEAD/OPTIONS) use read_code; everything else uses write_code.
+    """
+    class _HMP(IsAuthenticated):
+        def has_permission(self, request, view):
+            if not super().has_permission(request, view):
+                return False
+            code = read_code if request.method in ('GET', 'HEAD', 'OPTIONS') else write_code
+            return request.user.has_permission(code)
+    _HMP.__name__ = f'HasMethodPerm_{read_code}_{write_code}'
+    return _HMP
 from .serializers import (
     ScanSerializer, ScanListSerializer, ScanCreateSerializer,
     HostSerializer, HostListSerializer,
     FindingSerializer, FindingListSerializer,
     ReportSerializer, ReportConfigSerializer,
     ScanPolicySerializer, ScheduledScanSerializer,
+    AssetSerializer, AssetListSerializer,
 )
 
 
 class ScanViewSet(viewsets.ModelViewSet):
     queryset = Scan.objects.all()
-    permission_classes = [IsStaffOrReadOnly]
+    permission_classes = [HasMethodPerm('scan:read', 'scan:write')]
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        if not self.request.user.is_staff:
-            qs = qs.filter(created_by=self.request.user)
-        return qs
+        # Owner/Engineer see everything; the permission class blocks Viewers before this runs.
+        return super().get_queryset()
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -68,6 +86,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             skip_nuclei=data['skip_nuclei'],
             skip_openvas=data['skip_openvas'],
             status='pending',
+            created_by=request.user,
         )
 
         # Launch Celery task
@@ -225,22 +244,66 @@ class ScanViewSet(viewsets.ModelViewSet):
 
 class HostViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Host.objects.all()
+    permission_classes = [HasPerm('host:read')]
 
     def get_serializer_class(self):
         if self.action == 'list':
             return HostListSerializer
         return HostSerializer
 
+
+class AssetViewSet(viewsets.ReadOnlyModelViewSet):
+    """Deduped (ip, port, protocol) inventory. Feeds the ASM dashboard table."""
+    queryset = Asset.objects.all()
+    permission_classes = [HasPerm('host:read')]
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return AssetListSerializer
+        return AssetSerializer
+
     def get_queryset(self):
         qs = super().get_queryset()
-        # Staff/admin see all, others see only their scans' hosts
-        if not self.request.user.is_staff:
-            qs = qs.filter(scan__created_by=self.request.user)
+        params = self.request.query_params
+
+        search = (params.get('search') or '').strip()
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(ip__icontains=search)
+                | Q(hostname__icontains=search)
+                | Q(service_name__icontains=search)
+                | Q(service_product__icontains=search)
+            )
+
+        status_filter = params.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+
+        min_risk = params.get('min_risk')
+        if min_risk:
+            try:
+                qs = qs.filter(risk_score__gte=int(min_risk))
+            except (TypeError, ValueError):
+                pass
+
+        if (params.get('has_cve') or '').lower() in ('1', 'true', 'yes'):
+            qs = qs.filter(findings_count__gt=0)
+
+        first_after = params.get('first_seen_after')
+        if first_after:
+            qs = qs.filter(first_seen__gte=first_after)
+
+        service = params.get('service')
+        if service:
+            qs = qs.filter(service_name__iexact=service)
+
         return qs
 
 
 class FindingViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Finding.objects.all()
+    permission_classes = [HasPerm('finding:read')]
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -249,9 +312,6 @@ class FindingViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        # Staff/admin see all, others see only their scans' findings
-        if not self.request.user.is_staff:
-            qs = qs.filter(scan__created_by=self.request.user)
         severity = self.request.query_params.get('severity')
         source = self.request.query_params.get('source')
         search = self.request.query_params.get('search')
@@ -270,37 +330,102 @@ class FindingViewSet(viewsets.ReadOnlyModelViewSet):
 
 @api_view(['GET'])
 def dashboard_stats(request):
-    """Dashboard summary statistics."""
-    from django.db.models import Count
+    """Attack Surface Management roll-up for the main dashboard."""
+    if not request.user.has_permission('dashboard:view'):
+        return Response({'error': 'Not authorized'}, status=403)
 
-    total_scans = Scan.objects.count()
-    running_scans = Scan.objects.filter(status='running').count()
-    total_hosts = Host.objects.values('ip').distinct().count()
+    from datetime import timedelta
+    from django.db.models import Avg, Count, Sum
+    from django.db.models.functions import TruncDate
+    from django.utils import timezone
 
-    severity_counts = Finding.objects.values('severity').annotate(count=Count('id'))
-    sev_dict = {item['severity']: item['count'] for item in severity_counts}
+    now = timezone.now()
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
 
-    source_counts = Finding.objects.values('source').annotate(count=Count('id'))
-    src_dict = {item['source']: item['count'] for item in source_counts}
+    # ── KPI band ────────────────────────────────────────────────────────
+    open_assets = Asset.objects.filter(status='open')
+    total_assets = open_assets.count()
+    critical_exposures = open_assets.aggregate(s=Sum('critical_count'))['s'] or 0
+    new_assets_7d = Asset.objects.filter(first_seen__gte=week_ago).count()
+    assets_with_cves = open_assets.filter(findings_count__gt=0).count()
 
-    recent_scans = ScanListSerializer(
-        Scan.objects.all()[:10], many=True
-    ).data
+    # Attack Surface Score: 100 = nothing exposed; 0 = saturated with criticals.
+    # When no assets exist we return None rather than an inflated 100 — the UI
+    # renders this as "N/A" so a fresh install doesn't look falsely "Strong".
+    if total_assets == 0:
+        attack_surface_score = None
+    else:
+        avg_risk = open_assets.aggregate(a=Avg('risk_score'))['a'] or 0
+        attack_surface_score = max(0, min(100, round(100 - avg_risk)))
+
+    # ── Severity trend: last 30 days, one bucket per day ────────────────
+    trend_rows = (
+        Finding.objects.filter(created_at__gte=month_ago)
+        .annotate(day=TruncDate('created_at'))
+        .values('day', 'severity')
+        .annotate(n=Count('id'))
+    )
+    by_day = {}
+    for row in trend_rows:
+        day = row['day'].isoformat()
+        bucket = by_day.setdefault(day, {'date': day, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0})
+        if row['severity'] in bucket:
+            bucket[row['severity']] = row['n']
+    severity_trend = sorted(by_day.values(), key=lambda r: r['date'])
+
+    # ── Risk by source (donut) ──────────────────────────────────────────
+    source_rows = Finding.objects.values('source').annotate(n=Count('id')).order_by('-n')
+    risk_by_source = [{'source': r['source'], 'count': r['n']} for r in source_rows]
+
+    # ── Newly discovered assets (last 7 days) ───────────────────────────
+    newly_discovered = [
+        {
+            'ip': a.ip, 'port': a.port, 'protocol': a.protocol,
+            'service': a.service_name,
+            'product': a.service_product, 'version': a.service_version,
+            'risk_score': a.risk_score,
+            'first_seen': a.first_seen.isoformat() if a.first_seen else None,
+        }
+        for a in Asset.objects.filter(first_seen__gte=week_ago).order_by('-first_seen')[:10]
+    ]
+
+    # ── Top exposures — highest CVSS first ──────────────────────────────
+    # CVSS is a CharField in Finding; sort client-side so non-numeric strings don't crash SQL.
+    raw = (
+        Finding.objects.exclude(cve='').exclude(cve__isnull=True)
+        .values('cve', 'title', 'severity', 'cvss')
+        .annotate(affected=Count('host_ip', distinct=True))
+        .order_by('-affected')[:50]
+    )
+    def _cvss_num(s):
+        try:
+            return float(str(s).split()[0]) if s else 0.0
+        except (ValueError, IndexError):
+            return 0.0
+    top_exposures = sorted(raw, key=lambda r: (_cvss_num(r['cvss']), r['affected']), reverse=True)[:10]
+
+    # ── Top technologies across the surface ─────────────────────────────
+    top_technologies = [
+        {'name': r['name'], 'count': r['n']}
+        for r in Technology.objects.values('name')
+                                   .annotate(n=Count('id'))
+                                   .order_by('-n')[:10]
+    ]
 
     return Response({
-        'total_scans': total_scans,
-        'running_scans': running_scans,
-        'total_hosts': total_hosts,
-        'total_findings': Finding.objects.count(),
-        'severity': {
-            'critical': sev_dict.get('critical', 0),
-            'high': sev_dict.get('high', 0),
-            'medium': sev_dict.get('medium', 0),
-            'low': sev_dict.get('low', 0),
-            'info': sev_dict.get('info', 0),
+        'kpis': {
+            'total_assets': total_assets,
+            'critical_exposures': critical_exposures,
+            'new_assets_7d': new_assets_7d,
+            'assets_with_cves': assets_with_cves,
+            'attack_surface_score': attack_surface_score,
         },
-        'sources': src_dict,
-        'recent_scans': recent_scans,
+        'severity_trend': severity_trend,
+        'risk_by_source': risk_by_source,
+        'newly_discovered': newly_discovered,
+        'top_exposures': top_exposures,
+        'top_technologies': top_technologies,
     })
 
 
@@ -312,8 +437,7 @@ def download_report(request, report_id):
     except Report.DoesNotExist:
         raise Http404
 
-    # Authorization: admin/staff can download any, others only their own scans
-    if not request.user.is_staff and report.scan.created_by != request.user:
+    if not request.user.has_permission('report:download'):
         return Response({'error': 'Not authorized'}, status=403)
 
     from pathlib import Path
@@ -349,9 +473,8 @@ def report_config(request):
     if request.method == 'GET':
         return Response(ReportConfigSerializer(config).data)
 
-    # PUT requires staff/admin
-    if not request.user.is_staff:
-        return Response({'error': 'Staff access required'}, status=403)
+    if not request.user.has_permission('report:config:write'):
+        return Response({'error': 'Not authorized'}, status=403)
 
     # Whitelist validation per field type
     import re
@@ -385,9 +508,9 @@ def report_config(request):
 
 @api_view(['POST'])
 def upload_logo(request):
-    """Upload a custom logo for reports. Requires staff."""
-    if not request.user.is_staff:
-        return Response({'error': 'Staff access required'}, status=403)
+    """Upload a custom logo for reports. Requires report:logo:upload permission."""
+    if not request.user.has_permission('report:logo:upload'):
+        return Response({'error': 'Not authorized'}, status=403)
     if 'logo' not in request.FILES:
         return Response({'error': 'No file uploaded'}, status=400)
 
@@ -438,7 +561,7 @@ def upload_logo(request):
 class ScanPolicyViewSet(viewsets.ModelViewSet):
     queryset = ScanPolicy.objects.all()
     serializer_class = ScanPolicySerializer
-    permission_classes = [IsStaffOrReadOnly]
+    permission_classes = [HasMethodPerm('policy:read', 'policy:write')]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -467,7 +590,7 @@ class ScanPolicyViewSet(viewsets.ModelViewSet):
 class ScheduledScanViewSet(viewsets.ModelViewSet):
     queryset = ScheduledScan.objects.all()
     serializer_class = ScheduledScanSerializer
-    permission_classes = [IsStaffOrReadOnly]
+    permission_classes = [HasMethodPerm('schedule:read', 'schedule:write')]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

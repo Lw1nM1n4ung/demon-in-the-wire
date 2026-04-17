@@ -2,7 +2,6 @@
 window.WG = window.WG || {};
 
 WG.API_BASE = '/api';
-WG.USE_MOCK = true;
 
 WG.state = {
   currentPage: 'dashboard',

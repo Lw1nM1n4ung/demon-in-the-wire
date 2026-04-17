@@ -1,10 +1,17 @@
 /* Wire_Ghost — User Management (API-driven, no mock) */
 
 WG.renderUsers = function() {
-  var users = WG.getCached('users', '/auth/users/', 'users');
   var currentUser = WG.currentUser();
-  var isAdmin = currentUser && currentUser.role === 'admin';
+  var isOwner = currentUser && currentUser.role === 'owner';
   var esc = WG.escHtml;
+
+  // Owner-only page. The router gates this too, but guarding here prevents a
+  // stray /api/auth/users/ fetch during any race where render still fires.
+  if (!isOwner) {
+    return '<div class="panel" style="max-width:700px;margin:40px auto;"><div class="panel-body"><div class="panel-empty"><div class="icon">&#128274;</div>Owner access required.</div></div></div>';
+  }
+
+  var users = WG.getCached('users', '/auth/users/');
 
   // Background refresh
   WG.fetchData('/auth/users/', 'users').then(function(data) {
@@ -23,27 +30,31 @@ WG.renderUsers = function() {
     '<div class="page-header">' +
       '<div class="page-header-left"><h1>Users</h1><p>' + users.length + ' accounts &mdash; ' + activeCount + ' active</p></div>' +
       '<div class="page-header-actions">' +
-        (isAdmin ? '<button class="btn btn-primary" onclick="WG.openUserModal()"><span>+</span> Add User</button>' : '') +
+        (isOwner ? '<button class="btn btn-primary" onclick="WG.openUserModal()"><span>+</span> Add User</button>' : '') +
       '</div>' +
     '</div>' +
 
     '<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;">' +
       '<div class="stat-card"><div class="stat-label">Total Users</div><div class="stat-value">' + users.length + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Admins</div><div class="stat-value">' + (roleCounts.admin || 0) + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Analysts</div><div class="stat-value">' + (roleCounts.analyst || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Owner</div><div class="stat-value">' + (roleCounts.owner || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Engineers</div><div class="stat-value">' + (roleCounts.engineer || 0) + '</div></div>' +
       '<div class="stat-card"><div class="stat-label">Viewers</div><div class="stat-value">' + (roleCounts.viewer || 0) + '</div></div>' +
     '</div>' +
 
     '<div class="filters-bar"><input class="filter-input" placeholder="Search users..." id="userSearch" oninput="WG.filterUsers()"></div>' +
 
     (users.length === 0 ?
-      '<div class="panel"><div class="panel-empty"><div class="icon">&#128100;</div>No users found. ' + (isAdmin ? 'Click "Add User" to create one.' : 'Contact admin.') + '</div></div>'
+      '<div class="panel"><div class="panel-empty"><div class="icon">&#128100;</div>No users found. ' + (isOwner ? 'Click "Add User" to create one.' : 'Contact the Owner.') + '</div></div>'
     :
       '<div class="panel"><table class="data-table" id="usersTable"><thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th>' +
-      (isAdmin ? '<th></th>' : '') +
+      (isOwner ? '<th></th>' : '') +
       '</tr></thead><tbody>' +
       users.map(function(u) {
-        var roleBadge = u.role === 'admin' ? 'critical' : u.role === 'analyst' ? 'medium' : 'info';
+        if (u.role && u.role !== 'owner' && u.role !== 'engineer' && u.role !== 'viewer') {
+          console.warn('Unknown user role:', u.role, '— migrate or normalize this row.');
+        }
+        var roleBadge = u.role === 'owner' ? 'critical' : u.role === 'engineer' ? 'medium' : 'info';
+        var isOwnerRow = u.role === 'owner';
         return '<tr data-search="' + esc((u.name + ' ' + u.username + ' ' + u.email + ' ' + u.role).toLowerCase()) + '">' +
           '<td><div style="display:flex;align-items:center;gap:10px;">' +
             '<div class="user-avatar-sm">' + esc(u.avatar) + '</div>' +
@@ -51,12 +62,14 @@ WG.renderUsers = function() {
             '<div class="mono" style="font-size:0.7rem;">' + esc(u.username) + '</div></div>' +
           '</div></td>' +
           '<td class="mono" style="font-size:0.78rem;">' + esc(u.email) + '</td>' +
-          '<td><span class="sev-badge ' + roleBadge + '">' + u.role + '</span></td>' +
-          '<td><span class="status-badge ' + (u.status === 'active' ? 'completed' : 'cancelled') + '"><span class="dot"></span> ' + u.status + '</span></td>' +
+          '<td><span class="sev-badge ' + roleBadge + '">' + esc(u.role) + '</span></td>' +
+          '<td><span class="status-badge ' + (u.status === 'active' ? 'completed' : 'cancelled') + '"><span class="dot"></span> ' + esc(u.status) + '</span></td>' +
           '<td class="mono">' + (u.last_login ? WG.timeAgo(u.last_login) : 'Never') + '</td>' +
-          (isAdmin ? '<td style="text-align:right;">' +
-            '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();WG.openUserModal(\'' + u.id + '\')">Edit</button>' +
-            (u.id !== currentUser.id ? ' <button class="btn btn-ghost btn-sm" style="color:var(--critical);" onclick="event.stopPropagation();WG.deleteUser(\'' + u.id + '\')">Delete</button>' : '') +
+          (isOwner ? '<td style="text-align:right;">' +
+            (isOwnerRow ? '<span style="font-size:0.7rem;color:var(--text-dim);">Protected</span>' :
+              '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();WG.openUserModal(\'' + u.id + '\')">Edit</button>' +
+              (u.id !== currentUser.id ? ' <button class="btn btn-ghost btn-sm" style="color:var(--critical);" onclick="event.stopPropagation();WG.deleteUser(\'' + u.id + '\')">Delete</button>' : '')
+            ) +
           '</td>' : '') +
         '</tr>';
       }).join('') +
@@ -69,7 +82,7 @@ WG.renderUsers = function() {
       '<div class="form-row"><div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="userName" placeholder="Jane Doe"></div>' +
       '<div class="form-group"><label class="form-label">Username</label><input class="form-input" id="userUsername" placeholder="jdoe"></div></div>' +
       '<div class="form-row"><div class="form-group"><label class="form-label">Email</label><input class="form-input" id="userEmail" type="email" placeholder="jane@company.com"></div>' +
-      '<div class="form-group"><label class="form-label">Role</label><select class="form-select" id="userRole"><option value="viewer">Viewer</option><option value="analyst">Analyst</option><option value="admin">Admin</option></select></div></div>' +
+      '<div class="form-group"><label class="form-label">Role</label><select class="form-select" id="userRole"><option value="viewer">Viewer</option><option value="engineer">Engineer</option></select></div></div>' +
       '<div class="form-row"><div class="form-group"><label class="form-label">Password</label><input class="form-input" id="userPass" type="password" placeholder="Enter password"></div>' +
       '<div class="form-group"><label class="form-label">Status</label><select class="form-select" id="userStatus"><option value="active">Active</option><option value="disabled">Disabled</option></select></div></div>' +
       '<div id="userModalError" style="display:none;color:var(--critical);font-size:0.82rem;"></div>' +

@@ -12,8 +12,10 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wireghost}
       MYSQL_USER: ${MYSQL_USER:-wireghost}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
-    ports:
-      - "127.0.0.1:3306:3306"
+    # Internal-only; no host port mapping needed for app use. Enable below to
+    # allow direct MySQL access from the host (conflicts with a local mysqld).
+    # ports:
+    #   - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:

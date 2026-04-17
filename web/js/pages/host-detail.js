@@ -19,13 +19,13 @@ WG.renderHostDetail = function(id) {
     });
   }
 
-  var host = WG._cache['host_' + id] || WG.getCached('hosts', '/hosts/', 'hosts').find(function(h) { return h.id === id; });
+  var host = WG._cache['host_' + id] || WG.getCached('hosts', '/hosts/').find(function(h) { return h.id === id; });
   if (!host) return '<div class="empty-state"><div class="icon">&#9678;</div><h3>Loading host...</h3><div class="spinner" style="margin:16px auto;"></div></div>';
 
   var esc = WG.escHtml;
-  var scan = WG.getCached('scans', '/scans/', 'scans').find(function(s) { return s.id === host.scan; });
-  var ports = host.ports || WG.getMock('ports').filter(function(p) { return p.host === id; });
-  var techs = host.technologies || WG.getMock('technologies').filter(function(t) { return t.host === id; });
+  var scan = WG.getCached('scans', '/scans/').find(function(s) { return s.id === host.scan; });
+  var ports = host.ports || [].filter(function(p) { return p.host === id; });
+  var techs = host.technologies || [].filter(function(t) { return t.host === id; });
   var hFindings = WG.getCached('host_findings_' + id, '/findings/?scan=' + (host.scan || ''), 'findings').filter(function(f) { return f.host === id || f.host_ip === host.ip; });
 
   var sevCards = ['critical','high','medium','low','info'].map(function(sev) {
@@ -82,7 +82,7 @@ WG._hostTechTab = function(techs) {
 WG.switchHostTab = function(tab, hostId) {
   document.querySelectorAll('#hostTabs .tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
   var el = document.getElementById('hostTabContent');
-  if (tab === 'ports') el.innerHTML = WG._hostPortsTab(WG.getMock('ports').filter(function(p) { return p.host === hostId; }));
-  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab(WG.getMock('findings').filter(function(f) { return f.host === hostId; }));
-  else if (tab === 'tech') el.innerHTML = WG._hostTechTab(WG.getMock('technologies').filter(function(t) { return t.host === hostId; }));
+  if (tab === 'ports') el.innerHTML = WG._hostPortsTab([].filter(function(p) { return p.host === hostId; }));
+  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab([].filter(function(f) { return f.host === hostId; }));
+  else if (tab === 'tech') el.innerHTML = WG._hostTechTab([].filter(function(t) { return t.host === hostId; }));
 };

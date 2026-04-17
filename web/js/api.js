@@ -1,5 +1,5 @@
-/* Wire_Ghost — API service (production)
-   Every page should call WG.fetchData() which tries API first, falls back to mock. */
+/* Wire_Ghost — API service.
+ * All data is served by the Django API. There is no offline/demo fallback. */
 
 /* Read CSRF token from cookie */
 WG._getCSRF = function() {
@@ -25,57 +25,51 @@ WG.api = async function(path, opts) {
       credentials: 'include',
     });
 
-    if (res.status === 401 || res.status === 403) {
-      if (path !== '/auth/login/' && path !== '/auth/csrf/' && path !== '/dashboard/') {
-        WG.clearSession();
-        window.location.hash = '#login';
-        return null;
-      }
+    // 401 = not authenticated; tear down session and bounce to login.
+    if (res.status === 401 && path !== '/auth/login/' && path !== '/auth/csrf/') {
+      WG.clearSession();
+      window.location.hash = '#login';
+      return null;
     }
+    // 403 = authenticated but forbidden; let the caller handle it.
+    if (res.status === 403) return null;
 
     if (!res.ok) {
-      // 404 means resource not found — don't switch to mock mode
       if (res.status === 404) return null;
       throw new Error(res.statusText);
     }
-    WG.USE_MOCK = false;
     return await res.json();
   } catch (e) {
-    WG.USE_MOCK = true;
     return null;
   }
 };
 
-/* Fetch data — tries API first, falls back to mock */
-WG.fetchData = async function(apiPath, mockType) {
+/* Fetch data — returns the API payload (or its `results` array for paginated
+ * responses), or null on failure. Pages should handle null as an empty state. */
+WG.fetchData = async function(apiPath) {
   var data = await WG.api(apiPath);
-  if (data) {
-    // API returns paginated or direct
-    return data.results || data;
-  }
-  return WG.MOCK[mockType] || [];
+  if (!data) return null;
+  return data.results || data;
 };
 
-WG.getMock = function(type) {
-  return WG.MOCK[type] || [];
-};
-
-/* Cache for API data — avoids re-fetching on every render */
+/* In-memory cache for API data — avoids re-fetching on every render. */
 WG._cache = {};
 WG._cacheTime = {};
 
-WG.getCached = function(key, apiPath, mockType, maxAge) {
+WG.getCached = function(key, apiPath, maxAge) {
   maxAge = maxAge || 30000; // 30 sec default
   var now = Date.now();
   if (WG._cache[key] && (now - WG._cacheTime[key]) < maxAge) {
     return WG._cache[key];
   }
-  // Return mock immediately, fetch in background
-  WG.fetchData(apiPath, mockType).then(function(data) {
-    WG._cache[key] = data;
-    WG._cacheTime[key] = Date.now();
+  // Fire-and-forget refresh; caller re-reads from cache on next render.
+  WG.fetchData(apiPath).then(function(data) {
+    if (data != null) {
+      WG._cache[key] = data;
+      WG._cacheTime[key] = Date.now();
+    }
   });
-  return WG._cache[key] || WG.MOCK[mockType] || [];
+  return WG._cache[key] || [];
 };
 
 /* Invalidate cache after mutations */

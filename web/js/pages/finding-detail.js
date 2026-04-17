@@ -12,11 +12,11 @@ WG.renderFindingDetail = function(id) {
     });
   }
 
-  var f = WG._cache['finding_' + id] || WG.getCached('findings', '/findings/', 'findings').find(function(x) { return x.id === id; });
+  var f = WG._cache['finding_' + id] || WG.getCached('findings', '/findings/').find(function(x) { return x.id === id; });
   if (!f) return '<div class="empty-state"><div class="icon">&#9888;</div><h3>Loading finding...</h3><div class="spinner" style="margin:16px auto;"></div></div>';
 
   var esc = WG.escHtml;
-  var scan = WG.getMock('scans').find(function(s) { return s.id === f.scan; });
+  var scan = null;
   var refs = [];
   try { refs = JSON.parse(f.references || '[]'); } catch (e) {}
   var safeHref = function(r) { return /^https?:\/\//i.test(r) ? esc(r) : '#'; };

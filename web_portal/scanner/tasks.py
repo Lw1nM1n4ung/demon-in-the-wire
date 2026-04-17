@@ -179,6 +179,84 @@ def _persist_results(scan, report):
     scan.info_count = sev_counts['info']
     scan.save()
 
+    # Refresh the deduped Asset inventory used by the ASM dashboard.
+    _sync_assets(scan, report)
+
+
+def _sev_str(sev):
+    """Normalize a severity to its lowercase string form.
+
+    Pipeline findings carry `Severity` enum values; DB-reconstructed findings
+    carry plain strings. This helper lets comparisons work for both.
+    """
+    if hasattr(sev, 'value'):
+        return str(sev.value).lower()
+    return str(sev).lower()
+
+
+def _compute_risk(critical, high, total):
+    """0..100 asset risk score. Critical dominates; everything else contributes lightly."""
+    other = max(0, total - critical - high)
+    return min(100, critical * 30 + high * 10 + other * 2)
+
+
+def _sync_assets(scan, report):
+    """Upsert an Asset row for each (ip, port, protocol) seen in this scan.
+
+    Preserves first_seen on existing rows, advances last_seen to now, recomputes
+    findings counts and risk score from the current scan's findings.
+    """
+    from scanner.models import Asset
+
+    now = timezone.now()
+    for host in report.hosts:
+        for port in host.open_ports:
+            key = {
+                'ip': host.ip,
+                'port': port.number,
+                'protocol': port.protocol or 'tcp',
+            }
+            # Findings pinned to this (ip, port) in this scan's report.
+            host_findings = [
+                f for f in report.findings
+                if f.host == host.ip and str(f.port) == str(port.number)
+            ]
+            # Tolerate both Severity enum and plain string payloads.
+            critical = sum(1 for f in host_findings if _sev_str(f.severity) == 'critical')
+            high = sum(1 for f in host_findings if _sev_str(f.severity) == 'high')
+            total = len(host_findings)
+
+            svc = port.service
+            defaults = {
+                'first_seen': now, 'last_seen': now,
+                'hostname': host.hostname or '', 'os': host.os or '',
+                'service_name': (svc.name if svc else '') or '',
+                'service_product': (svc.product if svc else '') or '',
+                'service_version': (svc.version if svc else '') or '',
+                'status': port.state if port.state in {'open', 'closed', 'filtered'} else 'open',
+                'last_scan': scan,
+                'findings_count': total,
+                'critical_count': critical,
+                'high_count': high,
+                'risk_score': _compute_risk(critical, high, total),
+            }
+            asset, created = Asset.objects.get_or_create(**key, defaults=defaults)
+            if not created:
+                asset.last_seen = now
+                asset.last_scan = scan
+                asset.hostname = host.hostname or asset.hostname
+                asset.os = host.os or asset.os
+                if svc:
+                    asset.service_name = svc.name or asset.service_name
+                    asset.service_product = svc.product or asset.service_product
+                    asset.service_version = svc.version or asset.service_version
+                asset.status = port.state if port.state in {'open', 'closed', 'filtered'} else 'open'
+                asset.findings_count = total
+                asset.critical_count = critical
+                asset.high_count = high
+                asset.risk_score = _compute_risk(critical, high, total)
+                asset.save()
+
 
 @shared_task(bind=True, max_retries=1)
 def generate_report(self, scan_id, formats=None):
@@ -320,14 +398,28 @@ def check_scheduled_scans():
 
 
 def _calc_next_run(frequency, run_time):
-    """Calculate the next run datetime from frequency and time-of-day."""
-    from datetime import timedelta
-    now = timezone.now()
-    # Build today's run datetime
-    next_dt = now.replace(hour=run_time.hour, minute=run_time.minute, second=0, microsecond=0)
+    """Calculate the next run datetime from frequency and time-of-day.
+
+    The time-of-day is interpreted in ``SiteConfig.schedule_timezone`` (the
+    Owner-configured zone). The returned datetime is UTC-aware so Django
+    can store it against ``ScheduledScan.next_run``.
+    """
+    from datetime import timedelta, timezone as dt_timezone
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from scanner.models import SiteConfig
+
+    tz_name = (SiteConfig.get().schedule_timezone or 'UTC')
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo('UTC')
+
+    now_local = timezone.now().astimezone(tz)
+    # Build today's run datetime in the configured zone
+    next_dt = now_local.replace(hour=run_time.hour, minute=run_time.minute, second=0, microsecond=0)
 
     # Always advance past now
-    if next_dt <= now:
+    if next_dt <= now_local:
         if frequency == 'daily':
             next_dt += timedelta(days=1)
         elif frequency == 'weekly':
@@ -338,4 +430,5 @@ def _calc_next_run(frequency, run_time):
             month = next_dt.month % 12 + 1
             year = next_dt.year + (1 if next_dt.month == 12 else 0)
             next_dt = next_dt.replace(year=year, month=month)
-    return next_dt
+    # Store as UTC so Django's timezone-aware filters compare correctly.
+    return next_dt.astimezone(dt_timezone.utc)

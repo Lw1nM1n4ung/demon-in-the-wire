@@ -1,7 +1,7 @@
 /* Wire_Ghost — Scan detail page */
 
 WG.renderScanDetail = function(id) {
-  var scan = WG.getCached('scans', '/scans/', 'scans').find(function(s) { return s.id === id; });
+  var scan = WG.getCached('scans', '/scans/').find(function(s) { return s.id === id; });
 
   // Fetch full scan detail from API (once per cache cycle)
   if (!WG._cache['scan_' + id]) {
@@ -22,7 +22,7 @@ WG.renderScanDetail = function(id) {
   var esc = WG.escHtml;
   var scanHosts = WG.getCached('scan_hosts_' + id, '/scans/' + id + '/hosts/', 'hosts').filter(function(h) { return h.scan === id || true; });
   var scanFindings = WG.getCached('scan_findings_' + id, '/scans/' + id + '/findings/', 'findings').filter(function(f) { return f.scan === id || true; });
-  var scanReports = (scan.reports || WG.getMock('reports').filter(function(r) { return r.scan === id; }));
+  var scanReports = (scan.reports || [].filter(function(r) { return r.scan === id; }));
   var progress = scan.status === 'running' ? 65 : scan.status === 'completed' ? 100 : 0;
 
   return '' +
@@ -110,7 +110,7 @@ WG._scanReportsTab = function(reports) {
 WG.switchScanTab = function(tab, scanId) {
   document.querySelectorAll('#scanTabs .tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
   var el = document.getElementById('scanTabContent');
-  if (tab === 'hosts') el.innerHTML = WG._scanHostsTab(WG.getMock('hosts').filter(function(h) { return h.scan === scanId; }));
-  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab(WG.getMock('findings').filter(function(f) { return f.scan === scanId; }));
-  else if (tab === 'reports') el.innerHTML = WG._scanReportsTab(WG.getMock('reports').filter(function(r) { return r.scan === scanId; }));
+  if (tab === 'hosts') el.innerHTML = WG._scanHostsTab([].filter(function(h) { return h.scan === scanId; }));
+  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab([].filter(function(f) { return f.scan === scanId; }));
+  else if (tab === 'reports') el.innerHTML = WG._scanReportsTab([].filter(function(r) { return r.scan === scanId; }));
 };
