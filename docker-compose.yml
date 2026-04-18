@@ -61,6 +61,8 @@ services:
       DJANGO_DEBUG: "false"
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,${WIREGHOST_HOST:-localhost}"
+      WIREGHOST_HOST: ${WIREGHOST_HOST:-localhost}
+      WIREGHOST_PORT: ${WIREGHOST_PORT:-9995}
       WIREGHOST_OUTPUT_DIR: /data/output
     volumes: &api-vols
       - scan_output:/data/output
@@ -114,8 +116,10 @@ services:
     restart: unless-stopped
     ports:
       # Explicit all-interfaces bind so LAN/VPN/SSH-tunnel clients can reach
-      # the portal. Change to 127.0.0.1:9995:80 if you want host-only access.
-      - "0.0.0.0:9995:80"
+      # the portal. Set WIREGHOST_PORT in .env to change the host port; the
+      # container always listens on :80 internally. Use 127.0.0.1:$PORT:80
+      # if you want host-only access.
+      - "0.0.0.0:${WIREGHOST_PORT:-9995}:80"
     volumes:
       - ./web:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro

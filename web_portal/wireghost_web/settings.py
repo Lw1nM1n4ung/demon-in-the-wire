@@ -64,11 +64,25 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+# Build the default origin list from WIREGHOST_HOST + WIREGHOST_PORT so users
+# only need to set those two in .env. Explicit CORS_ALLOWED_ORIGINS /
+# CSRF_TRUSTED_ORIGINS env vars still win for advanced setups.
+_PORTAL_PORT = os.environ.get('WIREGHOST_PORT', '9995')
+_PORTAL_HOST = os.environ.get('WIREGHOST_HOST', 'localhost')
+_default_origins = [
+    f'http://localhost:{_PORTAL_PORT}',
+    f'http://127.0.0.1:{_PORTAL_PORT}',
+]
+# Add the configured host if it's a real hostname (not the wildcard).
+if _PORTAL_HOST and _PORTAL_HOST not in ('*', 'localhost', '127.0.0.1'):
+    _default_origins.append(f'http://{_PORTAL_HOST}:{_PORTAL_PORT}')
+    _default_origins.append(f'https://{_PORTAL_HOST}:{_PORTAL_PORT}')
+
 # CORS — restrict to portal origin only
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
-    'http://localhost:9995,http://127.0.0.1:9995'
+    ','.join(_default_origins),
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
@@ -79,7 +93,10 @@ SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower()
 CSRF_COOKIE_HTTPONLY = False  # JS needs to read it
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'false').lower() == 'true'
-CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'http://localhost:9995,http://127.0.0.1:9995').split(',')
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    'CSRF_TRUSTED_ORIGINS',
+    ','.join(_default_origins),
+).split(',')
 
 ROOT_URLCONF = 'wireghost_web.urls'
 
