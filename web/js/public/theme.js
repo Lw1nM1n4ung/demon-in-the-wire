@@ -1,4 +1,10 @@
-/* Wire_Ghost — Theme engine with localStorage persistence */
+/* Wire_Ghost — Theme engine with localStorage persistence (Tier 0).
+ *
+ * This file is served to unauthenticated visitors (login.html, setup.html)
+ * as well as the full SPA, so it must not assume any other script has run.
+ * The WG init below matches the same self-sufficiency pattern as state.js,
+ * login-boot.js, and setup-boot.js. */
+window.WG = window.WG || {};
 
 WG.THEMES = {
   dark: {
