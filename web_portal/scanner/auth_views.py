@@ -1,6 +1,7 @@
 """Wire_Ghost — Authentication & User Management API."""
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth import get_user_model
+from django.http import HttpResponse
 User = get_user_model()
 from django.core.cache import cache
 from django.middleware.csrf import get_token
@@ -119,6 +120,21 @@ def auth_me(request):
     if not request.user.is_authenticated:
         return Response({'error': 'Not authenticated'}, status=401)
     return Response(_serialize_user(request.user))
+
+
+@api_view(['GET'])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
+def auth_check(request):
+    """204 if the session is authenticated, 401 otherwise.
+
+    Consumed by nginx `auth_request` on every gated static file and SPA path,
+    so it MUST stay cheap — no DB work beyond the session-middleware lookup
+    that already ran for this request. No body, no audit log, no cache write.
+    """
+    if request.user.is_authenticated:
+        return HttpResponse(status=204)
+    return HttpResponse(status=401)
 
 
 @api_view(['GET'])

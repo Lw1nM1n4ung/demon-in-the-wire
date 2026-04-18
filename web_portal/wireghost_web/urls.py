@@ -8,7 +8,7 @@ from scanner.views import (
     support_bundle,
 )
 from scanner.auth_views import (
-    auth_login, auth_logout, auth_csrf, auth_me, auth_users,
+    auth_login, auth_logout, auth_csrf, auth_me, auth_check, auth_users,
     auth_user_create, auth_user_update, auth_user_delete,
     site_config, update_site_config, check_username, setup_admin, site_setup_complete, reset_setup, user_preferences,
     list_sessions, revoke_session, revoke_all_sessions,
@@ -35,6 +35,8 @@ urlpatterns = [
     path('api/auth/logout/', auth_logout, name='auth-logout'),
     path('api/auth/csrf/', auth_csrf, name='auth-csrf'),
     path('api/auth/me/', auth_me, name='auth-me'),
+    # Lightweight session-validity probe for nginx auth_request (204/401, no body).
+    path('api/auth/check/', auth_check, name='auth-check'),
     path('api/auth/users/', auth_users, name='auth-users'),
     path('api/auth/users/create/', auth_user_create, name='auth-user-create'),
     path('api/auth/users/<uuid:user_id>/', auth_user_update, name='auth-user-update'),

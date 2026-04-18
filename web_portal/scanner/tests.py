@@ -780,3 +780,43 @@ class ResetSetupTests(TestCase):
         res = self.client.get('/api/site-config/')
         self.assertEqual(res.status_code, 200)
         self.assertFalse(res.json()['setup_complete'])
+
+
+class AuthCheckTests(TestCase):
+    """GET /api/auth/check/ — nginx auth_request target. Must stay cheap."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='ac-user', password='pw-check-123!', email='ac@example.com'
+        )
+        self.client = Client()
+
+    def test_unauth_returns_401(self):
+        res = self.client.get('/api/auth/check/')
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.content, b'')
+
+    def test_authed_returns_204(self):
+        self.client.force_login(self.user)
+        res = self.client.get('/api/auth/check/')
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(res.content, b'')
+
+    def test_authed_does_no_view_level_database_work(self):
+        """nginx fires this on every gated file; the view itself must add zero
+        queries on top of the session-middleware baseline.
+
+        With the default db-backed SESSION_ENGINE, Django's auth middleware
+        issues 2 queries per request to resolve ``request.user`` (session row
+        lookup + user row lookup). That's framework cost we can't skip without
+        switching to a cached session backend. What this test enforces is that
+        *our view* adds zero on top — no AuditLog.log(), no UserPreference
+        fetch, no cache writes — so a future edit that quietly adds DB work
+        will break the test.
+        """
+        self.client.force_login(self.user)
+        # Warm any per-request caches.
+        self.client.get('/api/auth/check/')
+        with self.assertNumQueries(2):  # session row + user row — see docstring
+            res = self.client.get('/api/auth/check/')
+        self.assertEqual(res.status_code, 204)

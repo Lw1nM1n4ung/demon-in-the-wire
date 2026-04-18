@@ -26,9 +26,11 @@ WG.api = async function(path, opts) {
     });
 
     // 401 = not authenticated; tear down session and bounce to login.
+    // `WG.clearSession` is defined in Tier-1 app/auth.js; guard for Tier-0
+    // contexts (e.g. setup.html) where that file isn't shipped.
     if (res.status === 401 && path !== '/auth/login/' && path !== '/auth/csrf/') {
-      WG.clearSession();
-      window.location.hash = '#login';
+      if (WG.clearSession) WG.clearSession();
+      window.location.href = '/login';
       return null;
     }
     // 403 = authenticated but forbidden; let the caller handle it.

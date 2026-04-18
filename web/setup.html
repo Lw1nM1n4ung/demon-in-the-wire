@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup — Wire_Ghost</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/variables.css?v=12">
+<link rel="stylesheet" href="css/layout.css?v=12">
+<link rel="stylesheet" href="css/components.css?v=12">
+<link rel="stylesheet" href="css/animations.css?v=12">
+<link rel="stylesheet" href="css/light.css?v=12">
+<link rel="stylesheet" href="css/cyberpunk.css?v=12">
+</head>
+<body>
+
+<!-- The wizard is injected here by js/public/setup-boot.js on DOMContentLoaded.
+     This is a Tier-0 entry point: served to unauthenticated users so the
+     first-install flow can run before any Owner exists. -->
+<div id="setupMount"></div>
+
+<script src="js/public/theme.js?v=12"></script>
+<script src="js/public/state.js?v=12"></script>
+<script src="js/public/api.js?v=12"></script>
+<script src="js/public/setup-boot.js?v=12"></script>
+
+</body>
+</html>

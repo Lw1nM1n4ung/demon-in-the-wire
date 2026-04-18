@@ -1,4 +1,49 @@
-/* Wire_Ghost — First-time Setup Wizard */
+/* Wire_Ghost — First-time Setup Wizard (Tier 0, pre-auth).
+ *
+ * Served by /setup.html (no auth_request gate). Also reachable from the
+ * authenticated "Re-run Setup Wizard" button in Settings — in that context
+ * the Tier-1 helpers below are already defined, so the `|| ...` polyfills
+ * are no-ops. */
+
+if (typeof WG === 'undefined') window.WG = {};
+WG.API_BASE = WG.API_BASE || '/api';
+WG.state = WG.state || { currentPage: 'setup' };
+
+/* ── Tier-0 polyfills ── */
+WG.escHtml = WG.escHtml || function(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+};
+WG.toast = WG.toast || function(msg, kind) {
+  try { console.log('[' + (kind || 'info') + '] ' + msg); } catch (e) {}
+};
+WG.navigate = WG.navigate || function(page) {
+  var map = { login: '/login', setup: '/setup', dashboard: '/dashboard' };
+  window.location.href = map[page] || '/' + page;
+};
+WG.render = WG.render || function() {
+  var m = document.getElementById('setupMount');
+  if (m && WG.renderSetup) {
+    m.textContent = '';
+    m.insertAdjacentHTML('beforeend', WG.renderSetup());
+  }
+};
+WG.clearSession = WG.clearSession || function() {
+  try { localStorage.removeItem('wg_user_info'); } catch (e) {}
+};
+WG.isLoggedIn = WG.isLoggedIn || function() { return false; };
+WG.login = WG.login || async function(username, password) {
+  try {
+    var res = await fetch(WG.API_BASE + '/auth/login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password }),
+      credentials: 'include',
+    });
+    return res.ok;
+  } catch (e) { return false; }
+};
 
 WG.SETUP_STEPS = ['welcome', 'database', 'admin', 'branding', 'tools', 'complete'];
 WG._setupStep = 0;
@@ -405,9 +450,31 @@ WG.resetSetup = function() {
       if (WG.clearSession) WG.clearSession();
       WG._setupStep = 0;
       WG.toast('Setup reset — reloading…', 'success');
-      setTimeout(function() { window.location.href = '#setup'; window.location.reload(); }, 600);
+      setTimeout(function() { window.location.href = '/setup'; }, 600);
     } else {
       WG.toast((res && res.error) || 'Reset failed', 'error');
     }
   });
 };
+
+/* ── Tier-0 self-mount ──
+ * When loaded from /setup.html (no router.js), mount the wizard ourselves.
+ * Skip mounting if there's no #setupMount (we're running inside app.html). */
+document.addEventListener('DOMContentLoaded', function() {
+  var mount = document.getElementById('setupMount');
+  if (!mount) return;
+  WG.state.currentPage = 'setup';
+  WG._setupStep = 0;
+
+  /* Short-circuit if setup is already complete — bounce to login. */
+  fetch(WG.API_BASE + '/site-config/', { credentials: 'include' })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (data && data.setup_complete) {
+        window.location.href = '/login';
+        return;
+      }
+      WG.render();
+    })
+    .catch(function() { WG.render(); /* API hiccup — still render the wizard */ });
+});

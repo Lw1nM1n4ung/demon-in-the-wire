@@ -342,6 +342,7 @@ When run from the portal, output lives under `/data/output/<target>/` inside the
 - **Content-Security-Policy** via nginx: `script-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `img-src 'self' data:`, `frame-ancestors 'none'`.
 - **Django admin is blocked** at the nginx layer (`/admin` → 404) and dotfiles return 404.
 - **Static assets pinned** with `?v=N` cache-bust so updates land immediately after a deploy.
+- **Public/authenticated tier boundary at the nginx layer.** `web/js/public/` (login boot, theme, state, api wrapper) is served to everyone — it's what powers `login.html` and `setup.html` before a session exists. `web/js/app/` (router, session helpers, components, every page module) sits behind `auth_request /_auth_check`, which forwards the `sessionid` cookie to Django's lightweight `/api/auth/check/` endpoint (204/401, no DB work beyond session middleware) and returns 403 for any file fetch without a valid session. An unauthenticated visitor can fetch `login.html` and `setup.html`, but `/js/app/pages/users.js`, `/js/app/pages/policies.js`, etc. all return 403 — the files never leave the server. Combined with History API routing (real URLs like `/dashboard`, `/scans/<uuid>` instead of `#dashboard`), this shrinks the pre-auth recon surface from ~20 page modules to a login form.
 
 ---
 
