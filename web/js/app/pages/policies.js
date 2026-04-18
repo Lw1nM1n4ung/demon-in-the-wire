@@ -8,13 +8,7 @@ WG._getPolicies = function() {
 WG.renderPolicies = function() {
   var policies = WG._getPolicies();
   // Background refresh from API
-  WG.fetchData('/policies/', 'policies').then(function(data) {
-    if (data && data.length && WG.state.currentPage === 'policies') {
-      WG._cache['policies'] = data; WG._cacheTime['policies'] = Date.now();
-      var main = document.getElementById('mainContent');
-      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderPolicies();
-    }
-  });
+  WG.refreshAndRerender('policies', '/policies/', WG.renderPolicies, 'policies');
   var esc = WG.escHtml;
   var toolNames = ['nmap','nuclei','dirsearch','searchsploit','wpscan','service_enum','openvas'];
 

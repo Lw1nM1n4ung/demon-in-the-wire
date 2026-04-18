@@ -3,13 +3,7 @@
 WG.renderScans = function() {
   var scans = WG.getCached('scans', '/scans/');
   // Background refresh
-  WG.fetchData('/scans/', 'scans').then(function(data) {
-    if (data && data.length && WG.state.currentPage === 'scans') {
-      WG._cache['scans'] = data; WG._cacheTime['scans'] = Date.now();
-      var main = document.getElementById('mainContent');
-      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScans();
-    }
-  });
+  WG.refreshAndRerender('scans', '/scans/', WG.renderScans, 'scans');
   var esc = WG.escHtml;
 
   var running = scans.filter(function(s) { return s.status === 'running'; });

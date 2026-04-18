@@ -79,3 +79,35 @@ WG.invalidateCache = function(key) {
   if (key) { delete WG._cache[key]; delete WG._cacheTime[key]; }
   else { WG._cache = {}; WG._cacheTime = {}; }
 };
+
+/* Refresh list data from the server and re-render a page ONLY when the new
+ * data differs from the currently cached copy. Prevents the UI "blink" that
+ * used to fire on every page mount because list pages unconditionally
+ * replaced the mainContent DOM after every background fetch — even when
+ * nothing changed. 95% of revisits return identical data, so skipping the
+ * re-render is the right default.
+ *
+ * Guards:
+ *   - page-name check: won't rerender if the user has navigated away
+ *   - modal-active check: won't wipe an open dialog
+ *   - JSON-signature compare: cheap O(N) diff on typical list sizes */
+WG.refreshAndRerender = function(key, apiPath, renderFn, pageName) {
+  WG.fetchData(apiPath).then(function(data) {
+    if (data == null) return;
+    if (pageName && WG.state.currentPage !== pageName) return;
+    if (document.querySelector('.modal-overlay.active')) return;
+    var prev = WG._cache[key];
+    var sig = JSON.stringify(data);
+    if (prev && JSON.stringify(prev) === sig) {
+      /* Touch the timestamp so getCached treats it as fresh, but no DOM op. */
+      WG._cacheTime[key] = Date.now();
+      return;
+    }
+    WG._cache[key] = data;
+    WG._cacheTime[key] = Date.now();
+    var main = document.getElementById('mainContent');
+    if (!main) return;
+    main.textContent = '';
+    main.insertAdjacentHTML('beforeend', renderFn());
+  });
+};

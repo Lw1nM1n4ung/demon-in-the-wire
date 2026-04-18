@@ -24,13 +24,7 @@ WG._calcNextRun = function(freq, time) {
 WG.renderScheduled = function() {
   var schedules = WG._getSchedules();
   // Background refresh from API
-  WG.fetchData('/schedules/', 'schedules').then(function(data) {
-    if (data && data.length && WG.state.currentPage === 'scheduled') {
-      WG._cache['schedules'] = data; WG._cacheTime['schedules'] = Date.now();
-      var main = document.getElementById('mainContent');
-      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScheduled();
-    }
-  });
+  WG.refreshAndRerender('schedules', '/schedules/', WG.renderScheduled, 'scheduled');
   var esc = WG.escHtml;
   var enabled = schedules.filter(function(s) { return s.enabled; }).length;
 

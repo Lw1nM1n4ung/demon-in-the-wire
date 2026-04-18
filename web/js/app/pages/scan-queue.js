@@ -9,13 +9,7 @@ WG.renderScanQueue = function() {
   var queue = pending.concat(running);
 
   // Background refresh
-  WG.fetchData('/scans/', 'scans').then(function(data) {
-    if (data && WG.state.currentPage === 'scan-queue') {
-      WG._cache['scans'] = data; WG._cacheTime['scans'] = Date.now();
-      var main = document.getElementById('mainContent');
-      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScanQueue();
-    }
-  });
+  WG.refreshAndRerender('scans', '/scans/', WG.renderScanQueue, 'scan-queue');
 
   var phases = ['Discovery', 'Port Scan', 'Web Detect', 'Vuln Scan', 'Reports'];
 

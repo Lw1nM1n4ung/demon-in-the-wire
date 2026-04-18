@@ -14,13 +14,7 @@ WG.renderUsers = function() {
   var users = WG.getCached('users', '/auth/users/');
 
   // Background refresh
-  WG.fetchData('/auth/users/', 'users').then(function(data) {
-    if (data && data.length && WG.state.currentPage === 'users') {
-      WG._cache['users'] = data; WG._cacheTime['users'] = Date.now();
-      var main = document.getElementById('mainContent');
-      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderUsers();
-    }
-  });
+  WG.refreshAndRerender('users', '/auth/users/', WG.renderUsers, 'users');
 
   var roleCounts = {};
   users.forEach(function(u) { roleCounts[u.role] = (roleCounts[u.role] || 0) + 1; });

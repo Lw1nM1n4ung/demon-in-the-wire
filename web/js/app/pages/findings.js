@@ -2,13 +2,7 @@
 
 WG.renderFindings = function() {
   var findings = WG.getCached('findings', '/findings/');
-  WG.fetchData('/findings/', 'findings').then(function(data) {
-    if (data && data.length && WG.state.currentPage === 'findings') {
-      WG._cache['findings'] = data; WG._cacheTime['findings'] = Date.now();
-      var main = document.getElementById('mainContent');
-      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderFindings();
-    }
-  });
+  WG.refreshAndRerender('findings', '/findings/', WG.renderFindings, 'findings');
   var sevCounts = {};
   findings.forEach(function(f) { sevCounts[f.severity] = (sevCounts[f.severity] || 0) + 1; });
 
