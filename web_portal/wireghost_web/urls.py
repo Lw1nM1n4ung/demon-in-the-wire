@@ -10,7 +10,7 @@ from scanner.views import (
 from scanner.auth_views import (
     auth_login, auth_logout, auth_csrf, auth_me, auth_users,
     auth_user_create, auth_user_update, auth_user_delete,
-    site_config, update_site_config, check_username, setup_admin, site_setup_complete, user_preferences,
+    site_config, update_site_config, check_username, setup_admin, site_setup_complete, reset_setup, user_preferences,
     list_sessions, revoke_session, revoke_all_sessions,
     audit_log,
 )
@@ -45,6 +45,7 @@ urlpatterns = [
     path('api/auth/check-username/', check_username, name='check-username'),
     path('api/auth/setup-admin/', setup_admin, name='setup-admin'),
     path('api/site-config/setup-complete/', site_setup_complete, name='site-setup-complete'),
+    path('api/site-config/reset-setup/', reset_setup, name='site-reset-setup'),
     path('api/preferences/', user_preferences, name='user-preferences'),
     # Sessions
     path('api/sessions/', list_sessions, name='list-sessions'),

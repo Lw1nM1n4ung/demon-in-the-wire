@@ -387,11 +387,27 @@ WG._skipSetup = function() {
 };
 
 WG.resetSetup = function() {
-  localStorage.removeItem('wg_setup_complete');
-  localStorage.removeItem('wg_setup_admin');
-  localStorage.removeItem('wg_setup_branding');
-  // Reset server-side too — reuse the site-config endpoint
-  // (We'll need a reset endpoint, but for now just navigate)
-  WG._setupStep = 0;
-  WG.navigate('setup');
+  var user = WG.currentUser && WG.currentUser();
+  if (!user || user.role !== 'owner') {
+    WG.toast('Owner role required to re-run setup.', 'error');
+    return;
+  }
+  var msg = 'Re-run setup wizard?\n\nThis DELETES all users (including yours) and clears setup state. You will be signed out and have to create the Owner again. Scans, findings, and assets are kept.';
+  if (!window.confirm(msg)) return;
+
+  WG.api('/site-config/reset-setup/', { method: 'POST' }).then(function(res) {
+    if (res && res.setup_complete === false) {
+      try {
+        localStorage.removeItem('wg_setup_complete');
+        localStorage.removeItem('wg_setup_admin');
+        localStorage.removeItem('wg_setup_branding');
+      } catch (e) {}
+      if (WG.clearSession) WG.clearSession();
+      WG._setupStep = 0;
+      WG.toast('Setup reset — reloading…', 'success');
+      setTimeout(function() { window.location.href = '#setup'; window.location.reload(); }, 600);
+    } else {
+      WG.toast((res && res.error) || 'Reset failed', 'error');
+    }
+  });
 };

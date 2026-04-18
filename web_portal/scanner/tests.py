@@ -332,7 +332,7 @@ class RolePermissionTests(TestCase):
 class PermissionTableTests(TestCase):
     """Data-driven RBAC via Permission + RolePermission tables (seeded by 0007)."""
 
-    EXPECTED_PERMS = 16  # bumped for support:export (migration 0011)
+    EXPECTED_PERMS = 17  # bumped for support:export (0011) + site:reset (0012)
 
     def setUp(self):
         self.owner = User.objects.create_superuser(
@@ -723,3 +723,60 @@ class SupportBundleTests(TestCase):
         self.assertIn('theme=dark', scrubbed)
         self.assertIn('keep this', scrubbed)
         self.assertIn('/api/scans/', scrubbed)
+
+
+class ResetSetupTests(TestCase):
+    """POST /api/site-config/reset-setup/ — Owner-only tear-down to first-run state."""
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username='rs-owner', password='pw-owner-123!', email='rs-owner@example.com'
+        )
+        self.engineer = User.objects.create_user(
+            username='rs-engineer', password='pw-eng-123!', email='rs-eng@example.com',
+            role='engineer',
+        )
+        self.viewer = User.objects.create_user(
+            username='rs-viewer', password='pw-view-123!', email='rs-view@example.com',
+            role='viewer',
+        )
+        # Pretend setup was completed previously.
+        cfg = SiteConfig.get()
+        cfg.setup_complete = True
+        cfg.setup_completed_by = 'rs-owner'
+        cfg.save()
+        self.client = Client()
+
+    def test_engineer_and_viewer_cannot_reset(self):
+        self.client.force_login(self.engineer)
+        self.assertEqual(self.client.post('/api/site-config/reset-setup/').status_code, 403)
+
+        self.client.force_login(self.viewer)
+        self.assertEqual(self.client.post('/api/site-config/reset-setup/').status_code, 403)
+
+        # Nothing changed.
+        self.assertTrue(SiteConfig.get().setup_complete)
+        self.assertEqual(User.objects.count(), 3)
+
+    def test_owner_reset_wipes_users_and_flips_flag(self):
+        self.client.force_login(self.owner)
+        res = self.client.post('/api/site-config/reset-setup/')
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertFalse(body['setup_complete'])
+        self.assertEqual(body['users_deleted'], 3)
+
+        cfg = SiteConfig.get()
+        self.assertFalse(cfg.setup_complete)
+        self.assertIsNone(cfg.setup_completed_at)
+        self.assertEqual(cfg.setup_completed_by, '')
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_site_config_now_reports_setup_incomplete_to_public(self):
+        """After reset, the public /api/site-config/ must advertise setup_complete=false so the wizard re-shows."""
+        self.client.force_login(self.owner)
+        self.client.post('/api/site-config/reset-setup/')
+
+        res = self.client.get('/api/site-config/')
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.json()['setup_complete'])

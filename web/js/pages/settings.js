@@ -206,6 +206,13 @@ WG._filterAudit = function() {
 
 /* ── Export/Import ── */
 WG._settingsExport = function() {
+  var u = WG.currentUser && WG.currentUser();
+  var isOwner = u && u.role === 'owner';
+  var resetSection = isOwner
+    ? ('<div style="border-top:1px solid var(--border-dim);padding-top:20px;"><div style="font-weight:600;color:var(--critical);margin-bottom:8px;">Re-run Setup Wizard</div>' +
+        '<p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:12px;">Wipe all users and flip the portal back to first-run state. You will be signed out and have to create the Owner again. Scans, findings, and assets are preserved.</p>' +
+        '<button class="btn btn-danger" onclick="WG.resetSetup()">Re-run Setup Wizard</button></div>')
+    : '';
   return '<div class="panel" style="max-width:700px;"><div class="panel-header"><div class="panel-title">Export / Import Settings</div></div>' +
     '<div class="panel-body" style="display:flex;flex-direction:column;gap:20px;">' +
       '<div><div style="font-weight:600;color:var(--text-bright);margin-bottom:8px;">Export Settings</div>' +
@@ -218,9 +225,7 @@ WG._settingsExport = function() {
       '<div style="border-top:1px solid var(--border-dim);padding-top:20px;"><div style="font-weight:600;color:var(--critical);margin-bottom:8px;">Reset to Defaults</div>' +
         '<p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:12px;">Clear all saved settings and restore factory defaults.</p>' +
         '<button class="btn btn-danger" onclick="WG._resetSettings()">Reset All Settings</button></div>' +
-      '<div style="border-top:1px solid var(--border-dim);padding-top:20px;"><div style="font-weight:600;color:var(--text-bright);margin-bottom:8px;">Setup Wizard</div>' +
-        '<p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:12px;">Re-run the first-time setup wizard.</p>' +
-        '<button class="btn btn-secondary" onclick="WG.resetSetup()">Re-run Setup Wizard</button></div>' +
+      resetSection +
     '</div></div>';
 };
 

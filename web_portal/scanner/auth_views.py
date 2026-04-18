@@ -376,6 +376,46 @@ def site_setup_complete(request):
     return Response({'setup_complete': True})
 
 
+@api_view(['POST'])
+def reset_setup(request):
+    """Tear the portal back down to first-run state. Owner only.
+
+    Deletes every user (including the caller) and flips
+    SiteConfig.setup_complete back to False so the setup wizard is
+    re-served on the next request. The caller's session is killed
+    as a side-effect of their own user row being deleted.
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=403)
+    if not request.user.has_permission('site:reset'):
+        return Response({'error': 'Not authorized'}, status=403)
+
+    actor = request.user.get_full_name() or request.user.username
+    ip = request.META.get('REMOTE_ADDR', '')
+
+    user_count = User.objects.count()
+    User.objects.all().delete()
+
+    config = SiteConfig.get()
+    config.setup_complete = False
+    config.setup_completed_at = None
+    config.setup_completed_by = ''
+    config.save()
+
+    # Caller's session row is gone with the user delete; drop any
+    # lingering perm cache so a fresh first-run Owner starts clean.
+    try:
+        from scanner.models import User as _U
+        _U.invalidate_perm_cache()
+    except Exception:
+        pass
+
+    AuditLog.log(actor, 'site.reset',
+                 f'Deleted {user_count} users; setup marked incomplete',
+                 'admin', ip)
+    return Response({'setup_complete': False, 'users_deleted': user_count})
+
+
 # ═══════════════ User Preferences ═══════════════
 
 @api_view(['GET', 'PUT'])
