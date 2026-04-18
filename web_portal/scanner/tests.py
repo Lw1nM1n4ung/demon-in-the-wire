@@ -948,3 +948,268 @@ class ApiTokenTests(TestCase):
         # But /api/findings/ IS allowed for Viewers — same token should work.
         res = self.client.get('/api/findings/', HTTP_AUTHORIZATION=f'Token {raw}')
         self.assertEqual(res.status_code, 200)
+
+
+class NotificationsTests(TestCase):
+    """POST /api/notifications/{config,test}/ + the Telegram dispatch path."""
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username='n-owner', password='pw-own-123!', email='n-own@example.com'
+        )
+        self.engineer = User.objects.create_user(
+            username='n-eng', password='pw-eng-123!', email='n-eng@example.com',
+            role='engineer',
+        )
+        self.viewer = User.objects.create_user(
+            username='n-view', password='pw-view-123!', email='n-view@example.com',
+            role='viewer',
+        )
+        self.client = Client()
+
+    def test_owner_only_can_set_bot_token(self):
+        self.client.force_login(self.engineer)
+        res = self.client.put('/api/notifications/config/',
+                              data=json.dumps({'bot_token': '123:abc'}),
+                              content_type='application/json')
+        self.assertEqual(res.status_code, 403)
+
+        self.client.force_login(self.viewer)
+        res = self.client.put('/api/notifications/config/',
+                              data=json.dumps({'bot_token': '123:abc'}),
+                              content_type='application/json')
+        self.assertEqual(res.status_code, 403)
+
+        self.client.force_login(self.owner)
+        res = self.client.put('/api/notifications/config/',
+                              data=json.dumps({'bot_token': '123:abc',
+                                               'shared_chat_id': '-100987654321'}),
+                              content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()['has_token'])
+
+    def test_get_never_returns_raw_token(self):
+        from scanner.models import SiteConfig
+        cfg = SiteConfig.get()
+        cfg.telegram_bot_token = '999999:SECRETVALUE_SHOULD_NEVER_APPEAR_IN_BODY'
+        cfg.save()
+
+        self.client.force_login(self.owner)
+        res = self.client.get('/api/notifications/config/')
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertTrue(body['has_token'])
+        self.assertIn('token_tail', body)
+        # token_tail exposes only the last 6 chars; the secret middle bytes
+        # must not leak.
+        self.assertNotIn('SECRETVALUE_SHOULD_NEVER_APPEAR_IN_BODY',
+                         json.dumps(body))
+        # Non-owner GET hides token_tail entirely.
+        self.client.force_login(self.engineer)
+        res = self.client.get('/api/notifications/config/')
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn('token_tail', res.json())
+        self.assertTrue(res.json()['has_token'])
+
+    def test_test_endpoint_shared_hits_shared_chat_id(self):
+        from scanner.models import SiteConfig
+        cfg = SiteConfig.get()
+        cfg.telegram_bot_token = '999:abc'
+        cfg.telegram_shared_chat_id = '-100123456789'
+        cfg.save()
+
+        from unittest.mock import patch
+        with patch('scanner.notifications.send_telegram', return_value={'ok': True, 'error': None}) as mock_send:
+            self.client.force_login(self.engineer)
+            res = self.client.post('/api/notifications/test/',
+                                   data=json.dumps({'target': 'shared'}),
+                                   content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()['ok'])
+        # Verify target = shared chat id (first positional arg to send_telegram)
+        mock_send.assert_called_once()
+        args, kwargs = mock_send.call_args
+        self.assertEqual(args[0], '-100123456789')
+
+    def test_test_endpoint_self_hits_user_chat_id(self):
+        from scanner.models import SiteConfig, UserPreference
+        cfg = SiteConfig.get()
+        cfg.telegram_bot_token = '999:abc'
+        cfg.save()
+        prefs = UserPreference.for_user(self.engineer)
+        prefs.telegram_chat_id = '555666777'
+        prefs.save()
+
+        from unittest.mock import patch
+        with patch('scanner.notifications.send_telegram', return_value={'ok': True, 'error': None}) as mock_send:
+            self.client.force_login(self.engineer)
+            res = self.client.post('/api/notifications/test/',
+                                   data=json.dumps({'target': 'self'}),
+                                   content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+        args, kwargs = mock_send.call_args
+        self.assertEqual(args[0], '555666777')
+
+    def test_chat_id_validation_rejects_garbage(self):
+        self.client.force_login(self.owner)
+        # Try a path-traversal-like string
+        res = self.client.put('/api/notifications/config/',
+                              data=json.dumps({'shared_chat_id': '../evil'}),
+                              content_type='application/json')
+        self.assertEqual(res.status_code, 400)
+
+        # Engineer putting a malformed personal chat_id via /api/preferences/
+        self.client.force_login(self.engineer)
+        res = self.client.put('/api/preferences/',
+                              data=json.dumps({'telegram': {'chat_id': 'not_a_chat_id!@#'}}),
+                              content_type='application/json')
+        self.assertEqual(res.status_code, 400)
+
+        # A valid negative integer (channel) passes
+        res = self.client.put('/api/preferences/',
+                              data=json.dumps({'telegram': {'chat_id': '-100987654321',
+                                                            'enabled': True}}),
+                              content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+
+    def test_notify_scan_complete_fires_both_channels(self):
+        from scanner.models import SiteConfig, UserPreference, Scan
+        cfg = SiteConfig.get()
+        cfg.telegram_bot_token = '999:abc'
+        cfg.telegram_shared_chat_id = '-100555'
+        cfg.save()
+        prefs = UserPreference.for_user(self.engineer)
+        prefs.telegram_chat_id = '222'
+        prefs.telegram_enabled = True
+        prefs.save()
+
+        scan = Scan.objects.create(
+            name='test-scan', target='10.0.0.1', scan_type='quick',
+            status='completed', created_by=self.engineer,
+        )
+
+        from unittest.mock import patch
+        from scanner.notifications import notify
+        with patch('scanner.notifications.send_telegram', return_value={'ok': True, 'error': None}) as mock_send:
+            notify('scan.complete', scan=scan)
+
+        # Expect two calls: shared + creator DM
+        self.assertEqual(mock_send.call_count, 2)
+        targets = sorted([call.args[0] for call in mock_send.call_args_list])
+        self.assertEqual(targets, ['-100555', '222'])
+
+    def test_notify_respects_user_event_toggle(self):
+        from scanner.models import SiteConfig, UserPreference, Scan
+        cfg = SiteConfig.get()
+        cfg.telegram_bot_token = '999:abc'
+        cfg.telegram_shared_chat_id = '-100555'
+        cfg.save()
+        prefs = UserPreference.for_user(self.engineer)
+        prefs.telegram_chat_id = '222'
+        prefs.telegram_enabled = True
+        prefs.notif_scan_complete = False  # opt out of scan-complete DM
+        prefs.save()
+
+        scan = Scan.objects.create(
+            name='test-scan', target='10.0.0.1', scan_type='quick',
+            status='completed', created_by=self.engineer,
+        )
+
+        from unittest.mock import patch
+        from scanner.notifications import notify
+        with patch('scanner.notifications.send_telegram', return_value={'ok': True, 'error': None}) as mock_send:
+            notify('scan.complete', scan=scan)
+
+        # Shared channel fires; user's DM does NOT (toggle is off).
+        self.assertEqual(mock_send.call_count, 1)
+        self.assertEqual(mock_send.call_args.args[0], '-100555')
+
+    def test_notify_failures_do_not_raise(self):
+        from scanner.models import SiteConfig, Scan
+        cfg = SiteConfig.get()
+        cfg.telegram_bot_token = '999:abc'
+        cfg.telegram_shared_chat_id = '-100555'
+        cfg.save()
+
+        scan = Scan.objects.create(
+            name='test-scan', target='10.0.0.1', scan_type='quick',
+            status='completed', created_by=self.engineer,
+        )
+
+        from unittest.mock import patch
+        from scanner.notifications import notify
+        with patch('scanner.notifications.send_telegram', side_effect=RuntimeError('boom')):
+            # Must not raise — any failure inside notify() is swallowed
+            # so the scan pipeline is never held up by a broken config.
+            notify('scan.complete', scan=scan)  # no assertion needed; no raise = pass
+
+
+class ToolsHealthTests(TestCase):
+    """GET /api/tools-health/ — live probe + cache."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='th-user', password='pw-th-123!', email='th@example.com',
+            role='engineer',
+        )
+        self.client = Client()
+
+    def test_unauth_rejected(self):
+        res = self.client.get('/api/tools-health/')
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_authed_lists_known_tools(self):
+        self.client.force_login(self.user)
+        res = self.client.get('/api/tools-health/')
+        self.assertEqual(res.status_code, 200)
+        rows = res.json()
+        self.assertIsInstance(rows, list)
+        names = {r['name'] for r in rows}
+        # Every known tool must appear in the list — even if the binary isn't
+        # on PATH in the test environment, the row is there with ok=False.
+        self.assertIn('Nmap', names)
+        self.assertIn('Nuclei', names)
+        # Every row has the expected shape.
+        for r in rows:
+            self.assertIn('name', r)
+            self.assertIn('binary', r)
+            self.assertIn('path', r)
+            self.assertIn('version', r)
+            self.assertIn('ok', r)
+
+
+class GeneralSettingsTests(TestCase):
+    """SiteConfig.default_* fields round-trip + drive scan creation."""
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username='g-owner', password='pw-own-123!', email='g-own@example.com'
+        )
+        self.client = Client()
+
+    def test_default_parallelism_round_trips(self):
+        self.client.force_login(self.owner)
+        res = self.client.put('/api/site-config/update/',
+                              data=json.dumps({'default_parallelism': 42}),
+                              content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()['default_parallelism'], 42)
+
+        res = self.client.get('/api/site-config/')
+        self.assertEqual(res.json()['default_parallelism'], 42)
+
+    def test_scan_without_parallelism_uses_site_default(self):
+        from scanner.models import SiteConfig, Scan
+        cfg = SiteConfig.get()
+        cfg.default_parallelism = 42
+        cfg.save()
+
+        self.client.force_login(self.owner)
+        res = self.client.post('/api/scans/',
+                               data=json.dumps({'target': '10.0.0.1',
+                                                'scan_type': 'quick'}),
+                               content_type='application/json')
+        self.assertEqual(res.status_code, 201)
+        body = res.json()
+        scan = Scan.objects.get(id=body['id'])
+        self.assertEqual(scan.parallelism, 42)

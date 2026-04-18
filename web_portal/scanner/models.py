@@ -342,6 +342,19 @@ class SiteConfig(models.Model):
     setup_completed_by = models.CharField(max_length=255, blank=True)
     # IANA zone used to interpret ScheduledScan.time (e.g. "02:00" means 02:00 in this zone).
     schedule_timezone = models.CharField(max_length=64, default='UTC')
+
+    # Scan defaults — fall-back when a Scan is created without these fields set.
+    default_parallelism = models.IntegerField(default=10)
+    default_timeout = models.IntegerField(default=3600)
+    default_report_formats = models.CharField(max_length=100, default='dashboard,docx,xlsx')
+
+    # Telegram notifications — Owner-only writes via /api/notifications/config/.
+    # bot_token is plaintext (Telegram API requires the full value on each call);
+    # never returned raw from any GET endpoint. telegram_shared_chat_id is the
+    # team-wide channel/group (e.g. "-1001234567890" or "@wireghost_alerts").
+    telegram_bot_token = models.CharField(max_length=128, blank=True)
+    telegram_shared_chat_id = models.CharField(max_length=64, blank=True)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -375,6 +388,12 @@ class UserPreference(models.Model):
     notif_report_ready = models.BooleanField(default=True)
     notif_weekly_digest = models.BooleanField(default=False)
     notif_email = models.BooleanField(default=False)
+
+    # Telegram DM routing — optional per-user. The bot token lives on
+    # SiteConfig; this is just the chat the user wants their personal
+    # scan events delivered to. Master switch controls whether we dispatch.
+    telegram_chat_id = models.CharField(max_length=64, blank=True)
+    telegram_enabled = models.BooleanField(default=False)
 
     updated_at = models.DateTimeField(auto_now=True)
 

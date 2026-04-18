@@ -14,6 +14,7 @@ from scanner.auth_views import (
     list_sessions, revoke_session, revoke_all_sessions,
     audit_log,
     tokens_list_or_create, tokens_revoke,
+    notifications_config, notifications_test, tools_health,
 )
 
 router = DefaultRouter()
@@ -61,4 +62,9 @@ urlpatterns = [
     # Personal API tokens (Authorization: Token <wg_...>)
     path('api/auth/tokens/', tokens_list_or_create, name='auth-tokens'),
     path('api/auth/tokens/<uuid:token_id>/revoke/', tokens_revoke, name='auth-token-revoke'),
+    # Telegram notifications (site-wide config + test-send)
+    path('api/notifications/config/', notifications_config, name='notifications-config'),
+    path('api/notifications/test/', notifications_test, name='notifications-test'),
+    # Live tool presence/version probe (drives Settings → Tools tab)
+    path('api/tools-health/', tools_health, name='tools-health'),
 ]

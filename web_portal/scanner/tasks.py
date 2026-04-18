@@ -80,6 +80,18 @@ def run_scan(self, scan_id):
         scan.save()
 
         logger.info(f"Scan {scan_id} completed: {scan.findings_count} findings")
+
+        # Notifications — fire-and-forget; any dispatch error is swallowed
+        # inside notify() so the scan result is never held up.
+        try:
+            from scanner.notifications import notify
+            notify('scan.complete', scan=scan)
+            if scan.critical_count:
+                notify('critical.discovered', scan=scan,
+                       extra={'count': scan.critical_count})
+        except Exception:
+            logger.exception('notification dispatch failed for scan %s', scan_id)
+
         return {'scan_id': scan_id, 'status': 'completed', 'findings': scan.findings_count}
 
     except Exception as e:
@@ -92,6 +104,13 @@ def run_scan(self, scan_id):
                 (scan.completed_at - scan.started_at).total_seconds()
             )
         scan.save()
+
+        try:
+            from scanner.notifications import notify
+            notify('scan.failed', scan=scan)
+        except Exception:
+            logger.exception('notification dispatch failed for scan %s', scan_id)
+
         return {'scan_id': scan_id, 'status': 'failed', 'error': str(e)[:500]}
 
 

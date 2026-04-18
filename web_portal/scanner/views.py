@@ -73,13 +73,22 @@ class ScanViewSet(viewsets.ModelViewSet):
         safe_name = raw_name[:255]
         safe_target = raw_target[:500]
 
+        # Fall back to SiteConfig defaults when the client didn't explicitly
+        # send a value — lets Owners raise org-wide parallelism/timeout/
+        # report_formats from Settings → General without touching code.
+        from scanner.models import SiteConfig
+        cfg = SiteConfig.get()
+        parallelism = data['parallelism'] if 'parallelism' in request.data else cfg.default_parallelism
+        timeout = data['timeout'] if 'timeout' in request.data else cfg.default_timeout
+        report_formats = data['report_formats'] if 'report_formats' in request.data else cfg.default_report_formats
+
         scan = Scan.objects.create(
             name=safe_name,
             target=safe_target,
             scan_type=data['scan_type'],
-            parallelism=data['parallelism'],
-            timeout=data['timeout'],
-            report_formats=data['report_formats'],
+            parallelism=parallelism,
+            timeout=timeout,
+            report_formats=report_formats,
             version_detect=data['version_detect'],
             os_detect=data['os_detect'],
             service_enum=data['service_enum'],

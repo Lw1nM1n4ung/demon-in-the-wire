@@ -264,17 +264,30 @@ def auth_user_delete(request, user_id):
 
 # ═══════════════ Site Config (setup state) ═══════════════
 
+def _serialize_site_config(config, *, include_private=False):
+    data = {
+        'setup_complete': config.setup_complete,
+        'setup_completed_at': config.setup_completed_at.isoformat() if config.setup_completed_at else None,
+        'setup_completed_by': config.setup_completed_by,
+        'schedule_timezone': config.schedule_timezone,
+        'default_parallelism': config.default_parallelism,
+        'default_timeout': config.default_timeout,
+        'default_report_formats': config.default_report_formats,
+    }
+    if include_private:
+        # Owner-only extras for the Notifications tab; note that bot_token is
+        # NEVER surfaced in full — only the tail + a has-it flag.
+        tok = config.telegram_bot_token or ''
+        data['telegram_shared_chat_id'] = config.telegram_shared_chat_id
+    return data
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def site_config(request):
     """Get site-wide config (setup state). Public so login/setup pages can check."""
     config = SiteConfig.get()
-    return Response({
-        'setup_complete': config.setup_complete,
-        'setup_completed_at': config.setup_completed_at.isoformat() if config.setup_completed_at else None,
-        'setup_completed_by': config.setup_completed_by,
-        'schedule_timezone': config.schedule_timezone,
-    })
+    return Response(_serialize_site_config(config))
 
 
 @api_view(['PUT'])
@@ -295,18 +308,46 @@ def update_site_config(request):
             config.schedule_timezone = tz
             changed.append(f'schedule_timezone={tz}')
 
+    if 'default_parallelism' in request.data:
+        try:
+            p = int(request.data.get('default_parallelism', 10))
+        except (TypeError, ValueError):
+            return Response({'error': 'default_parallelism must be an integer'}, status=400)
+        if not 1 <= p <= 500:
+            return Response({'error': 'default_parallelism must be between 1 and 500'}, status=400)
+        if p != config.default_parallelism:
+            config.default_parallelism = p
+            changed.append(f'default_parallelism={p}')
+
+    if 'default_timeout' in request.data:
+        try:
+            t = int(request.data.get('default_timeout', 3600))
+        except (TypeError, ValueError):
+            return Response({'error': 'default_timeout must be an integer'}, status=400)
+        if not 60 <= t <= 86400:
+            return Response({'error': 'default_timeout must be between 60 and 86400 seconds'}, status=400)
+        if t != config.default_timeout:
+            config.default_timeout = t
+            changed.append(f'default_timeout={t}')
+
+    if 'default_report_formats' in request.data:
+        v = str(request.data.get('default_report_formats', ''))[:100]
+        allowed = {'dashboard', 'html', 'docx', 'xlsx'}
+        parts = [s.strip() for s in v.split(',') if s.strip()]
+        if not parts or any(p not in allowed for p in parts):
+            return Response({'error': f'default_report_formats must be a CSV of {sorted(allowed)}'}, status=400)
+        new_val = ','.join(parts)
+        if new_val != config.default_report_formats:
+            config.default_report_formats = new_val
+            changed.append(f'default_report_formats={new_val}')
+
     if changed:
         config.save()
         ip = request.META.get('REMOTE_ADDR', '')
         actor = request.user.get_full_name() or request.user.username
         AuditLog.log(actor, 'siteconfig.update', '; '.join(changed), 'config', ip)
 
-    return Response({
-        'setup_complete': config.setup_complete,
-        'setup_completed_at': config.setup_completed_at.isoformat() if config.setup_completed_at else None,
-        'setup_completed_by': config.setup_completed_by,
-        'schedule_timezone': config.schedule_timezone,
-    })
+    return Response(_serialize_site_config(config))
 
 
 @api_view(['GET'])
@@ -435,28 +476,39 @@ def reset_setup(request):
 
 # ═══════════════ User Preferences ═══════════════
 
+_CHAT_ID_RE_STR = r'^-?\d+$|^@[\w]{5,}$'
+
+
+def _serialize_prefs(prefs):
+    return {
+        'theme_mode': prefs.theme_mode,
+        'accent_color': prefs.accent_color,
+        'font_size': prefs.font_size,
+        'notifications': {
+            'scanComplete': prefs.notif_scan_complete,
+            'scanFailed': prefs.notif_scan_failed,
+            'criticalFinding': prefs.notif_critical_finding,
+            'reportReady': prefs.notif_report_ready,
+            'weeklyDigest': prefs.notif_weekly_digest,
+            'email': prefs.notif_email,
+        },
+        'telegram': {
+            'enabled': prefs.telegram_enabled,
+            'chat_id': prefs.telegram_chat_id,
+        },
+    }
+
+
 @api_view(['GET', 'PUT'])
 def user_preferences(request):
-    """Get or update current user's preferences (theme, notifications)."""
+    """Get or update current user's preferences (theme, notifications, telegram DM)."""
     if not request.user.is_authenticated:
         return Response({'error': 'Not authenticated'}, status=401)
 
     prefs = UserPreference.for_user(request.user)
 
     if request.method == 'GET':
-        return Response({
-            'theme_mode': prefs.theme_mode,
-            'accent_color': prefs.accent_color,
-            'font_size': prefs.font_size,
-            'notifications': {
-                'scanComplete': prefs.notif_scan_complete,
-                'scanFailed': prefs.notif_scan_failed,
-                'criticalFinding': prefs.notif_critical_finding,
-                'reportReady': prefs.notif_report_ready,
-                'weeklyDigest': prefs.notif_weekly_digest,
-                'email': prefs.notif_email,
-            },
-        })
+        return Response(_serialize_prefs(prefs))
 
     # PUT — update preferences (validate types and values)
     data = request.data
@@ -475,27 +527,27 @@ def user_preferences(request):
         prefs.font_size = val if val in VALID_SIZES else 'default'
     if 'notifications' in data:
         n = data['notifications']
-        if 'scanComplete' in n: prefs.notif_scan_complete = n['scanComplete']
-        if 'scanFailed' in n: prefs.notif_scan_failed = n['scanFailed']
-        if 'criticalFinding' in n: prefs.notif_critical_finding = n['criticalFinding']
-        if 'reportReady' in n: prefs.notif_report_ready = n['reportReady']
-        if 'weeklyDigest' in n: prefs.notif_weekly_digest = n['weeklyDigest']
-        if 'email' in n: prefs.notif_email = n['email']
+        if 'scanComplete' in n: prefs.notif_scan_complete = bool(n['scanComplete'])
+        if 'scanFailed' in n: prefs.notif_scan_failed = bool(n['scanFailed'])
+        if 'criticalFinding' in n: prefs.notif_critical_finding = bool(n['criticalFinding'])
+        if 'reportReady' in n: prefs.notif_report_ready = bool(n['reportReady'])
+        if 'weeklyDigest' in n: prefs.notif_weekly_digest = bool(n['weeklyDigest'])
+        if 'email' in n: prefs.notif_email = bool(n['email'])
+    if 'telegram' in data:
+        t = data['telegram']
+        if 'chat_id' in t:
+            cid = str(t.get('chat_id') or '').strip()[:64]
+            if cid and not re.match(_CHAT_ID_RE_STR, cid):
+                return Response(
+                    {'error': 'telegram.chat_id must be a numeric ID or @username (min 5 chars)'},
+                    status=400,
+                )
+            prefs.telegram_chat_id = cid
+        if 'enabled' in t:
+            prefs.telegram_enabled = bool(t['enabled'])
     prefs.save()
 
-    return Response({
-        'theme_mode': prefs.theme_mode,
-        'accent_color': prefs.accent_color,
-        'font_size': prefs.font_size,
-        'notifications': {
-            'scanComplete': prefs.notif_scan_complete,
-            'scanFailed': prefs.notif_scan_failed,
-            'criticalFinding': prefs.notif_critical_finding,
-            'reportReady': prefs.notif_report_ready,
-            'weeklyDigest': prefs.notif_weekly_digest,
-            'email': prefs.notif_email,
-        },
-    })
+    return Response(_serialize_prefs(prefs))
 
 
 # ═══════════════ Active Sessions ═══════════════
@@ -664,3 +716,114 @@ def tokens_revoke(request, token_id):
         AuditLog.log(actor, 'token.revoke', f'{tok.prefix} ({tok.name})', 'admin', ip)
 
     return Response(_serialize_token(tok))
+
+
+# ═══════════════ Telegram notifications ═══════════════
+
+@api_view(['GET', 'PUT'])
+def notifications_config(request):
+    """Site-wide Telegram config.
+
+    GET: everyone sees ``{has_token}``; Owner also sees ``{token_tail, shared_chat_id}``.
+    PUT: Owner only. Fields: ``bot_token``, ``shared_chat_id`` (both optional).
+    Empty string clears. Bot token is never returned raw once saved.
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+
+    is_owner = request.user.has_permission('site:config')
+    cfg = SiteConfig.get()
+    tok = cfg.telegram_bot_token or ''
+
+    if request.method == 'GET':
+        body = {'has_token': bool(tok)}
+        if is_owner:
+            body['token_tail'] = ('...' + tok[-6:]) if tok else ''
+            body['shared_chat_id'] = cfg.telegram_shared_chat_id
+        return Response(body)
+
+    # PUT
+    if not is_owner:
+        return Response({'error': 'Not authorized'}, status=403)
+
+    changed = []
+    if 'bot_token' in request.data:
+        new_tok = str(request.data.get('bot_token') or '').strip()[:128]
+        if new_tok != cfg.telegram_bot_token:
+            cfg.telegram_bot_token = new_tok
+            changed.append('bot_token=' + ('<set>' if new_tok else '<cleared>'))
+    if 'shared_chat_id' in request.data:
+        cid = str(request.data.get('shared_chat_id') or '').strip()[:64]
+        if cid and not re.match(_CHAT_ID_RE_STR, cid):
+            return Response(
+                {'error': 'shared_chat_id must be a numeric ID or @channelname (min 5 chars)'},
+                status=400,
+            )
+        if cid != cfg.telegram_shared_chat_id:
+            cfg.telegram_shared_chat_id = cid
+            changed.append(f'shared_chat_id={cid or "<cleared>"}')
+
+    if changed:
+        cfg.save()
+        ip = request.META.get('REMOTE_ADDR', '')
+        actor = request.user.get_full_name() or request.user.username
+        AuditLog.log(actor, 'telegram.config', '; '.join(changed), 'config', ip)
+
+    return Response({
+        'has_token': bool(cfg.telegram_bot_token),
+        'token_tail': ('...' + cfg.telegram_bot_token[-6:]) if cfg.telegram_bot_token else '',
+        'shared_chat_id': cfg.telegram_shared_chat_id,
+    })
+
+
+@api_view(['POST'])
+def notifications_test(request):
+    """Send a test Telegram message. Body: ``{"target": "shared"|"self"}``.
+
+    Returns 200 with ``{ok: true}`` if Telegram accepted the send, 400 with
+    ``{error}`` otherwise (propagates Telegram's error description so the
+    user sees "chat not found" / "bot was blocked by the user" directly).
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+
+    target = str(request.data.get('target', 'self')).strip().lower()
+    if target not in ('shared', 'self'):
+        return Response({'error': 'target must be "shared" or "self"'}, status=400)
+
+    cfg = SiteConfig.get()
+    if not cfg.telegram_bot_token:
+        return Response({'error': 'Telegram bot token not configured.'}, status=400)
+
+    if target == 'shared':
+        chat_id = cfg.telegram_shared_chat_id
+        if not chat_id:
+            return Response({'error': 'Shared channel ID not configured.'}, status=400)
+    else:  # self
+        prefs = UserPreference.for_user(request.user)
+        chat_id = prefs.telegram_chat_id
+        if not chat_id:
+            return Response({'error': 'Set your personal chat_id first.'}, status=400)
+
+    from scanner.notifications import send_telegram, NotificationError
+    actor = request.user.get_full_name() or request.user.username
+    text = f'✅ Wire_Ghost test message from @{actor}'
+    try:
+        result = send_telegram(chat_id, text, bot_token=cfg.telegram_bot_token)
+    except NotificationError as e:
+        return Response({'error': str(e)}, status=400)
+    if result.get('ok'):
+        return Response({'ok': True})
+    return Response({'error': result.get('error') or 'Telegram API rejected the send'}, status=400)
+
+
+@api_view(['GET'])
+def tools_health(request):
+    """Live probe of external scan tools. Auth'd users only (no sensitive data,
+    but the list reveals what pipeline components are present — keep behind auth).
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+    from scanner.tools_health import probe_all
+    refresh = str(request.query_params.get('refresh', '')).lower() in ('1', 'true', 'yes')
+    return Response(probe_all(refresh=refresh))

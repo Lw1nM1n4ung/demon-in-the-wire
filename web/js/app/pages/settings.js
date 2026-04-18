@@ -22,17 +22,69 @@ WG.renderSettings = function() {
     '<div id="settingsTabContent">' + WG._settingsGeneral() + '</div>';
 };
 
-/* ── General ── */
+/* ── General ──
+ * Scan defaults that drive new scans when the client doesn't override them.
+ * Owner sees editable inputs; everyone else sees the current values read-only. */
 WG._settingsGeneral = function() {
-  return '<div class="panel" style="max-width:700px;"><div class="panel-header"><div class="panel-title">General Settings</div></div>' +
+  var user = WG.currentUser && WG.currentUser();
+  var isOwner = user && user.role === 'owner';
+  var cfg = WG._cache['site_config'] || {};
+  WG.api('/site-config/').then(function(data) {
+    if (data && WG.state.currentPage === 'settings') {
+      WG._cache['site_config'] = data;
+      /* Populate input values live after the GET resolves. */
+      var set = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+      set('genParallelism', data.default_parallelism);
+      set('genTimeout', data.default_timeout);
+      set('genReportFormats', data.default_report_formats);
+    }
+  });
+  var esc = WG.escHtml;
+  var ro = isOwner ? '' : 'disabled readonly';
+  return '<div class="panel" style="max-width:720px;"><div class="panel-header"><div class="panel-title">Scan Defaults</div></div>' +
     '<div class="panel-body" style="display:flex;flex-direction:column;gap:18px;">' +
-      '<div class="form-group"><label class="form-label">API Base URL</label><input class="form-input" value="' + WG.API_BASE + '"></div>' +
-      '<div class="form-group"><label class="form-label">Default Output Directory</label><input class="form-input" value="/root/output"></div>' +
-      '<div class="form-group"><label class="form-label">Default Parallelism</label><input class="form-input" type="number" value="10"></div>' +
-      '<div class="form-group"><label class="form-label">Default Timeout (seconds)</label><input class="form-input" type="number" value="3600"></div>' +
-      '<div class="form-toggle" onclick="this.querySelector(\'.toggle-track\').classList.toggle(\'on\')"><div class="toggle-track on"></div><span class="toggle-label">Auto-generate reports on scan completion</span></div>' +
-      '<div><button class="btn btn-primary" onclick="WG.toast(\'Settings saved\',\'success\')">Save Settings</button></div>' +
+      '<div style="font-size:0.82rem;color:var(--text-dim);line-height:1.6;">' +
+        'These values fill in when a scan is launched without an explicit override (e.g. via the <span class="mono">/api/scans/</span> API). ' +
+        (isOwner ? 'Edit them here and click Save.' : 'Ask your Owner to change these in Settings.') +
+      '</div>' +
+      '<div class="form-group"><label class="form-label">Default Parallelism</label>' +
+        '<input class="form-input" id="genParallelism" type="number" min="1" max="500" value="' + esc(cfg.default_parallelism || 10) + '" ' + ro + '>' +
+        '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Number of concurrent hosts the pipeline processes (1–500).</div>' +
+      '</div>' +
+      '<div class="form-group"><label class="form-label">Default Timeout (seconds)</label>' +
+        '<input class="form-input" id="genTimeout" type="number" min="60" max="86400" value="' + esc(cfg.default_timeout || 3600) + '" ' + ro + '>' +
+        '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Per-scan wall-clock limit (60–86400s).</div>' +
+      '</div>' +
+      '<div class="form-group"><label class="form-label">Default Report Formats</label>' +
+        '<input class="form-input mono" id="genReportFormats" value="' + esc(cfg.default_report_formats || 'dashboard,docx,xlsx') + '" ' + ro + '>' +
+        '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Comma-separated from: <span class="mono">dashboard</span>, <span class="mono">html</span>, <span class="mono">docx</span>, <span class="mono">xlsx</span>.</div>' +
+      '</div>' +
+      (isOwner
+        ? '<div><button class="btn btn-primary" onclick="WG._saveGeneralDefaults()">Save</button></div>'
+        : '') +
     '</div></div>';
+};
+
+WG._saveGeneralDefaults = function() {
+  var p = parseInt(document.getElementById('genParallelism').value, 10);
+  var t = parseInt(document.getElementById('genTimeout').value, 10);
+  var r = (document.getElementById('genReportFormats').value || '').trim();
+  if (!(p >= 1 && p <= 500)) { WG.toast('Parallelism must be 1–500.', 'error'); return; }
+  if (!(t >= 60 && t <= 86400)) { WG.toast('Timeout must be 60–86400s.', 'error'); return; }
+  if (!r) { WG.toast('Report formats required.', 'error'); return; }
+  WG.api('/site-config/update/', {
+    method: 'PUT',
+    body: JSON.stringify({
+      default_parallelism: p, default_timeout: t, default_report_formats: r,
+    }),
+  }).then(function(res) {
+    if (res && res.default_parallelism != null) {
+      WG._cache['site_config'] = res;
+      WG.toast('Scan defaults saved', 'success');
+    } else {
+      WG.toast((res && res.error) || 'Save failed', 'error');
+    }
+  });
 };
 
 /* ── Theme ── */
@@ -86,56 +138,241 @@ WG._settingsTheme = function() {
     '</div></div>';
 };
 
-/* ── Notifications ── */
+/* ── Notifications ──
+ * Telegram bot dispatches scan events to:
+ *   - Shared channel (site-wide, Owner-configured)
+ *   - Per-user DM (optional, each user's own chat_id)
+ * Event toggles are server-side via /api/preferences/. */
 WG._settingsNotifications = function() {
-  var prefs = WG.getNotifPrefs();
-  function tog(key, label) {
-    return '<div class="form-toggle" onclick="WG._toggleNotif(this,\'' + key + '\')">' +
-      '<div class="toggle-track' + (prefs[key] ? ' on' : '') + '"></div>' +
+  var user = WG.currentUser && WG.currentUser();
+  var isOwner = user && user.role === 'owner';
+  var esc = WG.escHtml;
+
+  /* Seed from cache, then fetch both endpoints to populate inputs. */
+  var cfg = WG._cache['notif_config'] || { has_token: false, token_tail: '', shared_chat_id: '' };
+  var prefs = WG._cache['prefs'] || {
+    notifications: {}, telegram: { chat_id: '', enabled: false }
+  };
+  Promise.all([
+    WG.api('/notifications/config/'),
+    WG.api('/preferences/'),
+  ]).then(function(results) {
+    var c = results[0], p = results[1];
+    if (c && WG.state.currentPage === 'settings') {
+      WG._cache['notif_config'] = c;
+      var sc = document.getElementById('tgSharedChat');
+      if (sc) sc.value = c.shared_chat_id || '';
+      var tt = document.getElementById('tgTokenTail');
+      if (tt) tt.textContent = c.has_token ? (c.token_tail || '(configured)') : '(not set)';
+    }
+    if (p && WG.state.currentPage === 'settings') {
+      WG._cache['prefs'] = p;
+      var cid = document.getElementById('tgChatId');
+      if (cid) cid.value = (p.telegram && p.telegram.chat_id) || '';
+      var en = document.getElementById('tgEnabledTrack');
+      if (en) en.classList.toggle('on', !!(p.telegram && p.telegram.enabled));
+      /* sync event toggles */
+      Object.keys(p.notifications || {}).forEach(function(k) {
+        var el = document.getElementById('notifTrack_' + k);
+        if (el) el.classList.toggle('on', !!p.notifications[k]);
+      });
+    }
+  });
+
+  function eventToggle(key, label) {
+    var on = !!(prefs.notifications && prefs.notifications[key]);
+    return '<div class="form-toggle" onclick="WG._toggleNotif(\'' + key + '\')">' +
+      '<div class="toggle-track' + (on ? ' on' : '') + '" id="notifTrack_' + key + '"></div>' +
       '<span class="toggle-label">' + label + '</span></div>';
   }
-  return '<div class="panel" style="max-width:700px;"><div class="panel-header"><div class="panel-title">Notification Preferences</div></div>' +
-    '<div class="panel-body" style="display:flex;flex-direction:column;gap:14px;">' +
-      tog('scanComplete', 'Scan completed') +
-      tog('scanFailed', 'Scan failed') +
-      tog('criticalFinding', 'Critical vulnerability discovered') +
-      tog('reportReady', 'Report ready for download') +
-      tog('weeklyDigest', 'Weekly summary digest') +
-      '<div style="border-top:1px solid var(--border-dim);padding-top:14px;margin-top:4px;">' +
-        tog('email', 'Send email notifications') +
+
+  var sharedBlock = '<div class="form-group"><label class="form-label">Shared Channel ID</label>' +
+    '<input class="form-input mono" id="tgSharedChat" placeholder="-1001234567890 or @wireghost_alerts" value="' + esc(cfg.shared_chat_id || '') + '" ' + (isOwner ? '' : 'disabled readonly') + '>' +
+    '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Numeric channel/group ID or @channelname. Your bot must be a member/admin of the channel.</div>' +
+    '</div>';
+
+  var ownerTokenBlock = isOwner
+    ? '<div class="form-group"><label class="form-label">Bot Token <span class="mono" style="color:var(--text-dim);font-size:0.72rem;">' +
+        'current: <span id="tgTokenTail">' + esc(cfg.has_token ? (cfg.token_tail || '(configured)') : '(not set)') + '</span></span></label>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<input class="form-input mono" id="tgBotToken" type="password" placeholder="Paste new token (e.g. 12345:ABC...) or leave blank to keep current">' +
+        '<button class="btn btn-secondary btn-sm" onclick="var i=document.getElementById(\'tgBotToken\');i.type=i.type===\'password\'?\'text\':\'password\';">Show</button>' +
+      '</div>' +
+      '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Create via <span class="mono">@BotFather</span>. Clear the field and save empty to remove.</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;"><button class="btn btn-primary" onclick="WG._saveTelegramConfig()">Save Telegram config</button>' +
+      (cfg.has_token ? '<button class="btn btn-secondary" onclick="WG._telegramTest(\'shared\')">Send test to shared</button>' : '') +
+      '</div>'
+    : '<div style="font-size:0.78rem;color:var(--text-dim);">' +
+      (cfg.has_token ? '✓ Shared Telegram bot is configured by your Owner.' : '⚠ Telegram bot not configured. Ask your Owner to set it up.') +
+      '</div>';
+
+  var personalBlock = '<div style="border-top:1px solid var(--border-dim);padding-top:16px;">' +
+    '<div style="font-weight:600;color:var(--text-bright);margin-bottom:8px;">Your personal DM</div>' +
+    '<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:12px;">' +
+      'Optional — receive Telegram DMs for scans YOU run. DM <span class="mono">@userinfobot</span> to find your chat_id, then start a DM with your Wire_Ghost bot so it can message you.' +
+    '</div>' +
+    '<div class="form-group"><label class="form-label">Your chat ID</label>' +
+      '<input class="form-input mono" id="tgChatId" placeholder="123456789" value="' + esc((prefs.telegram && prefs.telegram.chat_id) || '') + '">' +
+    '</div>' +
+    '<div class="form-toggle" onclick="WG._togglePersonalTelegram()">' +
+      '<div class="toggle-track' + ((prefs.telegram && prefs.telegram.enabled) ? ' on' : '') + '" id="tgEnabledTrack"></div>' +
+      '<span class="toggle-label">Enable personal Telegram DMs</span>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:12px;">' +
+      '<button class="btn btn-primary btn-sm" onclick="WG._savePersonalTelegram()">Save DM settings</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="WG._telegramTest(\'self\')">Send test to me</button>' +
+    '</div></div>';
+
+  return '<div class="panel" style="max-width:820px;"><div class="panel-header"><div class="panel-title">Telegram Notifications</div></div>' +
+    '<div class="panel-body" style="display:flex;flex-direction:column;gap:18px;">' +
+      sharedBlock +
+      ownerTokenBlock +
+      personalBlock +
+      '<div style="border-top:1px solid var(--border-dim);padding-top:16px;">' +
+        '<div style="font-weight:600;color:var(--text-bright);margin-bottom:10px;">Events to notify on</div>' +
+        '<div style="display:flex;flex-direction:column;gap:10px;">' +
+          eventToggle('scanComplete', 'Scan completed') +
+          eventToggle('scanFailed', 'Scan failed') +
+          eventToggle('criticalFinding', 'Critical vulnerability discovered') +
+          eventToggle('reportReady', 'Report ready for download') +
+          eventToggle('weeklyDigest', 'Weekly summary digest') +
+        '</div>' +
+        '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:10px;">Controls YOUR personal DM only. The shared channel fires on every event regardless.</div>' +
       '</div>' +
     '</div></div>';
 };
 
-WG._toggleNotif = function(el, key) {
-  var track = el.querySelector('.toggle-track');
-  track.classList.toggle('on');
-  var prefs = WG.getNotifPrefs();
-  prefs[key] = track.classList.contains('on');
-  WG.saveNotifPrefs(prefs);
+WG._saveTelegramConfig = function() {
+  var tokenEl = document.getElementById('tgBotToken');
+  var chatEl = document.getElementById('tgSharedChat');
+  var body = {};
+  if (tokenEl && tokenEl.value) body.bot_token = tokenEl.value;
+  if (chatEl) body.shared_chat_id = chatEl.value.trim();
+  WG.api('/notifications/config/', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }).then(function(res) {
+    if (res && res.has_token !== undefined) {
+      WG._cache['notif_config'] = res;
+      WG.toast('Telegram config saved', 'success');
+      if (tokenEl) tokenEl.value = '';  /* clear so next save doesn't re-submit */
+      WG.switchSettingsTab('notifications');
+    } else {
+      WG.toast((res && res.error) || 'Save failed', 'error');
+    }
+  });
 };
 
-/* ── Tools ── */
+WG._savePersonalTelegram = function() {
+  var chat = (document.getElementById('tgChatId').value || '').trim();
+  var en = document.getElementById('tgEnabledTrack').classList.contains('on');
+  WG.api('/preferences/', {
+    method: 'PUT',
+    body: JSON.stringify({ telegram: { chat_id: chat, enabled: en } }),
+  }).then(function(res) {
+    if (res && res.telegram) {
+      WG._cache['prefs'] = res;
+      WG.toast('DM settings saved', 'success');
+    } else {
+      WG.toast((res && res.error) || 'Save failed', 'error');
+    }
+  });
+};
+
+WG._togglePersonalTelegram = function() {
+  var el = document.getElementById('tgEnabledTrack');
+  if (el) el.classList.toggle('on');
+};
+
+WG._telegramTest = function(target) {
+  WG.api('/notifications/test/', {
+    method: 'POST',
+    body: JSON.stringify({ target: target }),
+  }).then(function(res) {
+    if (res && res.ok) {
+      WG.toast('Test message sent via Telegram.', 'success');
+    } else {
+      WG.toast((res && res.error) || 'Telegram test failed', 'error');
+    }
+  });
+};
+
+WG._toggleNotif = function(key) {
+  var el = document.getElementById('notifTrack_' + key);
+  if (!el) return;
+  el.classList.toggle('on');
+  var patch = { notifications: {} };
+  patch.notifications[key] = el.classList.contains('on');
+  WG.api('/preferences/', {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  }).then(function(res) {
+    if (res && res.notifications) {
+      WG._cache['prefs'] = res;
+    }
+    /* Keep the legacy localStorage in sync so old code paths still behave. */
+    try {
+      var prefs = WG.getNotifPrefs ? WG.getNotifPrefs() : {};
+      prefs[key] = el.classList.contains('on');
+      if (WG.saveNotifPrefs) WG.saveNotifPrefs(prefs);
+    } catch (e) {}
+  });
+};
+
+/* ── Tools ──
+ * Live probe of external scan tools on the api container's PATH.
+ * Server caches results for 30s; the Refresh button passes ?refresh=1. */
 WG._settingsTools = function() {
-  var tools = [
-    { name: 'Nmap', desc: 'Port scanning & service detection', ok: true, path: '/usr/bin/nmap' },
-    { name: 'Nuclei', desc: 'Template-based vulnerability scanner', ok: true, path: '/usr/bin/nuclei' },
-    { name: 'Dirsearch', desc: 'Web directory brute-forcing', ok: true, path: '/usr/bin/dirsearch' },
-    { name: 'Searchsploit', desc: 'Exploit database search', ok: true, path: '/usr/bin/searchsploit' },
-    { name: 'WPScan', desc: 'WordPress vulnerability scanner', ok: true, path: '/usr/bin/wpscan' },
-    { name: 'httpx', desc: 'HTTP probe & tech detection', ok: true, path: '/usr/bin/httpx' },
-    { name: 'fping', desc: 'Host discovery via ICMP', ok: true, path: '/usr/bin/fping' },
-    { name: 'OpenVAS', desc: 'Full vulnerability assessment', ok: false, path: '' },
-  ];
-  return '<div class="panel" style="max-width:700px;"><div class="panel-header"><div class="panel-title">External Tools</div></div>' +
-    '<table class="data-table"><thead><tr><th>Tool</th><th>Description</th><th>Path</th><th>Status</th></tr></thead><tbody>' +
-    tools.map(function(t) {
-      return '<tr><td style="font-weight:600;color:var(--text-bright);">' + t.name + '</td>' +
-        '<td style="color:var(--text-dim);font-size:0.78rem;">' + t.desc + '</td>' +
-        '<td class="mono" style="font-size:0.72rem;">' + (t.path || '\u2014') + '</td>' +
-        '<td>' + (t.ok ? '<span class="status-badge completed" style="font-size:0.65rem;"><span class="dot"></span> Found</span>' : '<span class="status-badge failed" style="font-size:0.65rem;"><span class="dot"></span> Missing</span>') + '</td></tr>';
-    }).join('') +
-    '</tbody></table></div>';
+  var esc = WG.escHtml;
+  var tools = WG._cache['tools_health'] || [];
+  /* Background refresh so the next render shows fresh data. */
+  WG.api('/tools-health/').then(function(data) {
+    if (Array.isArray(data) && WG.state.currentPage === 'settings') {
+      WG._cache['tools_health'] = data;
+      /* Rerender in-place if still on Tools tab. */
+      var container = document.getElementById('toolsHealthBody');
+      if (container) {
+        container.textContent = '';
+        container.insertAdjacentHTML('beforeend', data.map(_toolsRow).join(''));
+      }
+    }
+  });
+
+  return '<div class="panel" style="max-width:760px;">' +
+    '<div class="panel-header">' +
+      '<div class="panel-title">External Tools <span class="count">' + tools.length + '</span></div>' +
+      '<button class="btn btn-secondary btn-sm" onclick="WG._refreshToolsHealth()">Refresh</button>' +
+    '</div>' +
+    '<table class="data-table">' +
+      '<thead><tr><th>Tool</th><th>Binary</th><th>Path</th><th>Version</th><th>Status</th></tr></thead>' +
+      '<tbody id="toolsHealthBody">' + tools.map(_toolsRow).join('') + '</tbody>' +
+    '</table>' +
+    (tools.length ? '' : '<div class="panel-empty" style="padding:14px 0;font-size:0.82rem;color:var(--text-dim);">Probing tools…</div>') +
+    '</div>';
+};
+
+function _toolsRow(t) {
+  var esc = WG.escHtml;
+  return '<tr>' +
+    '<td style="font-weight:600;color:var(--text-bright);">' + esc(t.name) + '</td>' +
+    '<td class="mono" style="font-size:0.75rem;">' + esc(t.binary) + '</td>' +
+    '<td class="mono" style="font-size:0.72rem;">' + esc(t.path || '—') + '</td>' +
+    '<td class="mono" style="font-size:0.72rem;color:var(--text-dim);">' + esc(t.version || '—') + '</td>' +
+    '<td>' + (t.ok
+      ? '<span class="status-badge completed" style="font-size:0.65rem;"><span class="dot"></span> Found</span>'
+      : '<span class="status-badge failed" style="font-size:0.65rem;"><span class="dot"></span> Missing</span>') + '</td>' +
+  '</tr>';
+}
+
+WG._refreshToolsHealth = function() {
+  WG.api('/tools-health/?refresh=1').then(function(data) {
+    if (Array.isArray(data)) {
+      WG._cache['tools_health'] = data;
+      WG.toast('Tools re-probed', 'info');
+      if (WG.state.currentPage === 'settings') WG.switchSettingsTab('tools');
+    }
+  });
 };
 
 /* ── Sessions (API-driven) ── */
