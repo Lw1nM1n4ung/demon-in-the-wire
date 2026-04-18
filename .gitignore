@@ -13,5 +13,7 @@ Tools/
 *.png
 *.tar.gz
 !templates/*.tar.gz
+templates/Templates/
+logs/
 .playwright-mcp/
 .claude/scheduled_tasks.lock

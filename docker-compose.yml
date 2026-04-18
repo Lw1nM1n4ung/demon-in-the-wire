@@ -67,6 +67,10 @@ services:
       - report_assets:/data/assets
       - ./src:/app/src:ro
       - ./templates:/opt/nuclei-template-archives:ro
+      - ${WIREGHOST_LOG_DIR:-./logs}/api:/app/logs
+      # Read-only view of nginx's log directory so the support-bundle
+      # endpoint can include portal access/error logs.
+      - ${WIREGHOST_LOG_DIR:-./logs}/nginx:/app/logs/nginx:ro
     depends_on:
       db:
         condition: service_healthy
@@ -87,7 +91,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A wireghost_web worker -l info -c 2 -Q scans,reports
+    command: celery -A wireghost_web worker -l info -c 2 -Q scans,reports --logfile=/app/logs/celery-worker.log
 
   # ── Celery Beat (scheduled scan dispatcher) ──
   beat:
@@ -102,7 +106,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A wireghost_web beat -l info
+    command: celery -A wireghost_web beat -l info --logfile=/app/logs/celery-beat.log
 
   # ── Web Portal (Nginx) ──
   portal:
@@ -113,6 +117,7 @@ services:
     volumes:
       - ./web:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${WIREGHOST_LOG_DIR:-./logs}/nginx:/var/log/nginx
     depends_on:
       - api
 

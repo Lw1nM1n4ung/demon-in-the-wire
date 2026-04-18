@@ -345,10 +345,68 @@ When run from the portal, output lives under `/data/output/<target>/` inside the
 
 ---
 
+## Support & logging
+
+All Wire_Ghost services write logs to host-side files so they survive container rebuilds and can be rotated, tailed, or shipped with normal host tooling.
+
+### Log locations
+
+With `WIREGHOST_LOG_DIR=./logs` (default), after `docker compose up -d`:
+
+```
+./logs/
+├── api/
+│   ├── django.log           # Django + scanner logger (10 MB × 5 rotation)
+│   ├── celery-worker.log    # Celery worker — scan pipeline execution
+│   └── celery-beat.log      # Celery beat — scheduled scan dispatcher
+└── nginx/
+    ├── access.log           # Portal HTTP access log
+    └── error.log            # Portal HTTP error log
+```
+
+Set `WIREGHOST_LOG_DIR=/var/log/wireghost` (or any absolute path) in `.env` for production. Change `WIREGHOST_LOG_LEVEL` to `DEBUG` / `WARNING` / `ERROR` to adjust Django/scanner verbosity without code changes.
+
+### Rotation
+
+Django uses `RotatingFileHandler` with a 10 MB × 5-backup policy. Under multiple gunicorn workers this can race at the rotation boundary — for heavy-logging deployments, delegate rotation to `logrotate` with `copytruncate` instead:
+
+```
+# /etc/logrotate.d/wireghost
+/var/log/wireghost/*/*.log {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+```
+
+### Support bundle (Owner only)
+
+Navigate to **Settings → Support** and click **Download support bundle** to generate a `wireghost-support-YYYY-MM-DD-HHMM.tar.gz` archive containing:
+
+- `logs/api/*.log`, `logs/nginx/*.log` — recent log tails (capped at ~30 MB total)
+- `data/snapshot.json` — versions, env var *names*, site config (no logo paths, no secrets)
+- `data/permissions.json` — role → permission-code matrix
+- `data/counts.json` — user/scan/host/finding/asset totals
+- `data/audit-tail.json` — last 500 audit rows (usernames hashed to opaque refs)
+- `data/site-config.json` — setup state + schedule timezone
+- `manifest.json` — index of every file + per-file source vs. bundled byte counts
+- `README.txt` — human-readable index
+
+Before bundling, all log content passes through a redaction step that strips: HTTP `Authorization` headers (Bearer / Basic / Digest / Token), session / CSRF / `wg_user_info` cookies, JSON `password` / `api_key` / `secret` fields, `X-API-Key` / `X-Auth-Token` style headers, and DSN-style `proto://user:pass@host` credentials. IPs, usernames, file paths, and stack traces are preserved so the logs remain debuggable.
+
+Each export is audit-logged as `support.export` with actor + IP + bundle size. Engineers and Viewers cannot export — the `support:export` permission is Owner-only by migration.
+
+> **Extend redaction for your deployment:** the starter patterns in `web_portal/scanner/support.py::REDACTION_PATTERNS` cover standard session/auth tokens. If your deployment emits customer-specific tokens, partner API keys, or webhook signatures, add one-line regex entries in the `TODO(operator)` block so they're stripped before bundling.
+
+---
+
 ## Tests
 
 ```bash
-# Django + portal (46 tests)
+# Django + portal (50 tests)
 docker compose exec api python manage.py test scanner.tests
 
 # CLI pipeline

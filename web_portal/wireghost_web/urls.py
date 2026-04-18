@@ -5,6 +5,7 @@ from scanner.views import (
     ScanViewSet, HostViewSet, FindingViewSet, AssetViewSet,
     ScanPolicyViewSet, ScheduledScanViewSet,
     dashboard_stats, download_report, report_config, upload_logo,
+    support_bundle,
 )
 from scanner.auth_views import (
     auth_login, auth_logout, auth_csrf, auth_me, auth_users,
@@ -51,4 +52,6 @@ urlpatterns = [
     path('api/sessions/revoke-all/', revoke_all_sessions, name='revoke-all-sessions'),
     # Audit Log
     path('api/audit-log/', audit_log, name='audit-log'),
+    # Support diagnostic bundle (Owner only)
+    path('api/support-bundle/', support_bundle, name='support-bundle'),
 ]

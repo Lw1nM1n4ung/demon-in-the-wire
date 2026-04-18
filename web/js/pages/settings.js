@@ -15,6 +15,7 @@ WG.renderSettings = function() {
       '<div class="tab" data-tab="export" onclick="WG.switchSettingsTab(\'export\')">Export/Import</div>' +
       '<div class="tab" data-tab="api" onclick="WG.switchSettingsTab(\'api\')">API</div>' +
       (isAdmin ? '<div class="tab" data-tab="admin" onclick="WG.switchSettingsTab(\'admin\')">Administration</div>' : '') +
+      (isAdmin ? '<div class="tab" data-tab="support" onclick="WG.switchSettingsTab(\'support\')">Support</div>' : '') +
       '<div class="tab" data-tab="about" onclick="WG.switchSettingsTab(\'about\')">About</div>' +
     '</div>' +
     '<div id="settingsTabContent">' + WG._settingsGeneral() + '</div>';
@@ -346,6 +347,73 @@ WG._saveScheduleTimezone = function() {
   });
 };
 
+/* ── Support (Owner-only) ── */
+WG._settingsSupport = function() {
+  var user = WG.currentUser && WG.currentUser();
+  if (!user || user.role !== 'owner') {
+    return '<div class="panel" style="max-width:700px;"><div class="panel-body"><div class="panel-empty"><div class="icon">&#128274;</div>Owner access required.</div></div></div>';
+  }
+  var esc = WG.escHtml;
+  var lastTs = null;
+  try { lastTs = localStorage.getItem('wg_support_last'); } catch (e) {}
+  var lastHint = '';
+  if (lastTs) {
+    lastHint = '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Last export: <span class="mono">' + esc(WG.timeAgo ? WG.timeAgo(lastTs) : lastTs) + '</span></div>';
+  }
+  return '<div class="panel" style="max-width:760px;"><div class="panel-header"><div class="panel-title">Support Diagnostic Bundle</div></div>' +
+    '<div class="panel-body" style="display:flex;flex-direction:column;gap:18px;">' +
+      '<div style="font-size:0.85rem;color:var(--text-dim);line-height:1.6;">' +
+        'Generates a <span class="mono">.tar.gz</span> archive containing the most recent Django, Celery worker, Celery beat, and nginx logs, plus a non-sensitive system snapshot (version, permissions matrix, user/scan/asset counts, and the last 500 audit rows). ' +
+        'Hand this file to Wire_Ghost support when opening a ticket.' +
+      '</div>' +
+      '<div style="border-left:3px solid var(--accent);background:var(--accent-dim);padding:12px 14px;border-radius:8px;font-size:0.78rem;color:var(--text-bright);">' +
+        '<strong>Redaction</strong> — Authorization headers, session / CSRF cookies, password JSON fields, and DSN-style credentials are stripped before bundling. IPs, usernames, stack traces, and file paths are preserved so the logs stay debuggable.' +
+      '</div>' +
+      '<div>' +
+        '<button class="btn btn-primary" id="btnSupportBundle" onclick="WG._downloadSupportBundle()">' +
+          '<span>&#8681;</span> Download support bundle' +
+        '</button>' +
+        lastHint +
+      '</div>' +
+      '<div style="border-top:1px solid var(--border-dim);padding-top:14px;font-size:0.78rem;color:var(--text-dim);">' +
+        'Logs persist on the host at the directory set via <span class="mono">WIREGHOST_LOG_DIR</span> in <span class="mono">.env</span> (default <span class="mono">./logs</span>). Per-container subdirectories: <span class="mono">api/</span>, <span class="mono">nginx/</span>.' +
+      '</div>' +
+    '</div></div>';
+};
+
+WG._downloadSupportBundle = function() {
+  var btn = document.getElementById('btnSupportBundle');
+  if (btn) { btn.disabled = true; btn.dataset.orig = btn.innerHTML; btn.textContent = 'Building…'; }
+  var url = (WG.API_BASE || '/api') + '/support-bundle/';
+  fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  }).then(function(res) {
+    if (!res.ok) {
+      if (res.status === 403) { WG.toast('Owner role required to export a support bundle.', 'error'); }
+      else { WG.toast('Bundle export failed (HTTP ' + res.status + ')', 'error'); }
+      throw new Error('bundle');
+    }
+    var disp = res.headers.get('Content-Disposition') || '';
+    var m = disp.match(/filename="([^"]+)"/);
+    var fname = m ? m[1] : ('wireghost-support-' + Date.now() + '.tar.gz');
+    return res.blob().then(function(blob) { return { blob: blob, fname: fname }; });
+  }).then(function(obj) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(obj.blob);
+    a.download = obj.fname;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    try { localStorage.setItem('wg_support_last', new Date().toISOString()); } catch (e) {}
+    WG.toast('Support bundle downloaded', 'success');
+    if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.orig || '&#8681; Download support bundle'; }
+  }).catch(function() {
+    if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.orig || '&#8681; Download support bundle'; }
+  });
+};
+
 /* ── Tab switcher ── */
 WG.switchSettingsTab = function(tab) {
   document.querySelectorAll('#settingsTabs .tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
@@ -354,7 +422,7 @@ WG.switchSettingsTab = function(tab) {
     general: WG._settingsGeneral, theme: WG._settingsTheme, notifications: WG._settingsNotifications,
     tools: WG._settingsTools, sessions: WG._settingsSessions,
     audit: WG._settingsAudit, export: WG._settingsExport, api: WG._settingsApi,
-    admin: WG._settingsAdmin, about: WG._settingsAbout,
+    admin: WG._settingsAdmin, support: WG._settingsSupport, about: WG._settingsAbout,
   };
   el.innerHTML = (tabs[tab] || WG._settingsGeneral)();
 };

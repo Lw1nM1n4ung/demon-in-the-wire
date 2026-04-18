@@ -196,7 +196,10 @@ WG._validateAdmin = async function() {
 
   err.style.display = 'none';
 
-  // Create the admin account via API
+  // Any previous user's session must not survive into the newly-set-up portal.
+  if (WG.clearSession) WG.clearSession();
+
+  // Create the admin account via API.
   try {
     var res = await fetch(WG.API_BASE + '/auth/setup-admin/', {
       method: 'POST',
@@ -210,7 +213,24 @@ WG._validateAdmin = async function() {
       return;
     }
   } catch (e) {
-    // API not available — store locally for manual creation later
+    err.textContent = 'Could not reach the API to create the account. Please check the backend and try again.';
+    err.style.display = 'block';
+    return;
+  }
+
+  // Immediately sign the new Owner in so they land on the dashboard without
+  // having to re-enter credentials. WG.login sets the Django session cookie.
+  try {
+    var ok = await WG.login(user, pass);
+    if (!ok) {
+      // setup_admin succeeded but login didn't — unusual; send the user to
+      // the login page with a hint rather than leaving them stuck.
+      WG.navigate('login');
+      return;
+    }
+  } catch (e) {
+    WG.navigate('login');
+    return;
   }
 
   var avatar = name.split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().substring(0, 2);
@@ -344,14 +364,20 @@ WG._setupPrev = function() {
 
 WG._finishSetup = function() {
   localStorage.setItem('wg_setup_complete', '1');
-  // Persist to server
+  // Persist to server (best-effort; authenticated Owner has the perm)
   var admin = {};
   try { admin = JSON.parse(localStorage.getItem('wg_setup_admin') || '{}'); } catch (e) {}
   WG.api('/site-config/setup-complete/', {
     method: 'POST',
     body: JSON.stringify({ completed_by: admin.username || 'admin' }),
   });
-  WG.navigate('login');
+  // The new Owner was auto-logged-in in _createAdmin, so land on the
+  // dashboard; otherwise fall back to the login page.
+  if (WG.isLoggedIn && WG.isLoggedIn()) {
+    WG.navigate('dashboard');
+  } else {
+    WG.navigate('login');
+  }
 };
 
 WG._skipSetup = function() {

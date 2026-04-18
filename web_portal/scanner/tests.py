@@ -89,6 +89,55 @@ class ScheduleTimezoneTests(TestCase):
         self.assertGreater(next_run, timezone.now())
 
 
+class SetupAdminRoundTripTests(TestCase):
+    """Lock the regression: Owner created via the setup wizard must be able to log in."""
+
+    def setUp(self):
+        # Mimic a fresh install — wipe Owner + clear setup_complete.
+        User.objects.filter(role='owner').delete()
+        cfg = SiteConfig.get()
+        cfg.setup_complete = False
+        cfg.save()
+        self.client = Client()
+
+    def test_setup_admin_then_login_succeeds(self):
+        # Step 1 — run the setup wizard's endpoint.
+        res = self.client.post(
+            '/api/auth/setup-admin/',
+            data=json.dumps({
+                'username': 'freshowner',
+                'email': 'fresh@example.com',
+                'name': 'Fresh Owner',
+                'password': 'Fresh-Pass-123!',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+
+        # Confirm the DB state is sane.
+        u = User.objects.get(username='freshowner')
+        self.assertEqual(u.role, 'owner')
+        self.assertTrue(u.is_superuser)
+        self.assertTrue(u.check_password('Fresh-Pass-123!'),
+                        'Password hash must verify against the plaintext we sent')
+
+        # Step 2 — log in with the exact credentials we just set. This is the
+        # step the user reported as broken.
+        self.client.logout()
+        res = self.client.post(
+            '/api/auth/login/',
+            data=json.dumps({
+                'username': 'freshowner',
+                'password': 'Fresh-Pass-123!',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        body = res.json()
+        self.assertEqual(body.get('role'), 'owner')
+        self.assertEqual(body.get('username'), 'freshowner')
+
+
 class RolePermissionTests(TestCase):
     """Three-role model: Owner (unique), Engineer, Viewer."""
 
@@ -283,7 +332,7 @@ class RolePermissionTests(TestCase):
 class PermissionTableTests(TestCase):
     """Data-driven RBAC via Permission + RolePermission tables (seeded by 0007)."""
 
-    EXPECTED_PERMS = 15
+    EXPECTED_PERMS = 16  # bumped for support:export (migration 0011)
 
     def setUp(self):
         self.owner = User.objects.create_superuser(
@@ -573,3 +622,104 @@ class AssetAggregationTests(TestCase):
         ips = {row['ip'] for row in (res.json().get('results') or res.json())}
         self.assertIn('10.8.8.2', ips)
         self.assertNotIn('10.8.8.1', ips)
+
+
+class SupportBundleTests(TestCase):
+    """POST /api/support-bundle/ — Owner-only diagnostic export with redaction."""
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username='sb-owner', password='pw-owner-123!', email='sb-owner@example.com'
+        )
+        self.engineer = User.objects.create_user(
+            username='sb-engineer', password='pw-eng-123!', email='sb-eng@example.com',
+            role='engineer',
+        )
+        self.viewer = User.objects.create_user(
+            username='sb-viewer', password='pw-view-123!', email='sb-view@example.com',
+            role='viewer',
+        )
+        self.client = Client()
+
+    def _log_dir_with(self, tmpdir, name, content):
+        """Write a log file under a nested subdir so _iter_log_files finds it."""
+        import os
+        sub = os.path.join(tmpdir, 'api')
+        os.makedirs(sub, exist_ok=True)
+        with open(os.path.join(sub, name), 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def test_support_bundle_owner_only(self):
+        """Engineer and Viewer get 403; Owner gets 200."""
+        self.client.force_login(self.engineer)
+        self.assertEqual(self.client.post('/api/support-bundle/').status_code, 403)
+
+        self.client.force_login(self.viewer)
+        self.assertEqual(self.client.post('/api/support-bundle/').status_code, 403)
+
+        self.client.force_login(self.owner)
+        res = self.client.post('/api/support-bundle/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'application/gzip')
+        self.assertIn('attachment; filename=', res['Content-Disposition'])
+        self.assertIn('.tar.gz', res['Content-Disposition'])
+
+    def test_support_bundle_contains_expected_files(self):
+        """Extracted archive has the manifest + system snapshot + permissions matrix."""
+        import io
+        import tarfile
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._log_dir_with(tmp, 'django.log', 'INFO startup\nGET /api/dashboard/ 200\n')
+            with patch.dict('os.environ', {'WIREGHOST_LOG_FILE_DIR': tmp}):
+                self.client.force_login(self.owner)
+                res = self.client.post('/api/support-bundle/')
+
+        self.assertEqual(res.status_code, 200)
+        tf = tarfile.open(fileobj=io.BytesIO(res.content), mode='r:gz')
+        names = set(tf.getnames())
+        self.assertIn('manifest.json', names)
+        self.assertIn('README.txt', names)
+        self.assertIn('data/snapshot.json', names)
+        self.assertIn('data/permissions.json', names)
+        self.assertIn('data/audit-tail.json', names)
+        self.assertIn('data/counts.json', names)
+        self.assertIn('data/site-config.json', names)
+        self.assertIn('logs/api/django.log', names)
+
+        # Permissions matrix must actually contain the owner role.
+        perms_json = tf.extractfile('data/permissions.json').read().decode('utf-8')
+        perms = json.loads(perms_json)
+        self.assertIn('owner', perms)
+        self.assertIn('support:export', perms['owner'])
+
+    def test_support_bundle_redacts_secrets(self):
+        """Known-secret patterns must not survive the redact() pass."""
+        from scanner.support import REDACTION_PATTERNS, redact
+
+        raw = (
+            'GET /api/scans/ HTTP/1.1\n'
+            'Authorization: Bearer abcdef1234567890TOPSECRET\n'
+            'Cookie: sessionid=SHOULD_NOT_LEAK; csrftoken=ALSO_NOT_LEAK; theme=dark\n'
+            '{"username": "alice", "password": "hunter2", "note": "keep this"}\n'
+            'X-API-Key: sk_live_DONTLEAKTHIS\n'
+            'redis://user:supersecret@redis:6379/0\n'
+        )
+        self.assertGreaterEqual(len(REDACTION_PATTERNS), 1)
+
+        scrubbed = redact(raw)
+        # Secrets gone
+        self.assertNotIn('abcdef1234567890TOPSECRET', scrubbed)
+        self.assertNotIn('SHOULD_NOT_LEAK', scrubbed)
+        self.assertNotIn('ALSO_NOT_LEAK', scrubbed)
+        self.assertNotIn('hunter2', scrubbed)
+        self.assertNotIn('sk_live_DONTLEAKTHIS', scrubbed)
+        self.assertNotIn('supersecret', scrubbed)
+        # Surrounding context preserved
+        self.assertIn('[REDACTED]', scrubbed)
+        self.assertIn('alice', scrubbed)
+        self.assertIn('theme=dark', scrubbed)
+        self.assertIn('keep this', scrubbed)
+        self.assertIn('/api/scans/', scrubbed)

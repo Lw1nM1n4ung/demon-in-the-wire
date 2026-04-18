@@ -634,3 +634,30 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
         schedule.save(update_fields=['last_run'])
 
         return Response(ScanSerializer(scan).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+def support_bundle(request):
+    """Stream a diagnostic .tar.gz bundle. Owner only (support:export perm)."""
+    if not request.user.has_permission('support:export'):
+        return Response({'error': 'Not authorized'}, status=403)
+
+    import os
+    from django.http import HttpResponse
+    from django.utils import timezone
+    from scanner.models import AuditLog
+    from scanner.support import build_support_bundle
+
+    log_dir = os.environ.get('WIREGHOST_LOG_FILE_DIR', '/app/logs')
+    blob = build_support_bundle(log_dir=log_dir, requested_by=request.user)
+
+    actor = request.user.get_full_name() or request.user.username
+    ip = request.META.get('REMOTE_ADDR', '')
+    AuditLog.log(actor, 'support.export', f'size_bytes={len(blob)}', 'admin', ip)
+
+    filename = f"wireghost-support-{timezone.now().strftime('%Y-%m-%d-%H%M')}.tar.gz"
+    resp = HttpResponse(blob, content_type='application/gzip')
+    resp['Content-Disposition'] = f'attachment; filename="{filename}"'
+    resp['Content-Length'] = str(len(blob))
+    resp['X-Content-Type-Options'] = 'nosniff'
+    return resp

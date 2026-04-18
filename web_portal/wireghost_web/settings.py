@@ -208,3 +208,46 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
     ],
 }
+
+# Logging — RotatingFileHandler writes to /app/logs which is bind-mounted
+# to $WIREGHOST_LOG_DIR/api on the host via docker-compose.yml.
+LOG_DIR = os.environ.get('WIREGHOST_LOG_FILE_DIR', '/app/logs')
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    _LOG_DIR_OK = os.access(LOG_DIR, os.W_OK)
+except OSError:
+    _LOG_DIR_OK = False
+
+_APP_LOG_LEVEL = os.environ.get('WIREGHOST_LOG_LEVEL', 'INFO').upper()
+
+_LOG_HANDLERS = {
+    'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'},
+}
+if _LOG_DIR_OK:
+    _LOG_HANDLERS['file'] = {
+        'class': 'logging.handlers.RotatingFileHandler',
+        'filename': os.path.join(LOG_DIR, 'django.log'),
+        'maxBytes': 10 * 1024 * 1024,
+        'backupCount': 5,
+        'formatter': 'verbose',
+        'encoding': 'utf-8',
+    }
+
+_ACTIVE_HANDLERS = list(_LOG_HANDLERS.keys())
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {'format': '{asctime} {levelname:7s} {name}: {message}', 'style': '{'},
+    },
+    'handlers': _LOG_HANDLERS,
+    'loggers': {
+        'django': {'handlers': _ACTIVE_HANDLERS, 'level': 'INFO', 'propagate': False},
+        'django.server': {'handlers': _ACTIVE_HANDLERS, 'level': 'INFO', 'propagate': False},
+        'django.request': {'handlers': _ACTIVE_HANDLERS, 'level': 'WARNING', 'propagate': False},
+        'scanner': {'handlers': _ACTIVE_HANDLERS, 'level': _APP_LOG_LEVEL, 'propagate': False},
+        'wireghost_web': {'handlers': _ACTIVE_HANDLERS, 'level': _APP_LOG_LEVEL, 'propagate': False},
+        'celery': {'handlers': _ACTIVE_HANDLERS, 'level': 'INFO', 'propagate': False},
+    },
+}
