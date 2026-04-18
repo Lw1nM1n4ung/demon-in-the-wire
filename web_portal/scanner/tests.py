@@ -1213,3 +1213,56 @@ class GeneralSettingsTests(TestCase):
         body = res.json()
         scan = Scan.objects.get(id=body['id'])
         self.assertEqual(scan.parallelism, 42)
+
+
+class LoginRateLimitTests(TestCase):
+    """POST /api/auth/login/ rate limiter — failures count, success resets."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='rl-user', password='pw-goodpass-123!', email='rl@example.com'
+        )
+        self.client = Client()
+        # The rate-limit uses the shared Django cache; tests.py overrides
+        # CACHES to LocMemCache so we're not persisting state between cases.
+        from django.core.cache import cache
+        cache.clear()
+
+    def _login(self, password):
+        return self.client.post(
+            '/api/auth/login/',
+            data=json.dumps({'username': 'rl-user', 'password': password}),
+            content_type='application/json',
+        )
+
+    def test_successful_login_does_not_consume_bucket(self):
+        """Repeated correct logins must not eventually lock the user out."""
+        from scanner.auth_views import _LOGIN_MAX
+        for _ in range(_LOGIN_MAX + 3):
+            res = self._login('pw-goodpass-123!')
+            self.assertEqual(res.status_code, 200)
+        # Even after _LOGIN_MAX + 3 correct logins, the next one still works.
+        self.assertEqual(self._login('pw-goodpass-123!').status_code, 200)
+
+    def test_failed_logins_trip_rate_limit(self):
+        from scanner.auth_views import _LOGIN_MAX
+        # _LOGIN_MAX failures are allowed; the next one is blocked.
+        for i in range(_LOGIN_MAX):
+            res = self._login('wrong')
+            self.assertEqual(res.status_code, 401, f'failure {i+1} unexpectedly blocked')
+        res = self._login('wrong')
+        self.assertEqual(res.status_code, 429)
+        self.assertIn('Retry-After', res.headers)
+
+    def test_success_clears_prior_failures(self):
+        """A correct login after some failures must reset the bucket."""
+        from scanner.auth_views import _LOGIN_MAX
+        for _ in range(_LOGIN_MAX - 1):  # leave one slot
+            self._login('wrong')
+        self.assertEqual(self._login('pw-goodpass-123!').status_code, 200)
+        # After success, failures start fresh — _LOGIN_MAX wrongs are
+        # required again to trigger 429.
+        for i in range(_LOGIN_MAX):
+            self.assertEqual(self._login('wrong').status_code, 401,
+                             f'failure {i+1} unexpectedly blocked after reset')
+        self.assertEqual(self._login('wrong').status_code, 429)

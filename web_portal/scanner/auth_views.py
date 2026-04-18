@@ -65,14 +65,24 @@ def _serialize_user(u):
 @authentication_classes([CsrfExemptAuth])
 @permission_classes([AllowAny])
 def auth_login(request):
-    """Authenticate user and create session."""
-    # Rate limiting via Django cache — use REMOTE_ADDR only (not spoofable via headers)
+    """Authenticate user and create session.
+
+    Rate limiting only counts FAILED attempts. A successful login clears the
+    counter, so a legitimate user can't lock themselves (or their whole NAT
+    subnet) out by logging in several times in a 5-minute window. The bucket
+    key stays per-REMOTE_ADDR to cap credential-stuffing from one origin.
+    """
     ip = request.META.get('REMOTE_ADDR', '')
     cache_key = f'login_attempts:{ip}'
     attempts = cache.get(cache_key, 0)
     if attempts >= _LOGIN_MAX:
-        return Response({'error': 'Too many login attempts. Try again later.'}, status=429)
-    cache.set(cache_key, attempts + 1, _LOGIN_WINDOW)
+        retry_after = _LOGIN_WINDOW
+        resp = Response(
+            {'error': 'Too many failed login attempts. Try again later.'},
+            status=429,
+        )
+        resp['Retry-After'] = str(retry_after)
+        return resp
 
     username = request.data.get('username', '')
     password = request.data.get('password', '')
@@ -87,10 +97,16 @@ def auth_login(request):
 
     user = authenticate(request, username=username, password=password)
     if user is None:
+        # Count the failure — only failures burn tokens.
+        cache.set(cache_key, attempts + 1, _LOGIN_WINDOW)
         return Response({'error': 'Invalid credentials'}, status=401)
 
     if not user.is_active:
+        cache.set(cache_key, attempts + 1, _LOGIN_WINDOW)
         return Response({'error': 'Account disabled'}, status=403)
+
+    # Success: drop the bucket so this user's retries don't count against them.
+    cache.delete(cache_key)
 
     login(request, user)
     AuditLog.log(user.get_full_name() or user.username, 'login', f'Logged in from {ip}', 'auth', ip)
