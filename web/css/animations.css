@@ -7,25 +7,12 @@
 html { scroll-behavior: smooth; }
 .main { scroll-behavior: smooth; }
 
-/* ── Scan line ── */
-body::after {
-  content: '';
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  opacity: 0.12;
-  animation: scanline 8s linear infinite;
-  pointer-events: none;
-  z-index: 9999;
-}
+/* Scan-line animation removed per user preference — no decorative
+ * viewport-wide line sweeping down every 8s. Interaction animations
+ * (tab underlines, button ripples, hover sweeps) are kept because
+ * they are feedback, not decoration. */
 
 /* ═══════════════ KEYFRAMES ═══════════════ */
-
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100vh); }
-}
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }

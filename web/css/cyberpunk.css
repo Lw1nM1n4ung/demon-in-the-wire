@@ -199,11 +199,9 @@
   background: rgba(255,45,149,0.3);
 }
 
-/* ── Scan line (override default) ── */
-body.cyberpunk::after {
-  background: linear-gradient(90deg, transparent, var(--cyber-cyan), transparent) !important;
-  opacity: 0.1 !important;
-}
+/* Scan-line override removed — the base scan line no longer exists.
+ * (Static CRT stripes via .cyberpunk::before stay — they're a visual
+ * texture, not an animation.) */
 
 /* ═══════════════ GLITCH SYSTEM ═══════════════ */
 

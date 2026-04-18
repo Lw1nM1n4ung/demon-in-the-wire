@@ -3,11 +3,7 @@
    Clean, editorial, refined with depth and warmth
    ═══════════════════════════════════════════════════ */
 
-/* ── Remove dark scan line ── */
-body[data-theme="light"]::after {
-  background: linear-gradient(90deg, transparent, var(--accent), transparent) !important;
-  opacity: 0.04 !important;
-}
+/* Scan-line override removed — the base scan line no longer exists. */
 
 /* ── Topbar ── */
 body[data-theme="light"] .topbar {
