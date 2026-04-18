@@ -30,6 +30,25 @@ WG.renderTopology = function(scanId) {
   var esc = WG.escHtml;
   var completedScans = scans.filter(function(s) { return s.status === 'completed'; });
 
+  /* Cold-cache bootstrap: getCached returns [] on first visit. Only
+   * re-render if we genuinely had nothing cached — otherwise a late
+   * refresh would blow away a graph the user has just drawn by picking
+   * a scan. Guard against open modals + already-drawn graphs. */
+  var hadColdCache = (scans.length === 0);
+  WG.fetchData('/scans/', 'scans').then(function(data) {
+    if (!Array.isArray(data) || !data.length) return;
+    WG._cache['scans'] = data; WG._cacheTime['scans'] = Date.now();
+    if (WG.state.currentPage !== 'topology') return;
+    if (!hadColdCache) return;  // dropdown already populated; don't clobber
+    if (document.querySelector('.modal-overlay.active')) return;
+    /* Only re-render if no graph is currently drawn (user hasn't picked yet). */
+    if (document.querySelectorAll('#topoContainer svg').length) return;
+    var main = document.getElementById('mainContent');
+    if (!main) return;
+    main.textContent = '';
+    main.insertAdjacentHTML('beforeend', WG.renderTopology(scanId));
+  });
+
   var scanOpts = completedScans.map(function(s) {
     var sel = (scanId && s.id === scanId) ? ' selected' : '';
     return '<option value="' + s.id + '"' + sel + '>' + esc(s.name) + ' (' + esc(s.target) + ')</option>';
