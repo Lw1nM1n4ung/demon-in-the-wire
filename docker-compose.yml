@@ -113,7 +113,9 @@ services:
     image: nginx:alpine
     restart: unless-stopped
     ports:
-      - "9995:80"
+      # Explicit all-interfaces bind so LAN/VPN/SSH-tunnel clients can reach
+      # the portal. Change to 127.0.0.1:9995:80 if you want host-only access.
+      - "0.0.0.0:9995:80"
     volumes:
       - ./web:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
