@@ -13,6 +13,7 @@ from scanner.auth_views import (
     site_config, update_site_config, check_username, setup_admin, site_setup_complete, reset_setup, user_preferences,
     list_sessions, revoke_session, revoke_all_sessions,
     audit_log,
+    tokens_list_or_create, tokens_revoke,
 )
 
 router = DefaultRouter()
@@ -57,4 +58,7 @@ urlpatterns = [
     path('api/audit-log/', audit_log, name='audit-log'),
     # Support diagnostic bundle (Owner only)
     path('api/support-bundle/', support_bundle, name='support-bundle'),
+    # Personal API tokens (Authorization: Token <wg_...>)
+    path('api/auth/tokens/', tokens_list_or_create, name='auth-tokens'),
+    path('api/auth/tokens/<uuid:token_id>/revoke/', tokens_revoke, name='auth-token-revoke'),
 ]

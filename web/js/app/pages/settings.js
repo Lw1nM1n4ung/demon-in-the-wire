@@ -14,6 +14,7 @@ WG.renderSettings = function() {
       '<div class="tab" data-tab="audit" onclick="WG.switchSettingsTab(\'audit\')">Audit Log</div>' +
       '<div class="tab" data-tab="export" onclick="WG.switchSettingsTab(\'export\')">Export/Import</div>' +
       '<div class="tab" data-tab="api" onclick="WG.switchSettingsTab(\'api\')">API</div>' +
+      '<div class="tab" data-tab="tokens" onclick="WG.switchSettingsTab(\'tokens\')">API Tokens</div>' +
       (isAdmin ? '<div class="tab" data-tab="admin" onclick="WG.switchSettingsTab(\'admin\')">Administration</div>' : '') +
       (isAdmin ? '<div class="tab" data-tab="support" onclick="WG.switchSettingsTab(\'support\')">Support</div>' : '') +
       '<div class="tab" data-tab="about" onclick="WG.switchSettingsTab(\'about\')">About</div>' +
@@ -419,6 +420,150 @@ WG._downloadSupportBundle = function() {
   });
 };
 
+/* ── API Tokens ── */
+WG._settingsTokens = function() {
+  /* Any authenticated user can manage their own tokens — the token inherits
+   * the caller's permissions, so there's no escalation vector. */
+  var esc = WG.escHtml;
+  var tokens = WG.getCached('api_tokens', '/auth/tokens/');
+  WG.fetchData('/auth/tokens/', 'api_tokens').then(function(data) {
+    if (data && WG.state.currentPage === 'settings') {
+      WG._cache['api_tokens'] = data;
+      WG._cacheTime['api_tokens'] = Date.now();
+    }
+  });
+  return '<div class="panel" style="max-width:860px;">' +
+    '<div class="panel-header">' +
+      '<div class="panel-title">API Tokens <span class="count">' + tokens.length + '</span></div>' +
+      '<button class="btn btn-primary btn-sm" onclick="WG._showCreateTokenForm()">+ New token</button>' +
+    '</div>' +
+    '<div class="panel-body" style="display:flex;flex-direction:column;gap:14px;">' +
+      '<div style="font-size:0.82rem;color:var(--text-dim);line-height:1.6;">' +
+        'Tokens authenticate programmatic requests via <span class="mono">Authorization: Token wg_…</span>. ' +
+        'They inherit your role\u2019s permissions. Each token is shown <strong>once</strong> at creation — from then on only the prefix is visible. Store it like a password.' +
+      '</div>' +
+      '<div id="tokenCreatePanel" style="display:none;"></div>' +
+      (tokens.length
+        ? '<table class="data-table"><thead><tr>' +
+            '<th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Status</th><th></th>' +
+          '</tr></thead><tbody>' +
+          tokens.map(function(t) {
+            var revoked = !!t.revoked_at;
+            var statusCell = revoked
+              ? '<span class="status-badge failed" style="font-size:0.65rem;">Revoked</span>'
+              : '<span class="status-badge completed" style="font-size:0.65rem;"><span class="dot"></span> Active</span>';
+            var revokeBtn = revoked
+              ? ''
+              : '<button class="btn btn-ghost btn-sm" style="color:var(--critical);" onclick="WG._revokeToken(\'' + esc(t.id) + '\',\'' + esc(t.name) + '\')">Revoke</button>';
+            return '<tr>' +
+              '<td style="font-weight:600;color:var(--text-bright);">' + esc(t.name) + '</td>' +
+              '<td class="mono" style="font-size:0.75rem;">' + esc(t.prefix) + '…</td>' +
+              '<td class="mono" style="font-size:0.72rem;">' + (t.created_at ? WG.fmtDate(t.created_at) : '—') + '</td>' +
+              '<td class="mono" style="font-size:0.72rem;">' + (t.last_used_at ? WG.timeAgo(t.last_used_at) : '—') + '</td>' +
+              '<td>' + statusCell + '</td>' +
+              '<td>' + revokeBtn + '</td>' +
+            '</tr>';
+          }).join('') +
+          '</tbody></table>'
+        : '<div class="panel-empty" style="padding:20px 0;"><div class="icon">&#128273;</div>No tokens yet. Click <strong>+ New token</strong> to create one.</div>'
+      ) +
+    '</div></div>';
+};
+
+WG._showCreateTokenForm = function() {
+  var panel = document.getElementById('tokenCreatePanel');
+  if (!panel) return;
+  panel.style.display = 'block';
+  var html = '<div style="background:var(--bg-input);border-radius:var(--radius-md);padding:14px;display:flex;flex-direction:column;gap:10px;">' +
+    '<div style="font-weight:600;color:var(--text-bright);">Create a new token</div>' +
+    '<div style="display:flex;gap:8px;">' +
+      '<input class="form-input" id="newTokenName" placeholder="e.g. my-laptop, ci-pipeline" maxlength="80" style="flex:1;" onkeydown="if(event.key===\'Enter\')WG._mintToken()">' +
+      '<button class="btn btn-primary btn-sm" onclick="WG._mintToken()">Create</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="WG._hideCreateTokenForm()">Cancel</button>' +
+    '</div>' +
+  '</div>';
+  panel.textContent = '';
+  panel.insertAdjacentHTML('beforeend', html);
+  setTimeout(function() {
+    var inp = document.getElementById('newTokenName');
+    if (inp) inp.focus();
+  }, 30);
+};
+
+WG._hideCreateTokenForm = function() {
+  var panel = document.getElementById('tokenCreatePanel');
+  if (panel) { panel.style.display = 'none'; panel.textContent = ''; }
+};
+
+WG._mintToken = function() {
+  var inp = document.getElementById('newTokenName');
+  if (!inp) return;
+  var name = inp.value.trim();
+  if (!name) { WG.toast('Enter a name for the token.', 'error'); return; }
+
+  WG.api('/auth/tokens/', {
+    method: 'POST',
+    body: JSON.stringify({ name: name }),
+  }).then(function(res) {
+    if (!res || !res.token) {
+      WG.toast((res && res.error) || 'Token creation failed', 'error');
+      return;
+    }
+    WG._showNewTokenReveal(res);
+    WG.invalidateCache('api_tokens');
+  });
+};
+
+WG._showNewTokenReveal = function(tok) {
+  var panel = document.getElementById('tokenCreatePanel');
+  if (!panel) return;
+  var esc = WG.escHtml;
+  var html = '<div style="border:1px solid var(--accent);background:var(--accent-dim);border-radius:var(--radius-md);padding:14px;display:flex;flex-direction:column;gap:10px;">' +
+    '<div style="font-weight:700;color:var(--text-bright);">Token created — copy it now</div>' +
+    '<div style="font-size:0.78rem;color:var(--text-dim);">This is the only time the full token will be shown. Store it like a password.</div>' +
+    '<div style="display:flex;gap:8px;">' +
+      '<input id="newTokenValue" class="form-input mono" readonly value="' + esc(tok.token) + '" style="flex:1;font-size:0.82rem;" onclick="this.select()">' +
+      '<button class="btn btn-primary btn-sm" onclick="WG._copyTokenToClipboard()">Copy</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="WG._hideCreateTokenForm();WG.switchSettingsTab(\'tokens\')">Done</button>' +
+    '</div>' +
+    '<div class="mono" style="font-size:0.7rem;color:var(--text-dim);">Use: <code>curl -H "Authorization: Token ' + esc(tok.prefix) + '…"</code></div>' +
+  '</div>';
+  panel.textContent = '';
+  panel.insertAdjacentHTML('beforeend', html);
+  setTimeout(function() {
+    var el = document.getElementById('newTokenValue');
+    if (el) { el.focus(); el.select(); }
+  }, 30);
+};
+
+WG._copyTokenToClipboard = function() {
+  var el = document.getElementById('newTokenValue');
+  if (!el) return;
+  el.select();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(el.value).then(
+      function() { WG.toast('Token copied to clipboard', 'success'); },
+      function() { WG.toast('Could not copy — select the field and press Ctrl+C.', 'error'); }
+    );
+  } else {
+    try { document.execCommand('copy'); WG.toast('Token copied to clipboard', 'success'); }
+    catch (e) { WG.toast('Could not copy — select the field and press Ctrl+C.', 'error'); }
+  }
+};
+
+WG._revokeToken = function(id, name) {
+  if (!window.confirm('Revoke token "' + name + '"?\n\nAny scripts or curls using this token will stop working immediately.')) return;
+  WG.api('/auth/tokens/' + id + '/revoke/', { method: 'POST' }).then(function(res) {
+    if (res && res.revoked_at) {
+      WG.toast('Token revoked', 'info');
+      WG.invalidateCache('api_tokens');
+      WG.switchSettingsTab('tokens');
+    } else {
+      WG.toast((res && res.error) || 'Revoke failed', 'error');
+    }
+  });
+};
+
 /* ── Tab switcher ── */
 WG.switchSettingsTab = function(tab) {
   document.querySelectorAll('#settingsTabs .tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
@@ -427,6 +572,7 @@ WG.switchSettingsTab = function(tab) {
     general: WG._settingsGeneral, theme: WG._settingsTheme, notifications: WG._settingsNotifications,
     tools: WG._settingsTools, sessions: WG._settingsSessions,
     audit: WG._settingsAudit, export: WG._settingsExport, api: WG._settingsApi,
+    tokens: WG._settingsTokens,
     admin: WG._settingsAdmin, support: WG._settingsSupport, about: WG._settingsAbout,
   };
   el.innerHTML = (tabs[tab] || WG._settingsGeneral)();

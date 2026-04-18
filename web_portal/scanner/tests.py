@@ -820,3 +820,131 @@ class AuthCheckTests(TestCase):
         with self.assertNumQueries(2):  # session row + user row — see docstring
             res = self.client.get('/api/auth/check/')
         self.assertEqual(res.status_code, 204)
+
+
+class ApiTokenTests(TestCase):
+    """Personal API tokens via ``Authorization: Token wg_<40>`` header."""
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username='tk-owner', password='pw-owner-123!', email='tk-owner@example.com'
+        )
+        self.engineer = User.objects.create_user(
+            username='tk-engineer', password='pw-eng-123!', email='tk-eng@example.com',
+            role='engineer',
+        )
+        self.viewer = User.objects.create_user(
+            username='tk-viewer', password='pw-view-123!', email='tk-view@example.com',
+            role='viewer',
+        )
+        self.client = Client()
+
+    def _mint(self, user, name='test'):
+        from scanner.models import ApiToken
+        return ApiToken.mint(user, name)
+
+    # ─── Auth-class behaviour ───
+
+    def test_token_auth_header_works(self):
+        """A valid Authorization: Token header authenticates the user."""
+        _, raw = self._mint(self.engineer, 'laptop')
+        res = self.client.get('/api/scans/', HTTP_AUTHORIZATION=f'Token {raw}')
+        # Engineer has scan:read → 200 with paginated response.
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('results', res.json())
+
+    def test_wrong_token_rejected(self):
+        res = self.client.get('/api/scans/', HTTP_AUTHORIZATION='Token wg_this_is_not_a_real_token_xxxxx')
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_revoked_token_rejected(self):
+        """A token that's been revoked no longer authenticates."""
+        from django.utils import timezone
+        tok, raw = self._mint(self.engineer, 'to-be-revoked')
+        tok.revoked_at = timezone.now()
+        tok.save(update_fields=['revoked_at'])
+        res = self.client.get('/api/scans/', HTTP_AUTHORIZATION=f'Token {raw}')
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_key_stored_as_hash_never_plaintext(self):
+        """DB must store a sha256 hex digest, not the raw token."""
+        import hashlib
+        tok, raw = self._mint(self.owner, 'hashed')
+        self.assertNotEqual(tok.key_hash, raw)
+        self.assertEqual(len(tok.key_hash), 64)
+        self.assertTrue(all(c in '0123456789abcdef' for c in tok.key_hash))
+        # Recompute to confirm exact match.
+        self.assertEqual(tok.key_hash, hashlib.sha256(raw.encode()).hexdigest())
+        # Prefix is visible, first 11 chars = 'wg_' + 8.
+        self.assertTrue(tok.prefix.startswith('wg_'))
+        self.assertEqual(len(tok.prefix), 11)
+
+    # ─── Endpoint behaviour ───
+
+    def test_create_via_endpoint_returns_raw_token_once(self):
+        self.client.force_login(self.owner)
+        res = self.client.post(
+            '/api/auth/tokens/',
+            data=json.dumps({'name': 'my first token'}),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 201)
+        body = res.json()
+        self.assertTrue(body['token'].startswith('wg_'))
+        self.assertEqual(body['name'], 'my first token')
+        self.assertEqual(body['prefix'], body['token'][:11])
+
+        # List endpoint must NOT include the raw token on subsequent calls.
+        list_res = self.client.get('/api/auth/tokens/')
+        self.assertEqual(list_res.status_code, 200)
+        rows = list_res.json()
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn('token', rows[0])
+        self.assertEqual(rows[0]['prefix'], body['prefix'])
+
+    def test_cannot_manage_others_tokens(self):
+        """Token ownership is enforced — 404 (not 403) to avoid leaking existence."""
+        from scanner.models import ApiToken
+        tok, _ = self._mint(self.owner, 'owner-only')
+
+        # Engineer tries to revoke Owner's token.
+        self.client.force_login(self.engineer)
+        res = self.client.post(f'/api/auth/tokens/{tok.id}/revoke/')
+        self.assertEqual(res.status_code, 404)
+
+        # Owner's token must remain active.
+        tok.refresh_from_db()
+        self.assertIsNone(tok.revoked_at)
+
+    def test_max_tokens_per_user_cap(self):
+        """The 21st create for a given user must be rejected with 400."""
+        from scanner.models import ApiToken
+        self.client.force_login(self.owner)
+        # Mint MAX_PER_USER (default 20) directly via ORM — faster than API.
+        for i in range(ApiToken.MAX_PER_USER):
+            self._mint(self.owner, f't{i}')
+        self.assertEqual(
+            ApiToken.objects.filter(user=self.owner, revoked_at__isnull=True).count(),
+            ApiToken.MAX_PER_USER,
+        )
+        res = self.client.post(
+            '/api/auth/tokens/',
+            data=json.dumps({'name': 'overflow'}),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('limit', res.json().get('error', '').lower())
+
+    def test_viewer_token_inherits_viewer_scope(self):
+        """A Viewer-issued token must not grant more access than the Viewer role.
+
+        Viewers don't have scan:read (engineer+ only) — a curl with their token
+        against /api/scans/ must get 403 just like a browser session would.
+        """
+        _, raw = self._mint(self.viewer, 'viewer-scope')
+        res = self.client.get('/api/scans/', HTTP_AUTHORIZATION=f'Token {raw}')
+        self.assertIn(res.status_code, (401, 403))
+
+        # But /api/findings/ IS allowed for Viewers — same token should work.
+        res = self.client.get('/api/findings/', HTTP_AUTHORIZATION=f'Token {raw}')
+        self.assertEqual(res.status_code, 200)

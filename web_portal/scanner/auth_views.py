@@ -2,6 +2,7 @@
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth import get_user_model
 from django.http import HttpResponse
+from django.utils import timezone
 User = get_user_model()
 from django.core.cache import cache
 from django.middleware.csrf import get_token
@@ -583,3 +584,83 @@ def audit_log(request):
     } for e in qs[:limit]]
 
     return Response(entries)
+
+
+# ═══════════════ Personal API Tokens ═══════════════
+
+def _serialize_token(t, *, include_raw=None):
+    data = {
+        'id': str(t.id),
+        'name': t.name,
+        'prefix': t.prefix,
+        'created_at': t.created_at.isoformat(),
+        'last_used_at': t.last_used_at.isoformat() if t.last_used_at else None,
+        'revoked_at': t.revoked_at.isoformat() if t.revoked_at else None,
+    }
+    if include_raw is not None:
+        data['token'] = include_raw  # only present on creation response
+    return data
+
+
+@api_view(['GET', 'POST'])
+def tokens_list_or_create(request):
+    """List the caller's tokens (GET) or mint a new one (POST).
+
+    The plaintext token is included in the POST response ONLY — it's never
+    returned again after that. POST body: ``{"name": "<80 chars max>"}``.
+    Enforces a per-user active-token cap of ``ApiToken.MAX_PER_USER``.
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+
+    from scanner.models import ApiToken
+
+    if request.method == 'GET':
+        qs = ApiToken.objects.filter(user=request.user).order_by('-created_at')
+        return Response([_serialize_token(t) for t in qs])
+
+    # POST
+    name = str(request.data.get('name', '')).strip()
+    if not name:
+        return Response({'error': 'name is required'}, status=400)
+    if len(name) > 80:
+        return Response({'error': 'name too long (max 80)'}, status=400)
+
+    active_count = ApiToken.objects.filter(user=request.user, revoked_at__isnull=True).count()
+    if active_count >= ApiToken.MAX_PER_USER:
+        return Response(
+            {'error': f'Token limit reached ({ApiToken.MAX_PER_USER} active per user). '
+                      'Revoke an existing token before creating another.'},
+            status=400,
+        )
+
+    tok, raw = ApiToken.mint(request.user, name)
+    actor = request.user.get_full_name() or request.user.username
+    ip = request.META.get('REMOTE_ADDR', '')
+    AuditLog.log(actor, 'token.create', f'{tok.prefix} ({name})', 'admin', ip)
+
+    return Response(_serialize_token(tok, include_raw=raw), status=201)
+
+
+@api_view(['POST'])
+def tokens_revoke(request, token_id):
+    """Revoke a token the caller owns. 404 (not 403) if the token belongs to
+    another user — never leak token-existence across accounts.
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+
+    from scanner.models import ApiToken
+    try:
+        tok = ApiToken.objects.get(id=token_id, user=request.user)
+    except ApiToken.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+
+    if tok.revoked_at is None:
+        tok.revoked_at = timezone.now()
+        tok.save(update_fields=['revoked_at'])
+        actor = request.user.get_full_name() or request.user.username
+        ip = request.META.get('REMOTE_ADDR', '')
+        AuditLog.log(actor, 'token.revoke', f'{tok.prefix} ({tok.name})', 'admin', ip)
+
+    return Response(_serialize_token(tok))

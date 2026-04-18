@@ -199,7 +199,11 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'scanner.authentication.CsrfExemptAuth',  # Session auth without CSRF (SameSite=Lax protects)
+        # Header token wins when Authorization: Token is present — clients
+        # using programmatic access never need a cookie.
+        'scanner.authentication.TokenHeaderAuth',
+        # Session auth without CSRF (SameSite=Lax protects) for the SPA.
+        'scanner.authentication.CsrfExemptAuth',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',

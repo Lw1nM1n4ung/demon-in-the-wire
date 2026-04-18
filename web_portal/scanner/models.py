@@ -523,3 +523,56 @@ class Asset(models.Model):
 
     def __str__(self):
         return f"{self.ip}:{self.port}/{self.protocol}"
+
+
+class ApiToken(models.Model):
+    """User-issued token for programmatic /api/* access.
+
+    The plaintext token value is returned ONCE at creation time — from then
+    on only a SHA-256 hash is kept on disk. A DB leak therefore cannot
+    reveal usable tokens. The `wg_` prefix is intentional: it lets
+    TruffleHog / gitleaks / GitHub Secret Scanning detect accidentally-
+    committed tokens.
+    """
+    MAX_PER_USER = 20
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='api_tokens')
+    name = models.CharField(max_length=80)
+    prefix = models.CharField(max_length=12, db_index=True)   # e.g. 'wg_abc1234'
+    key_hash = models.CharField(max_length=64, unique=True)   # sha256 hex
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['user', 'revoked_at'])]
+
+    def __str__(self):
+        return f"{self.prefix}… ({self.user.username})"
+
+    @property
+    def is_active(self):
+        return self.revoked_at is None
+
+    @classmethod
+    def mint(cls, user, name):
+        """Create a new token for ``user``. Returns ``(token_row, raw_plaintext)``.
+
+        The caller must return ``raw_plaintext`` to the end user exactly once
+        and then forget it — it's never stored.
+        """
+        import secrets
+        import hashlib
+        # urlsafe_b64 of 32 bytes → 43 chars; strip separators for a clean
+        # alphanumeric body, prefix with 'wg_' marker so secret scanners can
+        # detect leaks.
+        body = secrets.token_urlsafe(32).replace('-', '').replace('_', '')[:40]
+        raw = f'wg_{body}'
+        prefix = raw[:11]  # 'wg_' + first 8 chars of body
+        key_hash = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+        obj = cls.objects.create(
+            user=user, name=(name or '')[:80], prefix=prefix, key_hash=key_hash,
+        )
+        return obj, raw
