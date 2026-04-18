@@ -216,15 +216,10 @@ html { scroll-behavior: smooth; }
   transform: translateX(3px);
 }
 
-/* Severity bar animation — grow on page load */
-.sev-bar span {
-  transform-origin: left;
-  animation: barGrow 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
-}
-@keyframes barGrow {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
-}
+/* Severity bar — no entry animation. The stacked crit/high/med/low fill
+ * previously grew from scaleX(0) on every page mount, but the list page
+ * re-renders whenever a running scan's counters tick, so the bar appeared
+ * to "blink in" repeatedly. Keeping the bar static eliminates that flash. */
 
 /* ═══════════════ BUTTONS ═══════════════ */
 
@@ -342,9 +337,9 @@ html { scroll-behavior: smooth; }
 
 /* ═══════════════ STATUS BADGES ═══════════════ */
 
-.status-badge.running {
-  animation: glowPulse 2s ease infinite;
-}
+/* "Running" badge previously had a 2s infinite glowPulse — the constant
+ * box-shadow heartbeat read as blinking on the severity-heavy list pages.
+ * The colored dot inside the badge already signals the live state. */
 
 /* ═══════════════ HOST / IP TAGS ═══════════════ */
 
