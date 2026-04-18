@@ -13,7 +13,7 @@ WG.renderScanQueue = function() {
     if (data && WG.state.currentPage === 'scan-queue') {
       WG._cache['scans'] = data; WG._cacheTime['scans'] = Date.now();
       var main = document.getElementById('mainContent');
-      if (main) main.innerHTML = WG.renderScanQueue();
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScanQueue();
     }
   });
 

@@ -7,7 +7,7 @@ WG.renderScans = function() {
     if (data && data.length && WG.state.currentPage === 'scans') {
       WG._cache['scans'] = data; WG._cacheTime['scans'] = Date.now();
       var main = document.getElementById('mainContent');
-      if (main) main.innerHTML = WG.renderScans();
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScans();
     }
   });
   var esc = WG.escHtml;

@@ -18,7 +18,7 @@ WG.renderUsers = function() {
     if (data && data.length && WG.state.currentPage === 'users') {
       WG._cache['users'] = data; WG._cacheTime['users'] = Date.now();
       var main = document.getElementById('mainContent');
-      if (main) main.innerHTML = WG.renderUsers();
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderUsers();
     }
   });
 

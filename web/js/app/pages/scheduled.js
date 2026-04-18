@@ -28,7 +28,7 @@ WG.renderScheduled = function() {
     if (data && data.length && WG.state.currentPage === 'scheduled') {
       WG._cache['schedules'] = data; WG._cacheTime['schedules'] = Date.now();
       var main = document.getElementById('mainContent');
-      if (main) main.innerHTML = WG.renderScheduled();
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScheduled();
     }
   });
   var esc = WG.escHtml;

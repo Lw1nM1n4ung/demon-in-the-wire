@@ -12,7 +12,7 @@ WG.renderPolicies = function() {
     if (data && data.length && WG.state.currentPage === 'policies') {
       WG._cache['policies'] = data; WG._cacheTime['policies'] = Date.now();
       var main = document.getElementById('mainContent');
-      if (main) main.innerHTML = WG.renderPolicies();
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderPolicies();
     }
   });
   var esc = WG.escHtml;

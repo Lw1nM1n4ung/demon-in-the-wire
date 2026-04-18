@@ -10,7 +10,7 @@ WG.renderScanDetail = function(id) {
         WG._cache['scan_' + id] = data;
         WG._cacheTime['scan_' + id] = Date.now();
         var main = document.getElementById('mainContent');
-        if (main) main.innerHTML = WG.renderScanDetail(id);
+        if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScanDetail(id);
       }
     });
   }

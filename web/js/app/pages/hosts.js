@@ -7,7 +7,7 @@ WG.renderHosts = function() {
     if (data && data.length && WG.state.currentPage === 'hosts') {
       WG._cache['hosts'] = data; WG._cacheTime['hosts'] = Date.now();
       var main = document.getElementById('mainContent');
-      if (main) main.innerHTML = WG.renderHosts();
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderHosts();
     }
   });
   var esc = WG.escHtml;

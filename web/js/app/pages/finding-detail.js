@@ -7,7 +7,7 @@ WG.renderFindingDetail = function(id) {
         WG._cache['finding_' + id] = data;
         WG._cacheTime['finding_' + id] = Date.now();
         var main = document.getElementById('mainContent');
-        if (main) main.innerHTML = WG.renderFindingDetail(id);
+        if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderFindingDetail(id);
       }
     });
   }

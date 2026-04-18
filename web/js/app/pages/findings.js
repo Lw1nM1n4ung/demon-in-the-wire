@@ -6,7 +6,7 @@ WG.renderFindings = function() {
     if (data && data.length && WG.state.currentPage === 'findings') {
       WG._cache['findings'] = data; WG._cacheTime['findings'] = Date.now();
       var main = document.getElementById('mainContent');
-      if (main) main.innerHTML = WG.renderFindings();
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderFindings();
     }
   });
   var sevCounts = {};
@@ -66,7 +66,7 @@ WG.filterFindings = function() {
         WG._cache['findings'] = data;
         WG._cacheTime['findings'] = Date.now();
         var main = document.getElementById('mainContent');
-        if (main) main.innerHTML = WG.renderFindings();
+        if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderFindings();
       }
     });
   }, 500);
