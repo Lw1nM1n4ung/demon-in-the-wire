@@ -16,3 +16,10 @@ requests>=2.31
 beautifulsoup4>=4.12
 lxml>=5.1
 pyyaml>=6.0
+# Runtime deps of the wireghost scanner package — Celery worker imports
+# scanner.tasks → wireghost.pipeline → rich / aiohttp / defusedxml. These
+# are declared in pyproject.toml but we don't `pip install -e .` the
+# package in-container, so list them explicitly.
+rich>=13.0
+aiohttp>=3.9
+defusedxml>=0.7
