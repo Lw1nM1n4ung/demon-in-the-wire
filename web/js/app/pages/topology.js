@@ -30,23 +30,31 @@ WG.renderTopology = function(scanId) {
   var esc = WG.escHtml;
   var completedScans = scans.filter(function(s) { return s.status === 'completed'; });
 
-  /* Cold-cache bootstrap: getCached returns [] on first visit. Only
-   * re-render if we genuinely had nothing cached — otherwise a late
-   * refresh would blow away a graph the user has just drawn by picking
-   * a scan. Guard against open modals + already-drawn graphs. */
-  var hadColdCache = (scans.length === 0);
-  WG.fetchData('/scans/', 'scans').then(function(data) {
+  /* Cold-cache bootstrap: getCached returns [] on first visit. Surgically
+   * repopulate the <select> rather than re-rendering the whole page — the
+   * old full-rerender path wiped mainContent before calling renderTopology
+   * recursively, so any late-firing guard (route swap, modal, SVG present)
+   * left the user on a blank page. The null-check on `sel` handles the
+   * "user navigated away" case without needing a route-state guard. */
+  WG.fetchData('/scans/').then(function(data) {
     if (!Array.isArray(data) || !data.length) return;
     WG._cache['scans'] = data; WG._cacheTime['scans'] = Date.now();
-    if (WG.state.currentPage !== 'topology') return;
-    if (!hadColdCache) return;  // dropdown already populated; don't clobber
-    if (document.querySelector('.modal-overlay.active')) return;
-    /* Only re-render if no graph is currently drawn (user hasn't picked yet). */
-    if (document.querySelectorAll('#topoContainer svg').length) return;
-    var main = document.getElementById('mainContent');
-    if (!main) return;
-    main.textContent = '';
-    main.insertAdjacentHTML('beforeend', WG.renderTopology(scanId));
+    var sel = document.getElementById('topoScanSelect');
+    if (!sel) return;
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select a scan...';
+    sel.appendChild(placeholder);
+    data.filter(function(s) { return s.status === 'completed'; })
+        .forEach(function(s) {
+          var o = document.createElement('option');
+          o.value = s.id;
+          o.textContent = s.name + ' (' + s.target + ')';
+          if (scanId && s.id === scanId) o.selected = true;
+          sel.appendChild(o);
+        });
+    if (scanId && sel.value === scanId) WG._topoLoadScan(scanId);
   });
 
   var scanOpts = completedScans.map(function(s) {
