@@ -33,6 +33,21 @@ def HasMethodPerm(read_code, write_code):
             return request.user.has_permission(code)
     _HMP.__name__ = f'HasMethodPerm_{read_code}_{write_code}'
     return _HMP
+
+
+class IsCreatorOrOwnerForWrite(IsAuthenticated):
+    """Object-level guard: unsafe methods require row.created_by == user OR role=owner.
+
+    Stacked after HasMethodPerm so the role check runs first (fails fast for viewers
+    and unauthenticated callers). This one only fires on detail actions that go through
+    `get_object()`, preventing horizontal privilege escalation between engineers.
+    """
+    def has_object_permission(self, request, view, obj):
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return True
+        if getattr(request.user, 'role', '') == 'owner':
+            return True
+        return getattr(obj, 'created_by_id', None) == request.user.id
 from .serializers import (
     ScanSerializer, ScanListSerializer, ScanCreateSerializer,
     HostSerializer, HostListSerializer,
@@ -45,7 +60,7 @@ from .serializers import (
 
 class ScanViewSet(viewsets.ModelViewSet):
     queryset = Scan.objects.all()
-    permission_classes = [HasMethodPerm('scan:read', 'scan:write')]
+    permission_classes = [HasMethodPerm('scan:read', 'scan:write'), IsCreatorOrOwnerForWrite]
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
     def get_queryset(self):
@@ -570,7 +585,7 @@ def upload_logo(request):
 class ScanPolicyViewSet(viewsets.ModelViewSet):
     queryset = ScanPolicy.objects.all()
     serializer_class = ScanPolicySerializer
-    permission_classes = [HasMethodPerm('policy:read', 'policy:write')]
+    permission_classes = [HasMethodPerm('policy:read', 'policy:write'), IsCreatorOrOwnerForWrite]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -599,7 +614,7 @@ class ScanPolicyViewSet(viewsets.ModelViewSet):
 class ScheduledScanViewSet(viewsets.ModelViewSet):
     queryset = ScheduledScan.objects.all()
     serializer_class = ScheduledScanSerializer
-    permission_classes = [HasMethodPerm('schedule:read', 'schedule:write')]
+    permission_classes = [HasMethodPerm('schedule:read', 'schedule:write'), IsCreatorOrOwnerForWrite]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
