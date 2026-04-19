@@ -36,14 +36,22 @@ def HasMethodPerm(read_code, write_code):
 
 
 class IsCreatorOrOwnerForWrite(IsAuthenticated):
-    """Object-level guard: unsafe methods require row.created_by == user OR role=owner.
+    """Object-level guard for destructive/replacing actions only.
 
-    Stacked after HasMethodPerm so the role check runs first (fails fast for viewers
-    and unauthenticated callers). This one only fires on detail actions that go through
-    `get_object()`, preventing horizontal privilege escalation between engineers.
+    Guards `destroy` / `update` / `partial_update` — the actions that erase
+    or overwrite the target row. Engineers can still invoke team-cooperative
+    custom actions (`/cancel/`, `/regenerate_reports/`, `/clone/`, `/toggle/`,
+    `/run_now/`) on any peer's resource; those have their own business logic
+    and don't destroy the audit trail. Owners bypass the check entirely.
+
+    Stacked after `HasMethodPerm` so role/unauth rejection happens first.
     """
+    _DESTRUCTIVE = frozenset(('destroy', 'update', 'partial_update'))
+
     def has_object_permission(self, request, view, obj):
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return True
+        if getattr(view, 'action', None) not in self._DESTRUCTIVE:
             return True
         if getattr(request.user, 'role', '') == 'owner':
             return True
