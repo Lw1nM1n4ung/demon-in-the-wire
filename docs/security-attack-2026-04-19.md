@@ -207,3 +207,19 @@ POST  /api/scans/ (Token auth)    → 201  (token flow correctly exempt)
 - `350b562` — `fix(auth): restore CSRF enforcement on session-based endpoints`
 
 Both pushed to `rewrite-v2`. Image rebuilt (`docker compose build api worker`) so the fixes survive container recreation.
+
+---
+
+## Fresh run — 2026-04-19 (late)
+
+Re-executed the entire 4-phase pass against the fixed build (`4a19bf6`) to confirm both fixes hold and no new regressions surfaced.
+
+| Phase | Cells | Hits | Notes |
+|---|---|---|---|
+| 1 — SSRF / cmd-injection | 23 | 0 | Validator still blocks every variant |
+| 2 — XSS (stored + reflected) | 7 payloads × policy name+desc | 0 | `escHtml` neutralizes on render |
+| 3 — IDOR | 9 | 0 | `engineer DELETE admin scan/policy → 403` ✓ |
+| 4 — Auth / CSRF / rate-limit / token | 10 | 0 | `POST without X-CSRFToken → 403` ✓; token mint/use/revoke/prefix-guess all correct |
+
+**No new bugs found.** Both commits from the initial pass (`a7f6b5f`, `350b562`) verified live on the running portal.
+
