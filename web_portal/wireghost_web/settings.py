@@ -219,8 +219,11 @@ REST_FRAMEWORK = {
         # Header token wins when Authorization: Token is present — clients
         # using programmatic access never need a cookie.
         'scanner.authentication.TokenHeaderAuth',
-        # Session auth without CSRF (SameSite=Lax protects) for the SPA.
-        'scanner.authentication.CsrfExemptAuth',
+        # Full CSRF-enforcing session auth for the SPA. Login / csrf /
+        # setup-admin opt OUT per-endpoint via @authentication_classes([
+        # CsrfExemptAuth]) because those endpoints *acquire* the session
+        # and can't require a CSRF token that doesn't exist yet.
+        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
