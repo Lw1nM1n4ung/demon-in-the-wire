@@ -5,10 +5,21 @@ from rest_framework.authentication import SessionAuthentication
 
 
 class CsrfExemptAuth(SessionAuthentication):
-    """Session auth without CSRF enforcement.
-    SameSite=Lax cookie flag provides cross-origin protection instead."""
-    def enforce_csrf(self, request):
-        return
+    """Session auth with Django's default CSRF enforcement.
+
+    Previously stubbed out `enforce_csrf` and relied on the SameSite=Lax
+    cookie flag alone — but Lax still allows top-level form-POST navigations
+    and leaves browser-side behavior as the sole defense, so a state-changing
+    POST with just a stolen session cookie succeeded from any origin.
+    The SPA already sets `X-CSRFToken` on all mutating requests, so restoring
+    full CSRF enforcement doesn't break any legitimate flow. Header-based
+    token auth (`TokenHeaderAuth`) is CSRF-immune separately because browsers
+    don't auto-attach `Authorization` cross-origin.
+
+    Class name kept for settings.py compatibility; the "exempt" in the name
+    is now historical, not behavioral.
+    """
+    pass
 
 
 class TokenHeaderAuth(authentication.BaseAuthentication):
