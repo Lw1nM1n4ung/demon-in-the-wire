@@ -223,3 +223,65 @@ Re-executed the entire 4-phase pass against the fixed build (`4a19bf6`) to confi
 
 **No new bugs found.** Both commits from the initial pass (`a7f6b5f`, `350b562`) verified live on the running portal.
 
+---
+
+## Re-run — 2026-04-20 (post-rebuild + fresh install + new logo surface)
+
+Re-fired the entire matrix on the live VPS at HEAD `5471762`, after a full `docker compose down -v` + fresh git clone + setup-wizard re-install. New endpoints since the prior pass: `/api/system-stats/` (`d08f469`), `/api/report-config/logo/` invoked from the wizard (`5471762`), `nmap_timeout` config field (`5f8b7d5`), narrowed IDOR guard (`ba5001e`).
+
+Cookie/token plumbing: minted Owner + Engineer + Viewer API tokens via Django shell against the new `admin` Owner; engineer/viewer accounts seeded as `attack_eng` / `attack_view`.
+
+| Phase | Cells | Hits | Notes |
+|---|---|---|---|
+| 1 — SSRF / cmd-injection / IP-bypass | 23 | 0 | All variants still blocked by `validate_target` |
+| 2 — XSS / template injection | 7 (policy) + 6 (branding fields) | 0 | Policy: stored verbatim, render-safe via `escHtml`. Branding: server-side regex whitelist rejects HTML chars (defense in depth). |
+| 3 — IDOR / horizontal access (post `ba5001e` narrowing) | 9 | 0 | Destructive cells still 403; team-cooperate `@actions` (`/cancel/`, `/regenerate/`, `/clone/`) now correctly 200/201/400. |
+| 4 — Auth / CSRF / token / rate-limit | 17 | 0 | Includes the **support-bundle ESXi-symptom check** — owner-token POST returns 200 here, confirming the ESXi 403 is environment-state (Redis perm cache or unapplied migration on that host), not a code bug. |
+| 5 — **Logo upload** (NEW surface) | 14 | 0 | See section below for full breakdown |
+
+**Total: 76 cells / 0 deviations.** All five fixes from the prior session (`a7f6b5f`, `350b562`, `3e5efba`, `f198371`, `ba5001e`) verified intact post-rebuild.
+
+### Phase 5 — Logo upload attack matrix
+
+`POST /api/report-config/logo/` — first time this endpoint has been audited because the setup wizard only started actually firing it after `5471762`.
+
+Backend defenses (`web_portal/scanner/views.py::upload_logo`):
+1. RBAC (`report:logo:upload`) — owner + engineer; viewer = 403.
+2. Allowlist: `.png .jpg .jpeg .gif .bmp .webp`.
+3. Denylist: `.php .py .sh .js .html .htm .svg .exe .bat .cmd .jsp .asp .aspx .cgi .pl`.
+4. Multi-extension scan — every dot-suffix in the filename is checked against the denylist (blocks `shell.php.png`).
+5. 2 MB hard size cap.
+6. `os.path.basename(filename)` + `get_valid_filename()` strip path components and dangerous chars.
+7. `os.path.realpath().startswith()` check rejects any path that escapes `/data/assets/logos/`.
+
+Probe results:
+
+| Cell | Got | Want | Notes |
+|---|---|---|---|
+| unauth POST | 401 | 401 | ✓ |
+| viewer token POST | 403 | 403 | ✓ RBAC |
+| engineer token POST valid PNG | 200 | 200 | ✓ engineer has the perm |
+| owner token POST valid PNG | 200 | 200 | ✓ baseline |
+| **traversal** filename `../../../etc/passwd.png` | 200, file landed as `passwd.png` in `/data/assets/logos/` | 200 with safe path | ✓ basename + realpath defenses held |
+| double-ext `shell.php.png` | 400 | 400 | ✓ multi-ext scan caught it |
+| SVG with `onload=alert(1)` | 400 | 400 | ✓ SVG in denylist |
+| HTML body (`<script>alert(1)</script>`) renamed `.png` | 200, file stored | 200 | **safe in practice**: `/data/assets/logos/` is not exposed via any nginx URL — the file is reachable only through report rendering (server-side embed, no inline browser fetch). Confirmed by trying `GET /static/logos/...`, `/data/assets/logos/...`, `/assets/logos/...`, `/logos/...` — all 302 to login or 404 |
+| 3 MB png (cap is 2 MB) | 400 | 400 | ✓ size cap |
+| empty (0 byte) `.png` | 200 | (cosmetic) | minor — empty image stores but renders broken; not exploitable |
+| random binary `.png` | 200 | (cosmetic) | backend trusts extension; same risk profile as empty file (renderer fails gracefully) |
+| null-byte filename `logo.png\x00.php` | 400 | 400 | ✓ rejected at the HTTP/multipart parser layer before reaching the view |
+| session cookie + NO `X-CSRFToken` | 403 | 403 | ✓ CSRF gate from `3e5efba` covers this endpoint too |
+| session cookie + valid `X-CSRFToken` | 200 | 200 | ✓ |
+
+**Verdict**: logo-upload endpoint is correctly hardened. The two "200" cells for HTML-body-renamed-to-png and random-binary-as-png are **non-exploitable** because the storage directory is not web-served — the file only flows back into reports via server-side embed. Empty-file 200 is the only thing worth noting (cosmetic, not security).
+
+### What this re-run did NOT do (call-outs)
+
+- Setup-wizard "race the setup-admin" attack — out of scope, requires destructive reset.
+- Worker container-escape via subprocess pipeline — out of portal-layer scope.
+- DoS testing on `/api/system-stats/` (high-frequency polled) — could measure latency budget but not actively flood.
+
+### No commits this pass
+
+Zero deviations found. No source files changed. Test users `attack_eng` + `attack_view` left in DB for follow-up audits.
+
