@@ -226,7 +226,11 @@ WG._checkUsername = function(val) {
   }, 500);
 };
 
-WG._validateAdmin = async function() {
+WG._validateAdmin = function() {
+  /* Admin step now ONLY captures + validates the fields — the actual
+   * server submission happens in _finishSetup as a single multipart POST
+   * to /api/auth/setup/ that does Owner + branding + logo + setup-complete
+   * in one atomic request. See commit notes. */
   var name = (document.getElementById('setupAdminName').value || '').trim();
   var user = (document.getElementById('setupAdminUser').value || '').trim();
   var email = (document.getElementById('setupAdminEmail').value || '').trim();
@@ -241,44 +245,12 @@ WG._validateAdmin = async function() {
 
   err.style.display = 'none';
 
-  // Any previous user's session must not survive into the newly-set-up portal.
-  if (WG.clearSession) WG.clearSession();
-
-  // Create the admin account via API.
-  try {
-    var res = await fetch(WG.API_BASE + '/auth/setup-admin/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, username: user, email: email, password: pass }),
-    });
-    var data = await res.json();
-    if (!res.ok) {
-      err.textContent = data.error || 'Failed to create account';
-      err.style.display = 'block';
-      return;
-    }
-  } catch (e) {
-    err.textContent = 'Could not reach the API to create the account. Please check the backend and try again.';
-    err.style.display = 'block';
-    return;
-  }
-
-  // Immediately sign the new Owner in so they land on the dashboard without
-  // having to re-enter credentials. WG.login sets the Django session cookie.
-  try {
-    var ok = await WG.login(user, pass);
-    if (!ok) {
-      // setup_admin succeeded but login didn't — unusual; send the user to
-      // the login page with a hint rather than leaving them stuck.
-      WG.navigate('login');
-      return;
-    }
-  } catch (e) {
-    WG.navigate('login');
-    return;
-  }
-
+  // Stash the credentials in memory (NOT localStorage — password-in-storage
+  // is a leak). The final submit will pull them off WG._setupAdminPending.
   var avatar = name.split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().substring(0, 2);
+  WG._setupAdminPending = { name: name, username: user, email: email, password: pass };
+  // Keep the non-secret fields in localStorage so the "Complete" summary
+  // screen can still show the admin username/avatar without re-entering.
   localStorage.setItem('wg_setup_admin', JSON.stringify({ name: name, username: user, email: email, avatar: avatar }));
 
   WG._setupNext();
@@ -426,61 +398,60 @@ WG._setupPrev = function() {
 };
 
 WG._finishSetup = async function() {
-  localStorage.setItem('wg_setup_complete', '1');
-  var admin = {};
-  try { admin = JSON.parse(localStorage.getItem('wg_setup_admin') || '{}'); } catch (e) {}
+  /* Single-request wizard submission. Replaces the previous 5-request dance
+   * (setup-admin, login, report-config PUT, report-config/logo POST,
+   * site-config/setup-complete POST). The backend wraps everything in one
+   * transaction.atomic() + attaches the session cookie via django.contrib
+   * .auth.login, so on 201 we're already signed in. */
+  var admin = WG._setupAdminPending || {};
   var branding = {};
   try { branding = JSON.parse(localStorage.getItem('wg_setup_branding') || '{}'); } catch (e) {}
 
-  /* Push branding to the server (was previously localStorage-only — the
-   * server's ReportConfig stayed empty even though the user filled it in). */
-  if (branding.company_name || branding.report_title || branding.prepared_by || branding.brand_color) {
-    try {
-      await WG.api('/report-config/', {
-        method: 'PUT',
-        body: JSON.stringify({
-          company_name: branding.company_name || '',
-          report_title: branding.report_title || 'Vulnerability Assessment Report',
-          prepared_by: branding.prepared_by || '',
-          brand_color: branding.brand_color || '#006D38',
-        }),
-      });
-    } catch (e) { /* non-fatal — user can edit in Settings later */ }
+  if (!admin.username || !admin.password) {
+    WG.toast && WG.toast('Setup admin missing — go back to Step 3', 'error');
+    WG._setupStep = 2; WG.render(); return;
   }
 
-  /* Upload the logo (if picked) — multipart POST, handled by its own view.
-   * Uses raw fetch because WG.api forces Content-Type: application/json
-   * which breaks FormData. */
-  if (WG._setupLogoBlob) {
-    try {
-      var fd = new FormData();
-      fd.append('logo', WG._setupLogoBlob);
-      await fetch(WG.API_BASE + '/report-config/logo/', {
-        method: 'POST',
-        body: fd,
-        credentials: 'include',
-        headers: { 'X-CSRFToken': WG._getCSRF ? WG._getCSRF() : '' },
-      });
-    } catch (e) { /* non-fatal */ }
-    WG._setupLogoBlob = null;
-  }
+  var fd = new FormData();
+  fd.append('username', admin.username);
+  fd.append('password', admin.password);
+  fd.append('email', admin.email || '');
+  fd.append('name', admin.name || '');
+  if (branding.company_name) fd.append('company_name', branding.company_name);
+  if (branding.report_title) fd.append('report_title', branding.report_title);
+  if (branding.prepared_by)  fd.append('prepared_by', branding.prepared_by);
+  if (branding.brand_color)  fd.append('brand_color', branding.brand_color);
+  if (WG._setupLogoBlob)     fd.append('logo', WG._setupLogoBlob);
 
-  /* Mark setup complete server-side. setup-admin already flipped the
-   * flag atomically, but this second call also records completed_by. */
+  var ok = false;
+  var errMsg = '';
   try {
-    await WG.api('/site-config/setup-complete/', {
+    var res = await fetch(WG.API_BASE + '/auth/setup/', {
       method: 'POST',
-      body: JSON.stringify({ completed_by: admin.username || 'admin' }),
+      body: fd,
+      credentials: 'include',
     });
-  } catch (e) { /* non-fatal */ }
-
-  // The new Owner was auto-logged-in in _createAdmin, so land on the
-  // dashboard; otherwise fall back to the login page.
-  if (WG.isLoggedIn && WG.isLoggedIn()) {
-    WG.navigate('dashboard');
-  } else {
-    WG.navigate('login');
+    if (res.ok) {
+      ok = true;
+    } else {
+      try { errMsg = (await res.json()).error || ''; } catch (e) { errMsg = 'HTTP ' + res.status; }
+    }
+  } catch (e) {
+    errMsg = 'Could not reach the API';
   }
+
+  /* Scrub password from memory regardless of outcome. */
+  WG._setupAdminPending = null;
+  WG._setupLogoBlob = null;
+
+  if (!ok) {
+    WG.toast && WG.toast('Setup failed: ' + errMsg, 'error');
+    return;
+  }
+
+  localStorage.setItem('wg_setup_complete', '1');
+  localStorage.removeItem('wg_setup_branding');  /* server now owns it */
+  WG.navigate('dashboard');
 };
 
 WG._skipSetup = function() {

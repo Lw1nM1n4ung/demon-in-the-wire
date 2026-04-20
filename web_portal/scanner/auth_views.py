@@ -451,6 +451,159 @@ def site_setup_complete(request):
 
 
 @api_view(['POST'])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
+def setup_one_shot(request):
+    """All-in-one first-install endpoint.
+
+    Replaces the five-request wizard dance (setup-admin, login, report-config
+    PUT, report-config/logo POST, site-config/setup-complete POST) with a
+    single multipart POST. Everything lands atomically — either the whole
+    transaction commits or none of it does, so the Owner either lands on a
+    fully-configured portal or nothing sticks.
+
+    Accepts multipart form-data:
+      username, password, email, name     (Owner — required)
+      company_name, report_title,
+      prepared_by, brand_color            (branding — optional)
+      logo                                (file — optional)
+
+    Refuses with 409 if setup_complete is already True (one-shot; use
+    reset-setup first if you need to re-run).
+    """
+    from django.db import transaction
+    from django.contrib.auth.password_validation import validate_password
+    from scanner.models import ReportConfig
+    import os
+
+    config = SiteConfig.get()
+    if config.setup_complete:
+        return Response({'error': 'Setup already completed. Use admin panel to create users.'}, status=409)
+
+    # Defensive: if a prior setup flipped `setup_complete=False` via direct DB
+    # edit (not via reset-setup), there could still be an Owner in place. The
+    # User.save() singleton guard would raise 500 mid-transaction — catch it
+    # with a clean 409 up front instead.
+    if User.objects.filter(role='owner').exists():
+        return Response({'error': 'Owner account already exists — run reset-setup first'}, status=409)
+
+    data = request.data
+    try:
+        username = _wl(data.get('username', '').strip(), 'username', 150)
+        email = _wl(data.get('email', '').strip(), 'email', 254)
+        name = _wl(data.get('name', '').strip(), 'name', 150)
+    except (InputValidationError, Exception) as e:
+        return Response({'error': str(e)}, status=400)
+    password = data.get('password', '')
+    if not username or not password:
+        return Response({'error': 'Username and password required'}, status=400)
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already exists'}, status=400)
+    try:
+        validate_password(password)
+    except Exception as e:
+        return Response({'error': '; '.join(e.messages)}, status=400)
+
+    # Branding — reuse the same regex whitelist as PUT /report-config/.
+    BRAND_PATTERNS = {
+        'company_name': (re.compile(r"^[a-zA-Z0-9 &.,'\-()]+$"), 255),
+        'report_title': (re.compile(r"^[a-zA-Z0-9 &.,:'\-()]+$"), 255),
+        'prepared_by':  (re.compile(r"^[a-zA-Z0-9 .,'\-]+$"), 255),
+        'brand_color':  (re.compile(r'^#[0-9a-fA-F]{6}$'), 7),
+    }
+    branding = {}
+    for key, (pattern, max_len) in BRAND_PATTERNS.items():
+        val = (data.get(key) or '').strip()
+        if not val:
+            continue
+        val = val[:max_len]
+        if not pattern.match(val):
+            return Response({'error': f'Invalid characters in {key}'}, status=400)
+        branding[key] = val
+
+    # Logo — reuse the same 7 defenses from upload_logo (file-type allowlist,
+    # dangerous-ext denylist, multi-extension scan, size cap, basename, realpath).
+    logo_file = request.FILES.get('logo')
+    logo_path_to_save = None
+    if logo_file is not None:
+        from django.utils.text import get_valid_filename
+        ALLOWED = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
+        DANGEROUS = {'.php', '.py', '.sh', '.js', '.html', '.htm', '.svg', '.exe',
+                     '.bat', '.cmd', '.jsp', '.asp', '.aspx', '.cgi', '.pl'}
+        ext = os.path.splitext(logo_file.name)[1].lower()
+        all_exts = {('.' + p.lower()) for p in logo_file.name.split('.')[1:]} if '.' in logo_file.name else set()
+        if all_exts & DANGEROUS:
+            return Response({'error': 'Dangerous file extension detected'}, status=400)
+        if ext not in ALLOWED:
+            return Response({'error': f'File type {ext} not allowed'}, status=400)
+        if logo_file.size > 2 * 1024 * 1024:
+            return Response({'error': 'Logo too large (max 2MB)'}, status=400)
+        logo_dir = '/data/assets/logos'
+        os.makedirs(logo_dir, exist_ok=True)
+        safe_name = get_valid_filename(os.path.basename(logo_file.name))
+        if not safe_name:
+            return Response({'error': 'Invalid logo filename'}, status=400)
+        logo_path_to_save = os.path.join(logo_dir, safe_name)
+        if not os.path.realpath(logo_path_to_save).startswith(os.path.realpath(logo_dir)):
+            return Response({'error': 'Invalid logo path'}, status=400)
+
+    # All validation passed — commit atomically. Owner creation + config flip
+    # + branding save happen in one transaction; partial failure rolls back.
+    with transaction.atomic():
+        parts = name.split(' ', 1) if name else [username, '']
+        user = User.objects.create_superuser(
+            username=username, password=password, email=email,
+            first_name=parts[0], last_name=parts[1] if len(parts) > 1 else '',
+        )
+        user.role = 'owner'
+        user.save()
+
+        # Mark setup complete in the same txn as Owner creation.
+        config = SiteConfig.get()
+        config.setup_complete = True
+        config.setup_completed_at = timezone.now()
+        config.setup_completed_by = username
+        config.save()
+
+        # Branding (inside txn so a regex failure would have rolled back
+        # everything above — but we already validated, so this is just writes).
+        if branding:
+            rc = ReportConfig.get()
+            for k, v in branding.items():
+                setattr(rc, k, v)
+            rc.save()
+
+        # Logo write happens AFTER the DB commit so a later I/O error doesn't
+        # leave an orphaned row; but we save the path on ReportConfig inside
+        # the txn so the record is consistent.
+        if logo_file is not None and logo_path_to_save:
+            rc = ReportConfig.get()
+            rc.logo_path = logo_path_to_save
+            rc.save()
+
+    # Write the logo bytes to disk post-commit — if this fails, the portal
+    # is already fully set up; at worst the user re-uploads from Settings.
+    if logo_file is not None and logo_path_to_save:
+        try:
+            with open(logo_path_to_save, 'wb+') as f:
+                for chunk in logo_file.chunks():
+                    f.write(chunk)
+        except OSError:
+            pass
+
+    # Auto-login the new Owner so the browser lands on /dashboard with a
+    # live session. Since the endpoint is CsrfExempt + AllowAny, we attach
+    # the session cookie directly via django.contrib.auth.login.
+    login(request, user)
+
+    AuditLog.log(name or username, 'user.create', f'One-shot setup created Owner: {username}', 'admin')
+
+    payload = _serialize_user(user)
+    payload['setup_complete'] = True
+    return Response(payload, status=201)
+
+
+@api_view(['POST'])
 def reset_setup(request):
     """Tear the portal back down to first-run state. Owner only.
 

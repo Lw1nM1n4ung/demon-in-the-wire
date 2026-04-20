@@ -10,7 +10,7 @@ from scanner.views import (
 from scanner.auth_views import (
     auth_login, auth_logout, auth_csrf, auth_me, auth_check, auth_users,
     auth_user_create, auth_user_update, auth_user_delete,
-    site_config, update_site_config, check_username, setup_admin, site_setup_complete, reset_setup, user_preferences,
+    site_config, update_site_config, check_username, setup_admin, setup_one_shot, site_setup_complete, reset_setup, user_preferences,
     list_sessions, revoke_session, revoke_all_sessions,
     audit_log,
     tokens_list_or_create, tokens_revoke,
@@ -48,6 +48,10 @@ urlpatterns = [
     path('api/site-config/update/', update_site_config, name='site-config-update'),
     path('api/auth/check-username/', check_username, name='check-username'),
     path('api/auth/setup-admin/', setup_admin, name='setup-admin'),
+    # All-in-one wizard submission — multipart POST that lands Owner creation,
+    # branding save, logo upload, setup_complete flip, and auto-login in a
+    # single atomic request.
+    path('api/auth/setup/', setup_one_shot, name='setup-one-shot'),
     path('api/site-config/setup-complete/', site_setup_complete, name='site-setup-complete'),
     path('api/site-config/reset-setup/', reset_setup, name='site-reset-setup'),
     path('api/preferences/', user_preferences, name='user-preferences'),
