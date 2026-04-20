@@ -843,3 +843,48 @@ def tools_health(request):
     from scanner.tools_health import probe_all
     refresh = str(request.query_params.get('refresh', '')).lower() in ('1', 'true', 'yes')
     return Response(probe_all(refresh=refresh))
+
+
+@api_view(['GET'])
+def system_stats(request):
+    """Real-time container resource usage (CPU / memory / disk / network).
+
+    Polled every ~1.5s by the System Monitor SPA page. Returns container-
+    scoped (cgroup) numbers — no /proc or /sys host mounts in compose, so
+    numbers reflect what the api container sees, which is what operators
+    actually care about for capacity planning. No AuditLog write because
+    this is a high-frequency polling endpoint; logging every tick would
+    drown the audit trail in noise. IsAuthenticated is the only gate.
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+    import time
+    import psutil
+    # cpu_percent(interval=None) returns the delta since the previous call
+    # (or since boot on the first call). First call in a fresh process
+    # returns 0.0 — fine; the client's sparkline settles within a tick.
+    vm = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    net = psutil.net_io_counters()
+    return Response({
+        'cpu': {
+            'percent': psutil.cpu_percent(interval=None),
+            'count': psutil.cpu_count() or 0,
+        },
+        'memory': {
+            'percent': vm.percent,
+            'used': vm.used,
+            'total': vm.total,
+        },
+        'disk': {
+            'percent': disk.percent,
+            'used': disk.used,
+            'total': disk.total,
+        },
+        'net': {
+            'bytes_sent': net.bytes_sent,
+            'bytes_recv': net.bytes_recv,
+        },
+        'uptime': int(time.time() - psutil.boot_time()),
+        'ts': int(time.time() * 1000),
+    })

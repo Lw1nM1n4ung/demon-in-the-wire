@@ -14,7 +14,7 @@ from scanner.auth_views import (
     list_sessions, revoke_session, revoke_all_sessions,
     audit_log,
     tokens_list_or_create, tokens_revoke,
-    notifications_config, notifications_test, tools_health,
+    notifications_config, notifications_test, tools_health, system_stats,
 )
 
 router = DefaultRouter()
@@ -67,4 +67,6 @@ urlpatterns = [
     path('api/notifications/test/', notifications_test, name='notifications-test'),
     # Live tool presence/version probe (drives Settings → Tools tab)
     path('api/tools-health/', tools_health, name='tools-health'),
+    # Real-time container resource usage (drives /system page)
+    path('api/system-stats/', system_stats, name='system-stats'),
 ]

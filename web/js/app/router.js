@@ -51,6 +51,7 @@ WG._ROUTES = [
   { page: 'report-builder', path: '/report-builder' },
   { page: 'settings',       path: '/settings' },
   { page: 'users',          path: '/users' },
+  { page: 'system',         path: '/system' },
 ];
 
 WG._routeToPath = function(page, params) {
@@ -165,6 +166,7 @@ WG.render = function() {
     'report-builder': WG.renderReportBuilder,
     settings:         WG.renderSettings,
     users:            WG.renderUsers,
+    system:           WG.renderSystem,
   };
 
   var renderFn = pages[route.page] || WG.renderDashboard;
