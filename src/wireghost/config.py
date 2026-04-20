@@ -26,6 +26,10 @@ class ScanConfig:
     skip_nuclei: bool = False
     skip_vuln: bool = False
     tool_timeout: float = 3600.0
+    # nmap-specific budget. Nmap is routinely the slowest tool (full -sV -O
+    # followed by --script=vuln on a /24 can blow past the generic 1 h),
+    # so it gets 1.5 h by default. Other tools stay on tool_timeout.
+    nmap_timeout: float = 5400.0
     report_formats: list[str] = field(
         default_factory=lambda: ["html", "docx", "xlsx"]
     )
@@ -109,6 +113,7 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "skip_nuclei": "skip_nuclei",
         "skip_vuln": "skip_vuln",
         "tool_timeout": "tool_timeout",
+        "nmap_timeout": "nmap_timeout",
         "report_formats": "report_formats",
         "report_title": "report_title",
         "verbose": "verbose",
@@ -135,6 +140,7 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_SKIP_NUCLEI": ("skip_nuclei", bool),
         "WIREGHOST_SKIP_VULN": ("skip_vuln", bool),
         "WIREGHOST_TOOL_TIMEOUT": ("tool_timeout", float),
+        "WIREGHOST_NMAP_TIMEOUT": ("nmap_timeout", float),
         "WIREGHOST_REPORT_TITLE": ("report_title", str),
         "WIREGHOST_VERBOSE": ("verbose", bool),
         "WIREGHOST_LOGO": ("logo_path", Path),

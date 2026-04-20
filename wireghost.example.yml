@@ -21,6 +21,11 @@ skip_vuln: false
 # Per-tool timeout in seconds
 tool_timeout: 3600
 
+# Nmap-specific timeout (overrides tool_timeout for nmap only). Full -sV -O
+# followed by --script=vuln on a /24 can blow past the generic 1 h budget,
+# so nmap gets 1.5 h by default.
+nmap_timeout: 5400
+
 # Report output formats (html, docx, xlsx)
 report_formats:
   - html

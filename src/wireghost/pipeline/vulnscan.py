@@ -204,7 +204,7 @@ async def run_nmap_vuln(
             "-oX", str(xml_path),
             host.ip,
         ],
-        timeout=int(config.tool_timeout),
+        timeout=int(config.nmap_timeout or config.tool_timeout),
         label=f"nmap vuln {host.ip}",
     )
 
