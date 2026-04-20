@@ -303,7 +303,7 @@ WG._setupBranding = function() {
       '</div>' +
       '<div class="form-group"><label class="form-label">Logo (optional)</label>' +
         '<div style="display:flex;gap:10px;align-items:center;">' +
-          '<input type="file" id="setupLogoFile" accept="image/*" style="display:none;">' +
+          '<input type="file" id="setupLogoFile" accept="image/*" style="display:none;" onchange="WG._onSetupLogoPick(this)">' +
           '<button class="btn btn-secondary btn-sm" onclick="document.getElementById(\'setupLogoFile\').click()">Upload Logo</button>' +
           '<span class="mono" style="font-size:0.72rem;color:var(--text-dim);" id="setupLogoName">No logo</span>' +
         '</div>' +
@@ -313,6 +313,23 @@ WG._setupBranding = function() {
       '<button class="btn btn-ghost" onclick="WG._setupPrev()">Back</button>' +
       '<button class="btn btn-primary" onclick="WG._saveBranding()">Continue</button>' +
     '</div>';
+};
+
+/* Logo file-picker handler. Stashes the File object on WG so
+ * _finishSetup can push it to /api/report-config/logo/ once the new
+ * Owner's session is live (upload requires report:logo:upload, which
+ * the owner has but anonymous callers don't — we can't POST during the
+ * wizard itself). */
+WG._onSetupLogoPick = function(input) {
+  var file = input.files && input.files[0];
+  var label = document.getElementById('setupLogoName');
+  if (!file) {
+    WG._setupLogoBlob = null;
+    if (label) label.textContent = 'No logo';
+    return;
+  }
+  WG._setupLogoBlob = file;
+  if (label) label.textContent = file.name;
 };
 
 WG._saveBranding = function() {
@@ -325,7 +342,8 @@ WG._saveBranding = function() {
     company_name: company, report_title: title, prepared_by: prepared, brand_color: color,
   }));
 
-  // Branding saved to localStorage — will be pushed to API after first login
+  // Branding + logo are both pushed to the API in _finishSetup, once the
+  // Owner's session is established (both endpoints require auth).
   WG._setupNext();
 };
 
@@ -407,15 +425,55 @@ WG._setupPrev = function() {
   }
 };
 
-WG._finishSetup = function() {
+WG._finishSetup = async function() {
   localStorage.setItem('wg_setup_complete', '1');
-  // Persist to server (best-effort; authenticated Owner has the perm)
   var admin = {};
   try { admin = JSON.parse(localStorage.getItem('wg_setup_admin') || '{}'); } catch (e) {}
-  WG.api('/site-config/setup-complete/', {
-    method: 'POST',
-    body: JSON.stringify({ completed_by: admin.username || 'admin' }),
-  });
+  var branding = {};
+  try { branding = JSON.parse(localStorage.getItem('wg_setup_branding') || '{}'); } catch (e) {}
+
+  /* Push branding to the server (was previously localStorage-only — the
+   * server's ReportConfig stayed empty even though the user filled it in). */
+  if (branding.company_name || branding.report_title || branding.prepared_by || branding.brand_color) {
+    try {
+      await WG.api('/report-config/', {
+        method: 'PUT',
+        body: JSON.stringify({
+          company_name: branding.company_name || '',
+          report_title: branding.report_title || 'Vulnerability Assessment Report',
+          prepared_by: branding.prepared_by || '',
+          brand_color: branding.brand_color || '#006D38',
+        }),
+      });
+    } catch (e) { /* non-fatal — user can edit in Settings later */ }
+  }
+
+  /* Upload the logo (if picked) — multipart POST, handled by its own view.
+   * Uses raw fetch because WG.api forces Content-Type: application/json
+   * which breaks FormData. */
+  if (WG._setupLogoBlob) {
+    try {
+      var fd = new FormData();
+      fd.append('logo', WG._setupLogoBlob);
+      await fetch(WG.API_BASE + '/report-config/logo/', {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        headers: { 'X-CSRFToken': WG._getCSRF ? WG._getCSRF() : '' },
+      });
+    } catch (e) { /* non-fatal */ }
+    WG._setupLogoBlob = null;
+  }
+
+  /* Mark setup complete server-side. setup-admin already flipped the
+   * flag atomically, but this second call also records completed_by. */
+  try {
+    await WG.api('/site-config/setup-complete/', {
+      method: 'POST',
+      body: JSON.stringify({ completed_by: admin.username || 'admin' }),
+    });
+  } catch (e) { /* non-fatal */ }
+
   // The new Owner was auto-logged-in in _createAdmin, so land on the
   // dashboard; otherwise fall back to the login page.
   if (WG.isLoggedIn && WG.isLoggedIn()) {
