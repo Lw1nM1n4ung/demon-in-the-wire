@@ -27,14 +27,51 @@ _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _PARTITION_THRESHOLD = 23
 
 
+def _range_to_cidrs(target: str) -> list[ipaddress.IPv4Network] | None:
+    """Convert dash-range notation like '10.0.0.0-10.0.3.255' into CIDRs.
+
+    Returns None when *target* isn't a dash-range (caller falls back to
+    single-target handling). Uses ipaddress.summarize_address_range so
+    the result is the minimum set of CIDRs that exactly covers the range —
+    a /22 if aligned, else a cluster of smaller blocks.
+    """
+    if "-" not in target:
+        return None
+    try:
+        start_s, end_s = target.split("-", 1)
+        start = ipaddress.IPv4Address(start_s.strip())
+        end = ipaddress.IPv4Address(end_s.strip())
+        if end < start:
+            return None
+        return list(ipaddress.summarize_address_range(start, end))
+    except (ValueError, ipaddress.AddressValueError):
+        return None
+
+
 def _partition_target(target: str) -> list[str]:
-    """Split large CIDRs into /24 subnets for parallel scanning.
+    """Split anything wider than a /24 into /24 subnets for parallel scanning.
 
     - /16 → 256 /24 subnets
     - /20 → 16 /24 subnets
-    - /24 or smaller → returned as-is
-    - Hostnames / single IPs → returned as-is
+    - /24 or smaller (/25, /26, …, single IP) → returned as-is
+    - Dash ranges (10.0.0.0-10.0.3.255) → summarized to CIDRs, then each
+      CIDR wider than /24 is further split. A 1024-host range becomes
+      4 /24s just like /22 would.
+    - Hostnames → returned as-is
     """
+    # Dash range → expand to CIDRs first, then feed each CIDR through the
+    # same /24-split path so range and CIDR inputs converge on one code path.
+    cidrs = _range_to_cidrs(target)
+    if cidrs is not None:
+        out: list[str] = []
+        for net in cidrs:
+            if net.prefixlen <= _PARTITION_THRESHOLD:
+                out.extend(str(s) for s in net.subnets(new_prefix=24))
+            else:
+                out.append(str(net))
+        log.info("Partitioning range %s into %d /24 subnet(s)", target, len(out))
+        return out
+
     try:
         net = ipaddress.ip_network(target, strict=False)
         if net.prefixlen <= _PARTITION_THRESHOLD:
