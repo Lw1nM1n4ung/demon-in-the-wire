@@ -117,6 +117,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             service_enum=data['service_enum'],
             skip_nuclei=data['skip_nuclei'],
             skip_openvas=data['skip_openvas'],
+            scan_unresponsive=data.get('scan_unresponsive', False),
             status='pending',
             created_by=request.user,
         )

@@ -46,6 +46,7 @@ def run_scan(self, scan_id):
             skip_nuclei=scan.skip_nuclei,
             nuclei_templates=scan.nuclei_templates,
             nuclei_default_templates=scan.nuclei_default_templates,
+            scan_unresponsive=scan.scan_unresponsive,
             output_dir=str(output_dir),
         )
 

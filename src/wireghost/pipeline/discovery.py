@@ -158,7 +158,54 @@ async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
 
-    sorted_ips = sorted(live_ips, key=lambda ip: tuple(int(o) for o in ip.split(".")))
+    # Compute the "error / unreachable" set: every IP in the input CIDR(s)
+    # that did NOT answer either nmap or fping. Only makes sense when the
+    # input was a CIDR — hostnames and single IPs contribute no expansion.
+    candidate_ips: set[str] = set()
+    for subnet in subnets:
+        try:
+            net = ipaddress.ip_network(subnet, strict=False)
+        except ValueError:
+            continue  # hostname or opaque single-IP string — not expandable
+        # .hosts() skips the network + broadcast addrs on /≤30. For /31 and
+        # /32 it yields both IPs or the single IP respectively.
+        for ip in net.hosts():
+            candidate_ips.add(str(ip))
+    unreachable_ips = candidate_ips - live_ips
+
+    _ip_sort_key = lambda ip: tuple(int(o) for o in ip.split(".")) if ip.count(".") == 3 else (0,)
+    sorted_unreachable = sorted(unreachable_ips, key=_ip_sort_key)
+
+    # Always persist the unreachable list as a diagnostic — operators can
+    # eyeball which IPs were silently dropped by ICMP filters. No cost if
+    # the input was a hostname (empty file).
+    unreachable_txt = tree.live_host_dir / "unreachable.txt"
+    unreachable_txt.write_text(
+        ("\n".join(sorted_unreachable) + "\n") if sorted_unreachable else "",
+        encoding="utf-8",
+    )
+
+    # The returned list (feeds the rest of the pipeline) depends on the
+    # scan_unresponsive flag. Default behaviour is unchanged — only alive
+    # hosts proceed to portscan.
+    if config.scan_unresponsive and unreachable_ips:
+        log.warning(
+            "scan_unresponsive=True — including %d ICMP-silent IP(s) in the scan "
+            "(total scan targets: %d)",
+            len(unreachable_ips),
+            len(live_ips) + len(unreachable_ips),
+        )
+        effective_ips: set[str] = live_ips | unreachable_ips
+    else:
+        if unreachable_ips:
+            log.info(
+                "Discovery: %d unreachable IP(s) recorded to unreachable.txt "
+                "(not scanned; set scan_unresponsive=True to include them)",
+                len(unreachable_ips),
+            )
+        effective_ips = live_ips
+
+    sorted_ips = sorted(effective_ips, key=_ip_sort_key)
 
     # Persist to disk
     live_txt = tree.live_host_dir / "live.txt"

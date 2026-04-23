@@ -164,6 +164,9 @@ class Scan(models.Model):
     skip_openvas = models.BooleanField(default=True)
     nuclei_templates = models.CharField(max_length=500, blank=True)
     nuclei_default_templates = models.BooleanField(default=True)
+    # If True, ICMP-silent hosts get port-scanned too (nmap -Pn path). Default
+    # False because it can blow up scope on big CIDRs.
+    scan_unresponsive = models.BooleanField(default=False)
 
     # Results
     hosts_count = models.IntegerField(default=0)

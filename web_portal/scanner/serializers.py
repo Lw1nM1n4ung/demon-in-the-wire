@@ -96,6 +96,9 @@ class ScanCreateSerializer(serializers.Serializer):
     skip_openvas = serializers.BooleanField(default=True)
     nuclei_templates = serializers.CharField(max_length=500, required=False, default='', allow_blank=True)
     nuclei_default_templates = serializers.BooleanField(required=False, default=True)
+    # When True, hosts that don't answer ICMP are still port-scanned. Useful
+    # against firewalled targets; massively expands scope on big CIDRs.
+    scan_unresponsive = serializers.BooleanField(required=False, default=False)
 
     def validate_target(self, value):
         """Block SSRF targets: localhost, link-local, cloud metadata, non-routable."""
