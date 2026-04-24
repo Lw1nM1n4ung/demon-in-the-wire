@@ -1,0 +1,37 @@
+# Developer overlay — restores bind mounts, debug ports, and HTTP mode.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DJANGO_DEBUG: "true"
+      SESSION_COOKIE_SECURE: "false"
+      CSRF_COOKIE_SECURE: "false"
+      WIREGHOST_PROTO: http
+      WIREGHOST_PORT: "${WIREGHOST_PORT:-9995}"
+    volumes:
+      - ./src:/app/src:ro
+      - ./templates:/opt/nuclei-template-archives:ro
+
+  worker:
+    environment:
+      DJANGO_DEBUG: "true"
+      WIREGHOST_PROTO: http
+      WIREGHOST_PORT: "${WIREGHOST_PORT:-9995}"
+    volumes:
+      - ./src:/app/src:ro
+      - ./templates:/opt/nuclei-template-archives:ro
+
+  beat:
+    environment:
+      DJANGO_DEBUG: "true"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  portal:
+    ports:
+      - "0.0.0.0:${WIREGHOST_PORT:-9995}:80"

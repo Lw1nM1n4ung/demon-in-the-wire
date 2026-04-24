@@ -53,8 +53,13 @@ RUN mkdir -p /opt/nuclei-external-templates \
 COPY web_portal/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
+RUN groupadd -g 1000 appuser && useradd -u 1000 -g 1000 -m -s /bin/sh appuser \
+    && mkdir -p /data/output /data/assets /app/logs \
+    && chown -R appuser:appuser /data /app/logs /opt/nuclei-external-templates
+
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app:/app/src
 
 EXPOSE 8000
+USER appuser
 ENTRYPOINT ["/docker-entrypoint.sh"]

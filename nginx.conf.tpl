@@ -15,7 +15,7 @@ server {
 server {
     listen 443 ssl default_server;
     http2 on;
-    server_name 95.111.251.53;
+    server_name {{WIREGHOST_HOST}};
 
     # TLS certificates (self-signed by install.sh or user-provided)
     ssl_certificate     /etc/nginx/certs/cert.pem;

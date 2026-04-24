@@ -142,8 +142,12 @@ class ScanCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError('Multicast addresses not allowed')
             if ip.is_unspecified:
                 raise serializers.ValidationError('Unspecified address not allowed')
+            if ip.is_reserved:
+                raise serializers.ValidationError('Reserved addresses not allowed')
             if ip.is_private and str(ip).startswith('169.254'):
                 raise serializers.ValidationError('Cloud metadata endpoint not allowed')
+            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+                _check_ip(ip.ipv4_mapped)
 
         try:
             ip = ipaddress.ip_address(ip_str)

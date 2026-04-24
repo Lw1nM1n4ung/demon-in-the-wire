@@ -15,5 +15,8 @@ Tools/
 !templates/*.tar.gz
 templates/Templates/
 logs/
+certs/
+backups/
+nginx.conf
 .playwright-mcp/
 .claude/scheduled_tasks.lock
