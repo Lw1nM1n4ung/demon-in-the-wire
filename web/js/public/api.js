@@ -64,13 +64,6 @@ WG.getCached = function(key, apiPath, maxAge) {
   if (WG._cache[key] && (now - WG._cacheTime[key]) < maxAge) {
     return WG._cache[key];
   }
-  // Fire-and-forget refresh; caller re-reads from cache on next render.
-  WG.fetchData(apiPath).then(function(data) {
-    if (data != null) {
-      WG._cache[key] = data;
-      WG._cacheTime[key] = Date.now();
-    }
-  });
   return WG._cache[key] || [];
 };
 

@@ -72,7 +72,6 @@ class ScanViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
     def get_queryset(self):
-        # Owner/Engineer see everything; the permission class blocks Viewers before this runs.
         return super().get_queryset()
 
     def get_serializer_class(self):

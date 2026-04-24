@@ -43,7 +43,8 @@ ROLE_MATRIX = {
         'schedule:read', 'schedule:write',
     },
     'viewer': {
-        'finding:read', 'dashboard:view',
+        'scan:read', 'host:read', 'finding:read',
+        'dashboard:view', 'report:download',
     },
 }
 
