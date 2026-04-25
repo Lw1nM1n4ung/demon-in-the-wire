@@ -1,11 +1,6 @@
 from django.db import migrations, models
 import django.db.models.deletion
-
-
-def generate_uuid7():
-    """Placeholder for the model default — not called during migration."""
-    import uuid
-    return uuid.uuid4()
+import scanner.models
 
 
 class Migration(migrations.Migration):
@@ -18,7 +13,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Screenshot',
             fields=[
-                ('id', models.UUIDField(default=generate_uuid7, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=scanner.models.generate_uuid7, editable=False, primary_key=True, serialize=False)),
                 ('url', models.CharField(max_length=500)),
                 ('filename', models.CharField(max_length=500)),
                 ('title', models.CharField(blank=True, max_length=500)),

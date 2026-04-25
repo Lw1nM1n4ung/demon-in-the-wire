@@ -29,13 +29,12 @@ RUN NAABU_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/naabu/rel
     && unzip -o naabu.zip naabu -d /tools/ \
     && chmod +x /tools/naabu && rm naabu.zip
 
-# gowitness
+# gowitness (v3+ ships as a standalone binary, not a tarball)
 RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/releases/latest \
         | grep -o '"browser_download_url": *"[^"]*linux-amd64[^"]*"' \
         | head -1 | cut -d'"' -f4) \
-    && curl -sL "$GOWITNESS_URL" -o gowitness.tar.gz \
-    && tar xzf gowitness.tar.gz -C /tools/ \
-    && chmod +x /tools/gowitness && rm gowitness.tar.gz
+    && curl -sL "$GOWITNESS_URL" -o /tools/gowitness \
+    && chmod +x /tools/gowitness
 
 # === Stage 2: Build scannerctl from OpenVAS Rust source ===
 FROM rust:1.93-bookworm AS scannerctl-builder

@@ -11,6 +11,10 @@ RUN HTTPX_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/httpx/rel
 RUN NAABU_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/naabu/releases/latest \
         | grep -o '"browser_download_url": *"[^"]*linux_amd64.zip"' | head -1 | cut -d'"' -f4) \
     && curl -sL "$NAABU_URL" -o /tmp/naabu.zip && unzip -o /tmp/naabu.zip naabu -d /tools/ && chmod +x /tools/naabu
+# gowitness (v3+ ships as a standalone binary)
+RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/releases/latest \
+        | grep -o '"browser_download_url": *"[^"]*linux-amd64[^"]*"' | head -1 | cut -d'"' -f4) \
+    && curl -sL "$GOWITNESS_URL" -o /tools/gowitness && chmod +x /tools/gowitness
 
 # ── Stage 2: final image ──
 FROM python:3.12-slim
@@ -22,12 +26,14 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc default-libmysqlclient-dev pkg-config \
     nmap fping masscan git libpcap0.8 \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
-# ProjectDiscovery binaries
-COPY --from=pd-tools /tools/nuclei /usr/local/bin/nuclei
-COPY --from=pd-tools /tools/httpx  /usr/local/bin/httpx
-COPY --from=pd-tools /tools/naabu  /usr/local/bin/naabu
+# ProjectDiscovery binaries + gowitness
+COPY --from=pd-tools /tools/nuclei    /usr/local/bin/nuclei
+COPY --from=pd-tools /tools/httpx     /usr/local/bin/httpx
+COPY --from=pd-tools /tools/naabu     /usr/local/bin/naabu
+COPY --from=pd-tools /tools/gowitness /usr/local/bin/gowitness
 
 # searchsploit (exploitdb) — shallow clone to keep image size reasonable.
 RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb \

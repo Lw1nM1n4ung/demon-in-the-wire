@@ -615,7 +615,7 @@ class Screenshot(models.Model):
 
     class Meta:
         ordering = ['url']
-        indexes = [models.Index(fields=['scan'])]
+        indexes = [models.Index(fields=['scan'], name='scanner_scr_scan_id_idx')]
 
     def __str__(self):
         return f"{self.url} ({self.host.ip})"
