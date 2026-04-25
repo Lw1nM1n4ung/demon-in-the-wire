@@ -40,6 +40,7 @@ class ScanConfig:
     nuclei_templates: str = ""
     nuclei_default_templates: bool = True
     nuclei_batch_size: int = 5000
+    skip_screenshots: bool = False
     # When True, hosts that fail ICMP discovery are STILL port-scanned
     # (nmap -Pn already bypasses ping). Useful against firewalled targets
     # that drop ICMP but have open TCP ports; expensive on large CIDRs
@@ -128,6 +129,7 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "nuclei_default_templates": "nuclei_default_templates",
         "nuclei_batch_size": "nuclei_batch_size",
         "scan_unresponsive": "scan_unresponsive",
+        "skip_screenshots": "skip_screenshots",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -155,6 +157,7 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_NUCLEI_DEFAULT_TEMPLATES": ("nuclei_default_templates", bool),
         "WIREGHOST_NUCLEI_BATCH_SIZE": ("nuclei_batch_size", int),
         "WIREGHOST_SCAN_UNRESPONSIVE": ("scan_unresponsive", bool),
+        "WIREGHOST_SKIP_SCREENSHOTS": ("skip_screenshots", bool),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

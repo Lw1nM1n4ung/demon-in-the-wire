@@ -28,6 +28,14 @@ class WebTech:
 
 
 @dataclass
+class Screenshot:
+    url: str
+    filename: str
+    title: str = ""
+    status_code: int = 0
+
+
+@dataclass
 class Host:
     ip: str
     hostname: str = ""
@@ -37,6 +45,7 @@ class Host:
     web_titles: dict[str, str] = field(default_factory=dict)  # url → page title
     technologies: list[WebTech] = field(default_factory=list)
     os: str = ""  # OS detection from nmap -O (e.g. "Linux 5.15")
+    screenshots: list[Screenshot] = field(default_factory=list)
 
     @property
     def open_ports(self) -> list[Port]:

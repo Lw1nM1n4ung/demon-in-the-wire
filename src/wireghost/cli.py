@@ -70,6 +70,9 @@ def scan(
         True, "--nuclei-default-templates/--no-nuclei-default-templates",
         help="Include default nuclei templates (disable to run external only)"
     ),
+    skip_screenshots: bool = typer.Option(
+        False, "--skip-screenshots", help="Skip web endpoint screenshots"
+    ),
     config_file: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to wireghost.yml config"
     ),
@@ -88,6 +91,7 @@ def scan(
         "skip_openvas": skip_openvas,
         "nuclei_templates": nuclei_templates,
         "nuclei_default_templates": nuclei_default_templates,
+        "skip_screenshots": skip_screenshots,
     }
     if report_formats is not None:
         overrides["report_formats"] = [
