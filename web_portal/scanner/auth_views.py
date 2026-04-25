@@ -303,7 +303,11 @@ def _serialize_site_config(config, *, include_private=False):
 def site_config(request):
     """Get site-wide config (setup state). Public so login/setup pages can check."""
     config = SiteConfig.get()
-    return Response(_serialize_site_config(config))
+    data = _serialize_site_config(config)
+    if not request.user.is_authenticated:
+        data.pop('setup_completed_by', None)
+        data.pop('setup_completed_at', None)
+    return Response(data)
 
 
 @api_view(['PUT'])

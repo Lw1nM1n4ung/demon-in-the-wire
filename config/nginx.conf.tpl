@@ -132,6 +132,7 @@ server {
         client_max_body_size 10M;
         proxy_cookie_path / /;
 
+        add_header Cache-Control "no-store" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Frame-Options "DENY" always;
         add_header X-XSS-Protection "1; mode=block" always;
