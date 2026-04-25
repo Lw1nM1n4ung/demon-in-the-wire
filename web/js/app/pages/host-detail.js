@@ -49,6 +49,7 @@ WG.renderHostDetail = function(id) {
       '<div class="tab active" data-tab="ports" onclick="WG.switchHostTab(\'ports\',\'' + id + '\')">Ports <span class="count">' + ports.length + '</span></div>' +
       '<div class="tab" data-tab="findings" onclick="WG.switchHostTab(\'findings\',\'' + id + '\')">Findings <span class="count">' + hFindings.length + '</span></div>' +
       '<div class="tab" data-tab="tech" onclick="WG.switchHostTab(\'tech\',\'' + id + '\')">Technologies <span class="count">' + techs.length + '</span></div>' +
+      ((host.screenshots && host.screenshots.length) ? '<div class="tab" data-tab="screenshots" onclick="WG.switchHostTab(\'screenshots\',\'' + id + '\')">Screenshots <span class="count">' + host.screenshots.length + '</span></div>' : '') +
     '</div>' +
     '<div id="hostTabContent">' + WG._hostPortsTab(ports) + '</div>';
 };
@@ -79,10 +80,37 @@ WG._hostTechTab = function(techs) {
     '</tbody></table></div>';
 };
 
+WG._hostScreenshotsTab = function(screenshots) {
+  if (!screenshots || !screenshots.length) return '<div class="panel-empty"><div class="icon">&#128247;</div>No screenshots captured</div>';
+  var esc = WG.escHtml;
+  var cards = screenshots.map(function(ss, i) {
+    var statusClass = ss.status_code < 300 ? 'tag-success' : ss.status_code < 400 ? 'tag-warning' : 'tag-danger';
+    return '<div class="screenshot-card" data-ss-idx="' + i + '">' +
+      '<img src="' + esc(ss.image_url) + '" loading="lazy" alt="screenshot">' +
+      '<div class="screenshot-card-info">' +
+      '<div class="url">' + esc(ss.url) + '</div>' +
+      (ss.title ? '<div class="title">' + esc(ss.title) + '</div>' : '') +
+      (ss.status_code ? '<span class="tag ' + statusClass + '">' + ss.status_code + '</span>' : '') +
+      '</div></div>';
+  });
+  return '<div class="screenshot-gallery">' + cards.join('') + '</div>';
+};
+
+WG._bindScreenshotClicks = function(screenshots) {
+  document.querySelectorAll('.screenshot-card[data-ss-idx]').forEach(function(card) {
+    card.onclick = function() { WGLightbox.open(screenshots, parseInt(card.dataset.ssIdx)); };
+  });
+};
+
 WG.switchHostTab = function(tab, hostId) {
   document.querySelectorAll('#hostTabs .tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
   var el = document.getElementById('hostTabContent');
-  if (tab === 'ports') el.innerHTML = WG._hostPortsTab([].filter(function(p) { return p.host === hostId; }));
+  var host = WG._cache['host_' + hostId];
+  if (tab === 'ports') el.innerHTML = WG._hostPortsTab(host ? host.ports || [] : []);
   else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab([].filter(function(f) { return f.host === hostId; }));
-  else if (tab === 'tech') el.innerHTML = WG._hostTechTab([].filter(function(t) { return t.host === hostId; }));
+  else if (tab === 'tech') el.innerHTML = WG._hostTechTab(host ? host.technologies || [] : []);
+  else if (tab === 'screenshots' && host) {
+    el.innerHTML = WG._hostScreenshotsTab(host.screenshots);
+    WG._bindScreenshotClicks(host.screenshots);
+  }
 };

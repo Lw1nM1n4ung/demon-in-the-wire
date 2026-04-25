@@ -52,6 +52,7 @@ WG.renderDashboard = function() {
     WG._initAsmCharts();
     WG._bindAssetFilters();
     WG._renderAssetInventory();
+    WG._renderWebSurface();
   }, 0);
   return WG._buildAsm();
 };
@@ -181,6 +182,17 @@ WG._buildAsm = function() {
     '<div class="panel anim-reveal" style="animation-delay:0.50s;margin-bottom:18px;">' +
       '<div class="panel-header"><div class="panel-title">Top Technologies</div></div>' +
       '<div class="panel-body">' + WG._topTechHtml(data.top_technologies || [], loaded) + '</div>' +
+    '</div>' +
+
+    /* ══ Web Surface screenshots ══ */
+    '<div class="panel anim-reveal" style="animation-delay:0.52s;margin-bottom:18px;">' +
+      '<div class="panel-header">' +
+        '<div class="panel-title">Web Surface</div>' +
+        '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'hosts\')">View all hosts</button>' +
+      '</div>' +
+      '<div class="web-surface-grid" id="webSurfaceGrid">' +
+        '<div class="spinner" style="margin:20px auto;"></div>' +
+      '</div>' +
     '</div>' +
 
     /* ══ Asset inventory table — hidden for Viewers who lack host:read ══ */
@@ -521,6 +533,36 @@ WG._renderRiskBySource = function(sources) {
       '</div>';
     }).join(''));
   }
+};
+
+/* ── Web Surface screenshots ─────────────────────────────────────────── */
+WG._renderWebSurface = function() {
+  WG.api('/dashboard/screenshots/').then(function(data) {
+    var el = document.getElementById('webSurfaceGrid');
+    if (!el) return;
+    if (!data || data.length === 0) {
+      el.textContent = 'No screenshots available';
+      el.style.cssText = 'color:var(--text-dim);font-size:.85rem;padding:12px;';
+      return;
+    }
+    var fragment = document.createDocumentFragment();
+    data.forEach(function(ss, i) {
+      var card = document.createElement('div');
+      card.className = 'web-surface-card';
+      card.onclick = function() { WGLightbox.open(data, i); };
+      var image = document.createElement('img');
+      image.src = ss.image_url;
+      image.loading = 'lazy';
+      image.alt = 'screenshot';
+      var label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = ss.host_ip + ' — ' + ss.url;
+      card.appendChild(image);
+      card.appendChild(label);
+      fragment.appendChild(card);
+    });
+    el.replaceChildren(fragment);
+  });
 };
 
 /* ── Utility: compact number display (1234 → "1.2k") ────────────────── */
