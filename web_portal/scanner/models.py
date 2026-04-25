@@ -449,6 +449,7 @@ class ScanPolicy(models.Model):
     tools = models.JSONField(default=dict)
     version_detect = models.BooleanField(default=True)
     os_detect = models.BooleanField(default=True)
+    skip_screenshots = models.BooleanField(default=False)
     severity_filter = models.CharField(max_length=100, default='all')
     report_formats = models.CharField(max_length=100, default='dashboard,docx,xlsx')
     is_default = models.BooleanField(default=False)
@@ -598,3 +599,22 @@ class ApiToken(models.Model):
             user=user, name=(name or '')[:80], prefix=prefix, key_hash=key_hash,
         )
         return obj, raw
+
+
+class Screenshot(models.Model):
+    """Web endpoint screenshot captured by gowitness during a scan."""
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    host = models.ForeignKey(Host, on_delete=models.CASCADE, related_name='screenshots')
+    scan = models.ForeignKey(Scan, on_delete=models.CASCADE, related_name='screenshots')
+    url = models.CharField(max_length=500)
+    filename = models.CharField(max_length=500)
+    title = models.CharField(max_length=500, blank=True)
+    status_code = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['url']
+        indexes = [models.Index(fields=['scan'])]
+
+    def __str__(self):
+        return f"{self.url} ({self.host.ip})"
