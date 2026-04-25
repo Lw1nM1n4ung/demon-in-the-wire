@@ -117,7 +117,7 @@ def run_scan(self, scan_id):
 
 def _persist_results(scan, report):
     """Write ScanReport data into Django ORM tables."""
-    from scanner.models import Host as DBHost, Port as DBPort, Finding as DBFinding, Technology as DBTech
+    from scanner.models import Host as DBHost, Port as DBPort, Finding as DBFinding, Technology as DBTech, Screenshot as DBScreenshot
 
     host_map = {}  # pipeline_ip -> db_host
 
@@ -151,6 +151,16 @@ def _persist_results(scan, report):
                 name=t.name,
                 version=t.version or '',
                 url=t.url or '',
+            )
+
+        for sc in getattr(h, 'screenshots', []):
+            DBScreenshot.objects.create(
+                host=db_host,
+                scan=scan,
+                url=sc.url,
+                filename=sc.filename,
+                title=sc.title or '',
+                status_code=sc.status_code,
             )
 
     # Findings
