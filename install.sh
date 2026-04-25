@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 
 # ── Colours ──────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 
 info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
 ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*"; }
@@ -61,75 +61,194 @@ gen_secret() {
     openssl rand -base64 48 | tr -d '\n/+=' | head -c 64
 }
 
-# ── Interactive prompts ──────────────────────────────────────────────
-collect_inputs() {
+# ── Prompt helper: show default, read input, keep default if empty ───
+# Usage: prompt_var VARNAME "Label" "default_value"
+prompt_var() {
+    local varname="$1" label="$2" default="$3"
+    local current="${!varname:-$default}"
+    printf "  %-22s ${DIM}[%s]${NC}: " "$label" "$current"
+    read -r _input
+    if [ -n "$_input" ]; then
+        eval "$varname=\"\$_input\""
+    else
+        eval "$varname=\"\$current\""
+    fi
+}
+
+# Prompt for a secret: show truncated auto-gen value
+prompt_secret() {
+    local varname="$1" label="$2" default="$3"
+    local current="${!varname:-$default}"
+    local masked="${current:0:4}...${current: -3}"
+    printf "  %-22s ${DIM}[auto: %s]${NC}: " "$label" "$masked"
+    read -r _input
+    if [ -n "$_input" ]; then
+        eval "$varname=\"\$_input\""
+    else
+        eval "$varname=\"\$current\""
+    fi
+}
+
+# Mask a secret for display: first 4 + last 3 chars
+mask_secret() {
+    local val="$1"
+    if [ ${#val} -gt 10 ]; then
+        printf "%s...%s" "${val:0:4}" "${val: -3}"
+    else
+        printf "********"
+    fi
+}
+
+# ── Compute derived values from proto/host/port ─────────────────────
+_compute_derived() {
+    if [ "$WIREGHOST_PROTO" = "https" ]; then
+        SESSION_COOKIE_SECURE="true"
+        CSRF_COOKIE_SECURE="true"
+    else
+        SESSION_COOKIE_SECURE="false"
+        CSRF_COOKIE_SECURE="false"
+    fi
+
+    _PORT_SUFFIX=""
+    if [ "$WIREGHOST_PROTO" = "https" ] && [ "$WIREGHOST_PORT" != "443" ]; then
+        _PORT_SUFFIX=":${WIREGHOST_PORT}"
+    elif [ "$WIREGHOST_PROTO" = "http" ] && [ "$WIREGHOST_PORT" != "80" ]; then
+        _PORT_SUFFIX=":${WIREGHOST_PORT}"
+    fi
+    CSRF_TRUSTED_ORIGINS="${WIREGHOST_PROTO}://${WIREGHOST_HOST}${_PORT_SUFFIX},${WIREGHOST_PROTO}://localhost${_PORT_SUFFIX},${WIREGHOST_PROTO}://127.0.0.1${_PORT_SUFFIX}"
+}
+
+# ── Collect all configuration (interactive, grouped) ────────────────
+collect_all_config() {
     UPGRADE_MODE=false
     if [ -f .env ]; then
         UPGRADE_MODE=true
-        warn "Existing .env found — running in upgrade mode (secrets preserved)"
+        warn "Existing .env found — values from .env used as defaults"
         # shellcheck disable=SC1091
         set -a; source .env; set +a
     fi
 
-    if [ -t 0 ]; then
-        printf "\n${BOLD}Hostname or IP${NC} that users will access this instance at.\n"
-        printf "  Examples: scanner.corp.local, 10.0.1.50, wireghost.example.com\n"
-        CURRENT_HOST="${WIREGHOST_HOST:-}"
-        if [ -n "$CURRENT_HOST" ] && [ "$CURRENT_HOST" != "localhost" ] && [ "$CURRENT_HOST" != "*" ]; then
-            printf "  Current: ${CYAN}%s${NC}\n" "$CURRENT_HOST"
-            printf "  Press Enter to keep, or type a new value: "
-        else
-            printf "  Hostname/IP: "
-        fi
-        read -r INPUT_HOST
-        if [ -n "$INPUT_HOST" ]; then
-            WIREGHOST_HOST="$INPUT_HOST"
-        elif [ -z "$CURRENT_HOST" ] || [ "$CURRENT_HOST" = "localhost" ] || [ "$CURRENT_HOST" = "*" ]; then
-            DEFAULT_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-            if [ -n "$DEFAULT_IP" ]; then
-                printf "  Auto-detected IP: ${CYAN}%s${NC} — use this? [Y/n] " "$DEFAULT_IP"
-                read -r CONFIRM_IP
-                if [ -z "$CONFIRM_IP" ] || [[ "$CONFIRM_IP" =~ ^[Yy] ]]; then
-                    WIREGHOST_HOST="$DEFAULT_IP"
-                else
-                    die "No hostname provided. Re-run and enter a hostname."
-                fi
-            else
-                die "Could not detect IP. Re-run and enter a hostname."
-            fi
-        fi
+    # Pre-generate secrets so they're available as defaults
+    _AUTO_DJANGO_SECRET="$(gen_secret)"
+    _AUTO_MYSQL_ROOT_PW="$(gen_secret)"
+    _AUTO_MYSQL_PW="$(gen_secret)"
+    _AUTO_REDIS_PW="$(gen_secret)"
 
-        printf "\n${BOLD}HTTPS port${NC} [443]: "
-        read -r INPUT_PORT
-        WIREGHOST_PORT="${INPUT_PORT:-${WIREGHOST_PORT:-443}}"
-    else
-        [ -n "${WIREGHOST_HOST:-}" ] && [ "$WIREGHOST_HOST" != "localhost" ] || \
-            die "Non-interactive mode requires WIREGHOST_HOST to be set in .env or environment"
-        WIREGHOST_PORT="${WIREGHOST_PORT:-443}"
-    fi
-
-    ok "Target: https://${WIREGHOST_HOST}:${WIREGHOST_PORT}"
-}
-
-# ── Generate secrets (fresh install only) ────────────────────────────
-generate_secrets() {
-    if [ "$UPGRADE_MODE" = true ]; then
-        info "Preserving existing secrets from .env"
-        return
-    fi
-
-    info "Generating cryptographic secrets..."
-    DJANGO_SECRET_KEY="$(gen_secret)"
-    MYSQL_ROOT_PASSWORD="$(gen_secret)"
-    MYSQL_PASSWORD="$(gen_secret)"
-    REDIS_PASSWORD="$(gen_secret)"
-
+    # Carry forward existing secrets in upgrade mode, otherwise use auto-gen
+    DJANGO_SECRET_KEY="${DJANGO_SECRET_KEY:-$_AUTO_DJANGO_SECRET}"
+    MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$_AUTO_MYSQL_ROOT_PW}"
+    MYSQL_PASSWORD="${MYSQL_PASSWORD:-$_AUTO_MYSQL_PW}"
+    REDIS_PASSWORD="${REDIS_PASSWORD:-$_AUTO_REDIS_PW}"
     MYSQL_DATABASE="${MYSQL_DATABASE:-wireghost}"
     MYSQL_USER="${MYSQL_USER:-wireghost}"
+    WIREGHOST_PROTO="${WIREGHOST_PROTO:-https}"
     WIREGHOST_LOG_DIR="${WIREGHOST_LOG_DIR:-./logs}"
     WIREGHOST_LOG_LEVEL="${WIREGHOST_LOG_LEVEL:-INFO}"
 
-    ok "4 unique 64-character secrets generated"
+    # Auto-detect host IP as fallback default
+    _DETECTED_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    _HOST_DEFAULT="${WIREGHOST_HOST:-}"
+    if [ -z "$_HOST_DEFAULT" ] || [ "$_HOST_DEFAULT" = "localhost" ] || [ "$_HOST_DEFAULT" = "*" ]; then
+        _HOST_DEFAULT="${_DETECTED_IP:-localhost}"
+    fi
+    WIREGHOST_HOST="$_HOST_DEFAULT"
+    WIREGHOST_PORT="${WIREGHOST_PORT:-443}"
+
+    # ── Non-interactive mode: accept all defaults ────────────────────
+    if [ ! -t 0 ]; then
+        if [ "$WIREGHOST_HOST" = "localhost" ]; then
+            die "Non-interactive mode requires WIREGHOST_HOST to be set in .env or environment"
+        fi
+        _compute_derived
+        ok "Non-interactive mode — using defaults"
+        return
+    fi
+
+    # ── Interactive: grouped sections with skip option ───────────────
+    printf "\n${BOLD}Configure .env — press Enter to accept defaults in [brackets]${NC}\n"
+    printf "${DIM}Each section can be skipped entirely with the default 'N'.${NC}\n"
+
+    # ── Section 1/5: Portal Access ───────────────────────────────────
+    printf "\n${CYAN}── 1/5  Portal Access ──────────────────────────────${NC}\n"
+    printf "  Customize? [y/N] "
+    read -r _sec1
+    if [[ "$_sec1" =~ ^[Yy] ]]; then
+        prompt_var WIREGHOST_HOST  "WIREGHOST_HOST"  "$WIREGHOST_HOST"
+        prompt_var WIREGHOST_PORT  "WIREGHOST_PORT"  "$WIREGHOST_PORT"
+        prompt_var WIREGHOST_PROTO "WIREGHOST_PROTO" "$WIREGHOST_PROTO"
+    else
+        printf "  ${DIM}(using defaults: %s:%s, %s)${NC}\n" "$WIREGHOST_HOST" "$WIREGHOST_PORT" "$WIREGHOST_PROTO"
+    fi
+
+    # ── Section 2/5: Database ────────────────────────────────────────
+    printf "\n${CYAN}── 2/5  Database (MySQL) ───────────────────────────${NC}\n"
+    printf "  Customize? [y/N] "
+    read -r _sec2
+    if [[ "$_sec2" =~ ^[Yy] ]]; then
+        prompt_var    MYSQL_DATABASE      "MYSQL_DATABASE"      "$MYSQL_DATABASE"
+        prompt_var    MYSQL_USER          "MYSQL_USER"          "$MYSQL_USER"
+        prompt_secret MYSQL_PASSWORD      "MYSQL_PASSWORD"      "$MYSQL_PASSWORD"
+        prompt_secret MYSQL_ROOT_PASSWORD "MYSQL_ROOT_PASSWORD" "$MYSQL_ROOT_PASSWORD"
+    else
+        printf "  ${DIM}(using defaults: db=%s, user=%s, passwords=auto)${NC}\n" "$MYSQL_DATABASE" "$MYSQL_USER"
+    fi
+
+    # ── Section 3/5: Redis ───────────────────────────────────────────
+    printf "\n${CYAN}── 3/5  Redis ─────────────────────────────────────${NC}\n"
+    printf "  Customize? [y/N] "
+    read -r _sec3
+    if [[ "$_sec3" =~ ^[Yy] ]]; then
+        prompt_secret REDIS_PASSWORD "REDIS_PASSWORD" "$REDIS_PASSWORD"
+    else
+        printf "  ${DIM}(using default: password=auto)${NC}\n"
+    fi
+
+    # ── Section 4/5: Django ──────────────────────────────────────────
+    printf "\n${CYAN}── 4/5  Django ────────────────────────────────────${NC}\n"
+    printf "  Customize? [y/N] "
+    read -r _sec4
+    if [[ "$_sec4" =~ ^[Yy] ]]; then
+        prompt_secret DJANGO_SECRET_KEY "DJANGO_SECRET_KEY" "$DJANGO_SECRET_KEY"
+    else
+        printf "  ${DIM}(using default: secret_key=auto)${NC}\n"
+    fi
+
+    # ── Section 5/5: Logging ─────────────────────────────────────────
+    printf "\n${CYAN}── 5/5  Logging ───────────────────────────────────${NC}\n"
+    printf "  Customize? [y/N] "
+    read -r _sec5
+    if [[ "$_sec5" =~ ^[Yy] ]]; then
+        prompt_var WIREGHOST_LOG_DIR   "WIREGHOST_LOG_DIR"   "$WIREGHOST_LOG_DIR"
+        prompt_var WIREGHOST_LOG_LEVEL "WIREGHOST_LOG_LEVEL" "$WIREGHOST_LOG_LEVEL"
+    else
+        printf "  ${DIM}(using defaults: dir=%s, level=%s)${NC}\n" "$WIREGHOST_LOG_DIR" "$WIREGHOST_LOG_LEVEL"
+    fi
+
+    _compute_derived
+
+    # ── Confirmation summary ─────────────────────────────────────────
+    printf "\n${BOLD}══ Configuration Summary ═══════════════════════════${NC}\n"
+    printf "  %-24s %s\n" "WIREGHOST_HOST"       "$WIREGHOST_HOST"
+    printf "  %-24s %s\n" "WIREGHOST_PORT"       "$WIREGHOST_PORT"
+    printf "  %-24s %s\n" "WIREGHOST_PROTO"      "$WIREGHOST_PROTO"
+    printf "  %-24s %s\n" "MYSQL_DATABASE"       "$MYSQL_DATABASE"
+    printf "  %-24s %s\n" "MYSQL_USER"           "$MYSQL_USER"
+    printf "  %-24s %s  ${DIM}(auto)${NC}\n" "MYSQL_PASSWORD"       "$(mask_secret "$MYSQL_PASSWORD")"
+    printf "  %-24s %s  ${DIM}(auto)${NC}\n" "MYSQL_ROOT_PASSWORD"  "$(mask_secret "$MYSQL_ROOT_PASSWORD")"
+    printf "  %-24s %s  ${DIM}(auto)${NC}\n" "REDIS_PASSWORD"       "$(mask_secret "$REDIS_PASSWORD")"
+    printf "  %-24s %s  ${DIM}(auto)${NC}\n" "DJANGO_SECRET_KEY"    "$(mask_secret "$DJANGO_SECRET_KEY")"
+    printf "  %-24s %s\n" "SESSION_COOKIE_SECURE" "$SESSION_COOKIE_SECURE"
+    printf "  %-24s %s\n" "CSRF_COOKIE_SECURE"    "$CSRF_COOKIE_SECURE"
+    printf "  %-24s %s\n" "WIREGHOST_LOG_DIR"     "$WIREGHOST_LOG_DIR"
+    printf "  %-24s %s\n" "WIREGHOST_LOG_LEVEL"   "$WIREGHOST_LOG_LEVEL"
+
+    printf "\n  Write .env? [Y/n] "
+    read -r _confirm
+    if [[ "$_confirm" =~ ^[Nn] ]]; then
+        die "Aborted — .env not written"
+    fi
+
+    ok "Configuration confirmed"
 }
 
 # ── TLS certificate generation ───────────────────────────────────────
@@ -195,27 +314,34 @@ render_nginx() {
 # ── Write .env ───────────────────────────────────────────────────────
 write_env() {
     if [ "$UPGRADE_MODE" = true ]; then
-        PREV_HOST=$(grep '^WIREGHOST_HOST=' .env | cut -d= -f2-)
-        PREV_PORT=$(grep '^WIREGHOST_PORT=' .env | cut -d= -f2-)
+        info "Updating .env with configured values..."
 
-        if [ "$PREV_HOST" != "$WIREGHOST_HOST" ] || [ "$PREV_PORT" != "$WIREGHOST_PORT" ]; then
-            info "Updating hostname/port in .env"
-            sed -i "s|^WIREGHOST_HOST=.*|WIREGHOST_HOST=${WIREGHOST_HOST}|" .env
-            sed -i "s|^WIREGHOST_PORT=.*|WIREGHOST_PORT=${WIREGHOST_PORT}|" .env
-        fi
+        # Update every variable — sed for existing keys, append for missing
+        _update_env_var() {
+            local key="$1" val="$2"
+            if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${val}|" .env
+            else
+                echo "${key}=${val}" >> .env
+            fi
+        }
 
-        grep -q '^WIREGHOST_PROTO=' .env || echo "WIREGHOST_PROTO=https" >> .env
-        grep -q '^SESSION_COOKIE_SECURE=' .env || echo "SESSION_COOKIE_SECURE=true" >> .env
-        grep -q '^CSRF_COOKIE_SECURE=' .env || echo "CSRF_COOKIE_SECURE=true" >> .env
+        _update_env_var WIREGHOST_HOST       "$WIREGHOST_HOST"
+        _update_env_var WIREGHOST_PORT       "$WIREGHOST_PORT"
+        _update_env_var WIREGHOST_PROTO      "$WIREGHOST_PROTO"
+        _update_env_var SESSION_COOKIE_SECURE "$SESSION_COOKIE_SECURE"
+        _update_env_var CSRF_COOKIE_SECURE   "$CSRF_COOKIE_SECURE"
+        _update_env_var CSRF_TRUSTED_ORIGINS "$CSRF_TRUSTED_ORIGINS"
+        _update_env_var MYSQL_DATABASE       "$MYSQL_DATABASE"
+        _update_env_var MYSQL_USER           "$MYSQL_USER"
+        _update_env_var MYSQL_PASSWORD       "$MYSQL_PASSWORD"
+        _update_env_var MYSQL_ROOT_PASSWORD  "$MYSQL_ROOT_PASSWORD"
+        _update_env_var REDIS_PASSWORD       "$REDIS_PASSWORD"
+        _update_env_var DJANGO_SECRET_KEY    "$DJANGO_SECRET_KEY"
+        _update_env_var WIREGHOST_LOG_DIR    "$WIREGHOST_LOG_DIR"
+        _update_env_var WIREGHOST_LOG_LEVEL  "$WIREGHOST_LOG_LEVEL"
 
-        _CSRF_ORIGINS="https://${WIREGHOST_HOST}:${WIREGHOST_PORT},https://localhost:${WIREGHOST_PORT},https://127.0.0.1:${WIREGHOST_PORT}"
-        if grep -q '^CSRF_TRUSTED_ORIGINS=' .env; then
-            sed -i "s|^CSRF_TRUSTED_ORIGINS=.*|CSRF_TRUSTED_ORIGINS=${_CSRF_ORIGINS}|" .env
-        else
-            echo "CSRF_TRUSTED_ORIGINS=${_CSRF_ORIGINS}" >> .env
-        fi
-
-        ok ".env updated (secrets preserved)"
+        ok ".env updated"
         return
     fi
 
@@ -238,10 +364,10 @@ REDIS_PASSWORD=${REDIS_PASSWORD}
 # Portal
 WIREGHOST_HOST=${WIREGHOST_HOST}
 WIREGHOST_PORT=${WIREGHOST_PORT}
-WIREGHOST_PROTO=https
-SESSION_COOKIE_SECURE=true
-CSRF_COOKIE_SECURE=true
-CSRF_TRUSTED_ORIGINS=https://${WIREGHOST_HOST}:${WIREGHOST_PORT},https://localhost:${WIREGHOST_PORT},https://127.0.0.1:${WIREGHOST_PORT}
+WIREGHOST_PROTO=${WIREGHOST_PROTO}
+SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE}
+CSRF_COOKIE_SECURE=${CSRF_COOKIE_SECURE}
+CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
 
 # Logging
 WIREGHOST_LOG_DIR=${WIREGHOST_LOG_DIR}
@@ -323,8 +449,9 @@ print('OK')
 
 # ── Print summary ────────────────────────────────────────────────────
 print_summary() {
-    SETUP_URL="https://${WIREGHOST_HOST}"
-    if [ "$WIREGHOST_PORT" != "443" ]; then
+    SETUP_URL="${WIREGHOST_PROTO}://${WIREGHOST_HOST}"
+    if { [ "$WIREGHOST_PROTO" = "https" ] && [ "$WIREGHOST_PORT" != "443" ]; } || \
+       { [ "$WIREGHOST_PROTO" = "http" ] && [ "$WIREGHOST_PORT" != "80" ]; }; then
         SETUP_URL="${SETUP_URL}:${WIREGHOST_PORT}"
     fi
 
@@ -356,8 +483,7 @@ print_summary() {
 # ══════════════════════════════════════════════════════════════════════
 banner
 check_prereqs
-collect_inputs
-generate_secrets
+collect_all_config
 generate_certs
 render_nginx
 write_env
