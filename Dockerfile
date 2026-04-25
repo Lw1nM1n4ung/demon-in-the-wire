@@ -29,6 +29,14 @@ RUN NAABU_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/naabu/rel
     && unzip -o naabu.zip naabu -d /tools/ \
     && chmod +x /tools/naabu && rm naabu.zip
 
+# gowitness
+RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/releases/latest \
+        | grep -o '"browser_download_url": *"[^"]*linux-amd64[^"]*"' \
+        | head -1 | cut -d'"' -f4) \
+    && curl -sL "$GOWITNESS_URL" -o gowitness.tar.gz \
+    && tar xzf gowitness.tar.gz -C /tools/ \
+    && chmod +x /tools/gowitness && rm gowitness.tar.gz
+
 # === Stage 2: Build scannerctl from OpenVAS Rust source ===
 FROM rust:1.93-bookworm AS scannerctl-builder
 
@@ -49,6 +57,7 @@ FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap fping masscan libpcap0.8 libsnmp40 git rsync libxml2-utils \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Install searchsploit (exploitdb)
@@ -60,6 +69,7 @@ RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/e
 COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
 COPY --from=tools /tools/httpx /usr/local/bin/httpx
 COPY --from=tools /tools/naabu /usr/local/bin/naabu
+COPY --from=tools /tools/gowitness /usr/local/bin/gowitness
 COPY --from=scannerctl-builder /usr/local/bin/scannerctl /usr/local/bin/scannerctl
 
 # Install wireghost
@@ -84,6 +94,7 @@ RUN echo "=== Tool verification ===" \
     && nuclei -version 2>&1 | head -1 \
     && naabu -version 2>&1 | head -1 \
     && masscan --version 2>&1 | head -1 \
+    && gowitness version 2>&1 | head -1 \
     && scannerctl version 2>&1 | head -1 \
     && wireghost --version
 
