@@ -100,6 +100,42 @@ mask_secret() {
     fi
 }
 
+# ── Check if a port is available (returns 0=available, 1=in-use) ────
+_port_available() {
+    local port="$1"
+    local hit
+    hit=$(ss -tlnp "sport = :${port}" 2>/dev/null | grep -v "^State" | head -1) || true
+    if [ -n "$hit" ] && ! echo "$hit" | grep -q "docker\|containerd"; then
+        return 1
+    fi
+    return 0
+}
+
+# ── Prompt for a port with live availability check ─────────────────
+# Re-prompts until the user picks a free port or explicitly confirms.
+# Usage: prompt_port VARNAME "Label" "default"
+prompt_port() {
+    local varname="$1" label="$2" default="$3"
+    while true; do
+        prompt_var "$varname" "$label" "$default"
+        local chosen="${!varname}"
+        if ! [[ "$chosen" =~ ^[0-9]+$ ]] || [ "$chosen" -lt 1 ] || [ "$chosen" -gt 65535 ]; then
+            warn "Invalid port number: $chosen"
+            eval "$varname=\"$default\""
+            continue
+        fi
+        if _port_available "$chosen"; then
+            break
+        fi
+        warn "Port $chosen is already in use by another service"
+        printf "  ${DIM}Keep anyway? [y/N]:${NC} "
+        read -r _keep
+        if [[ "$_keep" =~ ^[Yy] ]]; then
+            break
+        fi
+    done
+}
+
 # ── Compute derived values from proto/host/port ─────────────────────
 _compute_derived() {
     if [ "$WIREGHOST_PROTO" = "https" ]; then
@@ -117,14 +153,6 @@ _compute_derived() {
         _PORT_SUFFIX=":${WIREGHOST_PORT}"
     fi
     CSRF_TRUSTED_ORIGINS="${WIREGHOST_PROTO}://${WIREGHOST_HOST}${_PORT_SUFFIX},${WIREGHOST_PROTO}://localhost${_PORT_SUFFIX},${WIREGHOST_PROTO}://127.0.0.1${_PORT_SUFFIX}"
-
-    # Warn if chosen ports are already in use (skip if our own containers hold them)
-    for _p in "$WIREGHOST_PORT" "$WIREGHOST_HTTP_PORT"; do
-        _pid=$(ss -tlnp "sport = :$_p" 2>/dev/null | grep -v "^State" | head -1) || true
-        if [ -n "$_pid" ] && ! echo "$_pid" | grep -q "docker\|containerd"; then
-            warn "Port $_p is already in use — another service may conflict"
-        fi
-    done
 }
 
 # ── Collect all configuration (interactive, grouped) ────────────────
@@ -184,8 +212,8 @@ collect_all_config() {
     read -r _sec1
     if [[ "$_sec1" =~ ^[Yy] ]]; then
         prompt_var WIREGHOST_HOST      "WIREGHOST_HOST"      "$WIREGHOST_HOST"
-        prompt_var WIREGHOST_PORT      "HTTPS Port"          "$WIREGHOST_PORT"
-        prompt_var WIREGHOST_HTTP_PORT "HTTP Port (redirect)" "$WIREGHOST_HTTP_PORT"
+        prompt_port WIREGHOST_PORT      "HTTPS Port"          "$WIREGHOST_PORT"
+        prompt_port WIREGHOST_HTTP_PORT "HTTP Port (redirect)" "$WIREGHOST_HTTP_PORT"
         prompt_var WIREGHOST_PROTO     "WIREGHOST_PROTO"     "$WIREGHOST_PROTO"
     else
         printf "  ${DIM}(using defaults: %s, https=%s, http=%s, %s)${NC}\n" "$WIREGHOST_HOST" "$WIREGHOST_PORT" "$WIREGHOST_HTTP_PORT" "$WIREGHOST_PROTO"
