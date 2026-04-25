@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset
+from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Screenshot
 
 
 class AssetListSerializer(serializers.ModelSerializer):
@@ -45,19 +45,38 @@ class FindingListSerializer(serializers.ModelSerializer):
         fields = ['id', 'source', 'severity', 'title', 'host_ip', 'port', 'cve', 'full_url']
 
 
+class ScreenshotSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Screenshot
+        fields = ['id', 'url', 'image_url', 'title', 'status_code', 'created_at']
+
+    def get_image_url(self, obj):
+        return f'/api/screenshots/{obj.id}/image/'
+
+
 class HostSerializer(serializers.ModelSerializer):
     ports = PortSerializer(many=True, read_only=True)
     technologies = TechnologySerializer(many=True, read_only=True)
+    screenshots = ScreenshotSerializer(many=True, read_only=True)
 
     class Meta:
         model = Host
-        fields = ['id', 'ip', 'hostname', 'os', 'status', 'ports_count', 'findings_count', 'ports', 'technologies']
+        fields = ['id', 'ip', 'hostname', 'os', 'status', 'ports_count', 'findings_count', 'ports', 'technologies', 'screenshots']
 
 
 class HostListSerializer(serializers.ModelSerializer):
+    screenshot_count = serializers.IntegerField(source='screenshots.count', read_only=True)
+    thumbnail_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Host
-        fields = ['id', 'ip', 'hostname', 'os', 'ports_count', 'findings_count']
+        fields = ['id', 'ip', 'hostname', 'os', 'ports_count', 'findings_count', 'scan', 'screenshot_count', 'thumbnail_url']
+
+    def get_thumbnail_url(self, obj):
+        first = obj.screenshots.first()
+        return f'/api/screenshots/{first.id}/image/' if first else None
 
 
 class ReportSerializer(serializers.ModelSerializer):

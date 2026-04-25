@@ -3,7 +3,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology
+from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology, Screenshot as DBScreenshot
 
 
 def HasPerm(code):
@@ -63,6 +63,7 @@ from .serializers import (
     ReportSerializer, ReportConfigSerializer,
     ScanPolicySerializer, ScheduledScanSerializer,
     AssetSerializer, AssetListSerializer,
+    ScreenshotSerializer,
 )
 
 
@@ -282,6 +283,54 @@ class HostViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             return HostListSerializer
         return HostSerializer
+
+
+@api_view(['GET'])
+def screenshot_image(request, screenshot_id):
+    """Serve a screenshot PNG with auth + host:read check."""
+    if not request.user.is_authenticated or not request.user.has_permission('host:read'):
+        return Response({'error': 'Not authorized'}, status=403)
+    try:
+        ss = DBScreenshot.objects.get(id=screenshot_id)
+    except DBScreenshot.DoesNotExist:
+        raise Http404
+
+    from django.conf import settings
+    from pathlib import Path
+    output_root = Path(getattr(settings, 'SCAN_OUTPUT_DIR', '/data/output'))
+    img_path = (output_root / ss.filename).resolve()
+
+    if not str(img_path).startswith(str(output_root.resolve())):
+        raise Http404
+    if not img_path.exists():
+        raise Http404
+
+    response = FileResponse(open(img_path, 'rb'), content_type='image/png')
+    response['Cache-Control'] = 'private, max-age=86400'
+    return response
+
+
+@api_view(['GET'])
+def dashboard_screenshots(request):
+    """Return the 20 most recent screenshots for the dashboard Web Surface panel."""
+    if not request.user.is_authenticated or not request.user.has_permission('dashboard:view'):
+        return Response({'error': 'Not authorized'}, status=403)
+    latest_scan = Scan.objects.filter(status='completed').order_by('-completed_at').first()
+    if not latest_scan:
+        return Response([])
+    screenshots = DBScreenshot.objects.filter(scan=latest_scan).select_related('host')[:20]
+    data = [
+        {
+            'id': str(ss.id),
+            'url': ss.url,
+            'title': ss.title,
+            'image_url': f'/api/screenshots/{ss.id}/image/',
+            'host_ip': ss.host.ip,
+            'host_id': str(ss.host.id),
+        }
+        for ss in screenshots
+    ]
+    return Response(data)
 
 
 class AssetViewSet(viewsets.ReadOnlyModelViewSet):

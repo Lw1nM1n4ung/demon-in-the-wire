@@ -5,7 +5,7 @@ from scanner.views import (
     ScanViewSet, HostViewSet, FindingViewSet, AssetViewSet,
     ScanPolicyViewSet, ScheduledScanViewSet,
     dashboard_stats, download_report, report_config, upload_logo,
-    support_bundle,
+    support_bundle, screenshot_image, dashboard_screenshots,
 )
 from scanner.auth_views import (
     auth_login, auth_logout, auth_csrf, auth_me, auth_check, auth_users,
@@ -29,6 +29,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/dashboard/', dashboard_stats, name='dashboard-stats'),
+    path('api/dashboard/screenshots/', dashboard_screenshots, name='dashboard-screenshots'),
+    path('api/screenshots/<uuid:screenshot_id>/image/', screenshot_image, name='screenshot-image'),
     path('api/reports/<uuid:report_id>/download/', download_report, name='download-report'),
     path('api/report-config/', report_config, name='report-config'),
     path('api/report-config/logo/', upload_logo, name='upload-logo'),
