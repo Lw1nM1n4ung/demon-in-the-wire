@@ -369,7 +369,16 @@ def update_site_config(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def check_username(request):
-    """Check if a username is available (rate-limited to prevent enumeration)."""
+    """Check if a username is available.
+
+    Pre-auth access is only allowed during initial setup (setup_complete=False)
+    so the wizard can validate the first admin username. After setup completes,
+    authentication is required — prevents unauthenticated username enumeration.
+    """
+    config = SiteConfig.get()
+    if config.setup_complete and not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+
     from django.core.cache import cache
     ip = request.META.get('REMOTE_ADDR', '')
     cache_key = f'check_user:{ip}'
