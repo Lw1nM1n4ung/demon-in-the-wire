@@ -37,6 +37,11 @@ class OutputTree:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def host_screenshots_dir(self, ip: str) -> Path:
+        d = self.host_dir(ip) / "web" / "screenshots"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
 
 def build_output_tree(output_dir: str | Path, target_name: str) -> OutputTree:
     """Create the full output directory tree and return an :class:`OutputTree`.

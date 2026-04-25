@@ -16,6 +16,7 @@ from wireghost.pipeline.portscan import scan_host
 from wireghost.pipeline.service_enum import enumerate_services
 from wireghost.pipeline.vulnscan import scan_host_vulns
 from wireghost.pipeline.webdetect import probe_host
+from wireghost.pipeline.webscreenshot import screenshot_host
 from wireghost.utils.fs import build_output_tree
 from wireghost.utils.log import setup_logging
 from wireghost.utils.process import check_tools
@@ -89,14 +90,13 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         # Phase 4: Web detection
         await probe_host(host, config, tree, sem)
 
-        # Phase 4b: CMS-specific scanning (WPScan for WordPress, etc.)
-        cms_findings = await scan_cms(host, config, tree, sem)
-
-        # Phase 4c: Service-specific enumeration
-        svc_findings = await enumerate_services(host, config, tree, sem)
-
-        # Phase 5: Vulnerability scanning (nuclei + nmap concurrent)
-        findings = await scan_host_vulns(host, config, tree, sem)
+        # Phases 4b-5: CMS, service enum, vuln scan, screenshots — parallel
+        cms_findings, svc_findings, findings, _ = await asyncio.gather(
+            scan_cms(host, config, tree, sem),
+            enumerate_services(host, config, tree, sem),
+            scan_host_vulns(host, config, tree, sem),
+            screenshot_host(host, config, tree, sem),
+        )
         findings.extend(svc_findings)
         findings.extend(cms_findings)
 
