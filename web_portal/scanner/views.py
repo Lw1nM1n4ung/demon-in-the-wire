@@ -116,6 +116,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             os_detect=data['os_detect'],
             service_enum=data['service_enum'],
             skip_nuclei=data['skip_nuclei'],
+            skip_screenshots=data.get('skip_screenshots', False),
             skip_openvas=data['skip_openvas'],
             scan_unresponsive=data.get('scan_unresponsive', False),
             status='pending',
@@ -295,9 +296,11 @@ def screenshot_image(request, screenshot_id):
     except DBScreenshot.DoesNotExist:
         raise Http404
 
-    from django.conf import settings
     from pathlib import Path
-    output_root = Path(getattr(settings, 'SCAN_OUTPUT_DIR', '/data/output'))
+    scan_dir = ss.scan.output_dir
+    if not scan_dir:
+        raise Http404
+    output_root = Path(scan_dir)
     img_path = (output_root / ss.filename).resolve()
 
     if not str(img_path).startswith(str(output_root.resolve())):
@@ -702,6 +705,7 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
             scan.report_formats = p.report_formats
             scan.version_detect = p.version_detect
             scan.os_detect = p.os_detect
+            scan.skip_screenshots = p.skip_screenshots
             scan.save()
 
         from scanner.tasks import run_scan
