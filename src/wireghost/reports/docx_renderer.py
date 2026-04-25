@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from wireghost.models.finding import Finding
     from wireghost.models.report import ScanReport
     from wireghost.models.scan import Host
+
+log = logging.getLogger("wireghost")
 
 
 def _make_anchor_image(
@@ -172,6 +175,7 @@ class DocxRenderer:
         self._target_subnets(doc, report)
         self._live_hosts(doc, report)
         self._open_ports(doc, report)
+        self._web_screenshots(doc, report, reports_dir)
         self._identified_issues(doc, report)
 
         self._add_header_logos(doc, logo, header_logo)
@@ -392,6 +396,42 @@ class DocxRenderer:
 
             sub_num += 1
 
+    def _web_screenshots(
+        self, doc: Document, report: ScanReport, reports_dir: Path,
+    ) -> None:
+        hosts_with_ss = [
+            h for h in report.hosts if getattr(h, "screenshots", None)
+        ]
+        if not hosts_with_ss:
+            return
+
+        doc.add_heading("5. Web Screenshots", level=1)
+        doc.add_paragraph(
+            "Screenshots of discovered web services captured during the assessment."
+        )
+
+        for h in hosts_with_ss:
+            doc.add_heading(h.ip, level=2)
+            for sc in h.screenshots:
+                png = (
+                    reports_dir.parent
+                    / "ips"
+                    / h.ip
+                    / "web"
+                    / "screenshots"
+                    / sc.filename
+                )
+                if not png.is_file():
+                    continue
+                caption = sc.url
+                if sc.title:
+                    caption += f" — {sc.title}"
+                doc.add_paragraph(caption)
+                try:
+                    doc.add_picture(str(png), width=Inches(5.5))
+                except Exception:
+                    log.debug("Could not embed screenshot %s", png)
+
     def _identified_issues(self, doc: Document, report: ScanReport) -> None:
         if not report.findings:
             return
@@ -410,7 +450,7 @@ class DocxRenderer:
             subnet = host_to_subnet.get(host_ip, host_ip)
             findings_by_subnet[subnet].extend(host_findings)
 
-        section_num = 5
+        section_num = 6
         for subnet in sorted(findings_by_subnet.keys()):
             subnet_findings = findings_by_subnet[subnet]
             doc.add_heading(

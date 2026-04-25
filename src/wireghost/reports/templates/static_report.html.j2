@@ -48,6 +48,12 @@
   .rec-list { list-style: disc inside; }
   .rec-list li { margin-bottom: 0.4rem; }
 
+  /* Screenshots */
+  .screenshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .screenshot-item { border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; background: #fff; }
+  .screenshot-item img { width: 100%; height: auto; display: block; }
+  .screenshot-item .caption { padding: 0.5rem 0.75rem; font-size: 0.8rem; color: #555; word-break: break-all; }
+
   /* Evidence details */
   .finding-evidence { background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 4px; margin: 0.75rem 0; }
   .finding-evidence summary { padding: 0.4rem 0.75rem; font-weight: 600; font-size: 0.85rem; cursor: pointer; color: #333; }
@@ -163,6 +169,35 @@
     {% endif %}
     {% endfor %}
   </div>
+  {% endif %}
+
+  <!-- Web Screenshots -->
+  {% if hosts %}
+  {% set ns = namespace(has_screenshots=false) %}
+  {% for host in hosts %}
+    {% if host.screenshots %}{% set ns.has_screenshots = true %}{% endif %}
+  {% endfor %}
+  {% if ns.has_screenshots %}
+  <div class="section">
+    <h2>Web Screenshots</h2>
+    {% for host in hosts %}
+    {% if host.screenshots %}
+    <h3>{{ host.ip }}{% if host.hostname %} ({{ host.hostname }}){% endif %}</h3>
+    <div class="screenshot-grid">
+      {% for sc in host.screenshots %}
+      {% set b64 = sc.filename|screenshot_b64(host.ip) %}
+      {% if b64 %}
+      <div class="screenshot-item">
+        <img src="{{ b64 }}" alt="Screenshot of {{ sc.url }}">
+        <div class="caption">{{ sc.url }}{% if sc.title %} &mdash; {{ sc.title }}{% endif %}</div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
   {% endif %}
 
   <!-- Recommendations -->

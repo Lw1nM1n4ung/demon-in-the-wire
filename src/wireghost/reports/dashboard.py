@@ -134,6 +134,10 @@ class DashboardRenderer:
                     ],
                     "os": getattr(h, "os", ""),
                     "web_titles": getattr(h, "web_titles", {}),
+                    "screenshots": [
+                        {"url": sc.url, "title": sc.title, "filename": sc.filename}
+                        for sc in getattr(h, "screenshots", [])
+                    ],
                 }
             )
 

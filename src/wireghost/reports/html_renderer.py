@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,6 +18,21 @@ if TYPE_CHECKING:
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
+log = logging.getLogger("wireghost")
+
+
+def _screenshot_b64(reports_dir: Path, host_ip: str, filename: str) -> str:
+    """Read a screenshot PNG and return a base64 data URI, or empty string."""
+    png = reports_dir.parent / "ips" / host_ip / "web" / "screenshots" / filename
+    if not png.is_file():
+        return ""
+    try:
+        data = png.read_bytes()
+        return f"data:image/png;base64,{base64.b64encode(data).decode()}"
+    except OSError:
+        log.debug("Could not read screenshot %s", png)
+        return ""
+
 
 class HtmlRenderer:
     """Render a ScanReport as a self-contained static HTML page."""
@@ -29,6 +46,9 @@ class HtmlRenderer:
         env = Environment(
             loader=FileSystemLoader(str(_TEMPLATE_DIR)),
             autoescape=True,
+        )
+        env.filters["screenshot_b64"] = lambda fname, ip: _screenshot_b64(
+            reports_dir, ip, fname
         )
         template = env.get_template("static_report.html.j2")
 
