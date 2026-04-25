@@ -117,6 +117,14 @@ _compute_derived() {
         _PORT_SUFFIX=":${WIREGHOST_PORT}"
     fi
     CSRF_TRUSTED_ORIGINS="${WIREGHOST_PROTO}://${WIREGHOST_HOST}${_PORT_SUFFIX},${WIREGHOST_PROTO}://localhost${_PORT_SUFFIX},${WIREGHOST_PROTO}://127.0.0.1${_PORT_SUFFIX}"
+
+    # Warn if chosen ports are already in use (skip if our own containers hold them)
+    for _p in "$WIREGHOST_PORT" "$WIREGHOST_HTTP_PORT"; do
+        _pid=$(ss -tlnp "sport = :$_p" 2>/dev/null | grep -v "^State" | head -1) || true
+        if [ -n "$_pid" ] && ! echo "$_pid" | grep -q "docker\|containerd"; then
+            warn "Port $_p is already in use — another service may conflict"
+        fi
+    done
 }
 
 # ── Collect all configuration (interactive, grouped) ────────────────
@@ -154,6 +162,7 @@ collect_all_config() {
     fi
     WIREGHOST_HOST="$_HOST_DEFAULT"
     WIREGHOST_PORT="${WIREGHOST_PORT:-443}"
+    WIREGHOST_HTTP_PORT="${WIREGHOST_HTTP_PORT:-80}"
 
     # ── Non-interactive mode: accept all defaults ────────────────────
     if [ ! -t 0 ]; then
@@ -174,11 +183,12 @@ collect_all_config() {
     printf "  Customize? [y/N] "
     read -r _sec1
     if [[ "$_sec1" =~ ^[Yy] ]]; then
-        prompt_var WIREGHOST_HOST  "WIREGHOST_HOST"  "$WIREGHOST_HOST"
-        prompt_var WIREGHOST_PORT  "WIREGHOST_PORT"  "$WIREGHOST_PORT"
-        prompt_var WIREGHOST_PROTO "WIREGHOST_PROTO" "$WIREGHOST_PROTO"
+        prompt_var WIREGHOST_HOST      "WIREGHOST_HOST"      "$WIREGHOST_HOST"
+        prompt_var WIREGHOST_PORT      "HTTPS Port"          "$WIREGHOST_PORT"
+        prompt_var WIREGHOST_HTTP_PORT "HTTP Port (redirect)" "$WIREGHOST_HTTP_PORT"
+        prompt_var WIREGHOST_PROTO     "WIREGHOST_PROTO"     "$WIREGHOST_PROTO"
     else
-        printf "  ${DIM}(using defaults: %s:%s, %s)${NC}\n" "$WIREGHOST_HOST" "$WIREGHOST_PORT" "$WIREGHOST_PROTO"
+        printf "  ${DIM}(using defaults: %s, https=%s, http=%s, %s)${NC}\n" "$WIREGHOST_HOST" "$WIREGHOST_PORT" "$WIREGHOST_HTTP_PORT" "$WIREGHOST_PROTO"
     fi
 
     # ── Section 2/5: Database ────────────────────────────────────────
@@ -231,6 +241,7 @@ collect_all_config() {
     printf "\n${BOLD}══ Configuration Summary ═══════════════════════════${NC}\n"
     printf "  %-24s %s\n" "WIREGHOST_HOST"       "$WIREGHOST_HOST"
     printf "  %-24s %s\n" "WIREGHOST_PORT"       "$WIREGHOST_PORT"
+    printf "  %-24s %s\n" "WIREGHOST_HTTP_PORT"  "$WIREGHOST_HTTP_PORT"
     printf "  %-24s %s\n" "WIREGHOST_PROTO"      "$WIREGHOST_PROTO"
     printf "  %-24s %s\n" "MYSQL_DATABASE"       "$MYSQL_DATABASE"
     printf "  %-24s %s\n" "MYSQL_USER"           "$MYSQL_USER"
@@ -329,6 +340,7 @@ write_env() {
 
         _update_env_var WIREGHOST_HOST       "$WIREGHOST_HOST"
         _update_env_var WIREGHOST_PORT       "$WIREGHOST_PORT"
+        _update_env_var WIREGHOST_HTTP_PORT  "$WIREGHOST_HTTP_PORT"
         _update_env_var WIREGHOST_PROTO      "$WIREGHOST_PROTO"
         _update_env_var SESSION_COOKIE_SECURE "$SESSION_COOKIE_SECURE"
         _update_env_var CSRF_COOKIE_SECURE   "$CSRF_COOKIE_SECURE"
@@ -365,6 +377,7 @@ REDIS_PASSWORD=${REDIS_PASSWORD}
 # Portal
 WIREGHOST_HOST=${WIREGHOST_HOST}
 WIREGHOST_PORT=${WIREGHOST_PORT}
+WIREGHOST_HTTP_PORT=${WIREGHOST_HTTP_PORT}
 WIREGHOST_PROTO=${WIREGHOST_PROTO}
 SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE}
 CSRF_COOKIE_SECURE=${CSRF_COOKIE_SECURE}
