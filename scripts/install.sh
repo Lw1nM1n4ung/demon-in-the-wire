@@ -347,8 +347,10 @@ render_nginx() {
         die "config/nginx.conf.tpl not found — is this the Wire_Ghost project directory?"
     fi
 
-    sed "s/{{WIREGHOST_HOST}}/${WIREGHOST_HOST}/g" config/nginx.conf.tpl > nginx.conf
-    ok "nginx.conf rendered for ${WIREGHOST_HOST}"
+    sed -e "s/{{WIREGHOST_HOST}}/${WIREGHOST_HOST}/g" \
+        -e "s/{{WIREGHOST_PORT}}/${WIREGHOST_PORT}/g" \
+        config/nginx.conf.tpl > nginx.conf
+    ok "nginx.conf rendered for ${WIREGHOST_HOST}:${WIREGHOST_PORT}"
 }
 
 # ── Write .env ───────────────────────────────────────────────────────
