@@ -3,10 +3,10 @@
 # Wire_Ghost — One-Line Remote Installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/install-wireghost.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/install-wireghost.sh | sudo bash
 #
 # Or download-and-run:
-#   wget -qO install-wireghost.sh https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/install-wireghost.sh
+#   wget -qO install-wireghost.sh https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/install-wireghost.sh
 #   sudo bash install-wireghost.sh
 #
 # What it does:
@@ -160,12 +160,12 @@ prompt_install_dir
 clone_repo
 
 printf "\n"
-info "Handing off to install.sh..."
+info "Handing off to scripts/install.sh..."
 printf "═══════════════════════════════════════════════════════\n\n"
 
-bash install.sh
+bash scripts/install.sh
 
 printf "\n"
 ok "Wire_Ghost is installed at: ${INSTALL_DIR}"
-printf "  ${BOLD}Management:${NC}  cd ${INSTALL_DIR} && ./wg-ctl --help\n"
-printf "  ${BOLD}Remove:${NC}      sudo bash ${INSTALL_DIR}/remove-wireghost.sh\n\n"
+printf "  ${BOLD}Management:${NC}  cd ${INSTALL_DIR} && ./scripts/wg-ctl --help\n"
+printf "  ${BOLD}Remove:${NC}      sudo bash ${INSTALL_DIR}/scripts/remove-wireghost.sh\n\n"

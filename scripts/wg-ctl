@@ -5,7 +5,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
 
 # ── Colours ──────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -18,7 +19,7 @@ err()   { printf "${RED}[ERR]${NC}   %s\n" "$*" >&2; }
 die()   { printf "${RED}[FATAL]${NC} %s\n" "$*" >&2; exit 1; }
 
 require_env() {
-    [ -f .env ] || die ".env not found — run install.sh first"
+    [ -f .env ] || die ".env not found — run scripts/install.sh first"
     set -a; source .env; set +a
 }
 
@@ -127,7 +128,7 @@ cmd_backup() {
     FINAL_SIZE=$(du -sh "$BACKUP_FILE" | cut -f1)
     printf "\n"
     ok "Backup complete: ${BACKUP_FILE} (${FINAL_SIZE})"
-    printf "  Restore with: ${CYAN}./wg-ctl restore ${BACKUP_FILE} --confirm${NC}\n\n"
+    printf "  Restore with: ${CYAN}./scripts/wg-ctl restore ${BACKUP_FILE} --confirm${NC}\n\n"
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -230,7 +231,7 @@ cmd_restore() {
 
     printf "\n"
     ok "Restore complete — all services started"
-    printf "  Verify with: ${CYAN}./wg-ctl status${NC}\n\n"
+    printf "  Verify with: ${CYAN}./scripts/wg-ctl status${NC}\n\n"
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -257,7 +258,7 @@ cmd_update() {
 
     printf "\n"
     ok "Update complete"
-    printf "  Verify with: ${CYAN}./wg-ctl status${NC}\n\n"
+    printf "  Verify with: ${CYAN}./scripts/wg-ctl status${NC}\n\n"
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -378,7 +379,7 @@ cmd_uninstall() {
 
     ok "Wire_Ghost uninstalled"
     printf "  Project files (source code) remain intact.\n"
-    printf "  Re-install with: ${CYAN}sudo bash install.sh${NC}\n\n"
+    printf "  Re-install with: ${CYAN}sudo bash scripts/install.sh${NC}\n\n"
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -393,7 +394,7 @@ cmd_shell() {
 # ══════════════════════════════════════════════════════════════════════
 cmd_help() {
     printf "\n${BOLD}wg-ctl${NC} — Wire_Ghost Management CLI\n\n"
-    printf "${BOLD}Usage:${NC} ./wg-ctl <command> [args]\n\n"
+    printf "${BOLD}Usage:${NC} ./scripts/wg-ctl <command> [args]\n\n"
     printf "${BOLD}Commands:${NC}\n"
     printf "  ${CYAN}%-28s${NC} %s\n" "status"                   "Show service health, cert info, disk usage"
     printf "  ${CYAN}%-28s${NC} %s\n" "backup"                   "Create full backup (DB + volumes + config)"

@@ -18,7 +18,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
 
 # ── Flags ────────────────────────────────────────────────────────────
 FORCE=false
@@ -260,17 +261,17 @@ fi
 step "Project directory"
 
 if ! $FORCE; then
-    if confirm "Remove the entire project directory (${SCRIPT_DIR})?"; then
+    if confirm "Remove the entire project directory (${PROJECT_DIR})?"; then
         cd /
         rm -rf "$SCRIPT_DIR"
-        ok "Project directory removed: ${SCRIPT_DIR}"
+        ok "Project directory removed: ${PROJECT_DIR}"
         printf "\n${GREEN}${BOLD}Wire_Ghost completely removed.${NC}\n\n"
         exit 0
     else
-        info "Project directory kept at: ${SCRIPT_DIR}"
+        info "Project directory kept at: ${PROJECT_DIR}"
     fi
 else
-    info "Project source files kept (use rm -rf ${SCRIPT_DIR} to remove manually)"
+    info "Project source files kept (use rm -rf ${PROJECT_DIR} to remove manually)"
 fi
 
 # ══════════════════════════════════════════════════════════════════════
@@ -287,9 +288,9 @@ printf "    • Local config (.env, nginx.conf, certs/, logs/)\n"
 printf "\n"
 printf "  ${BOLD}To reinstall:${NC}\n"
 
-if [ -f "${SCRIPT_DIR}/install.sh" ]; then
-    printf "    cd ${SCRIPT_DIR} && sudo bash install.sh\n"
+if [ -f "${PROJECT_DIR}/scripts/install.sh" ]; then
+    printf "    cd ${PROJECT_DIR} && sudo bash scripts/install.sh\n"
 else
-    printf "    curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/install-wireghost.sh | sudo bash\n"
+    printf "    curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/install-wireghost.sh | sudo bash\n"
 fi
 printf "\n"

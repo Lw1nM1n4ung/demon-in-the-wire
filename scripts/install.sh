@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════
 # Wire_Ghost — One-Command On-Premises Installer
-# Usage:  sudo bash install.sh
+# Usage:  sudo bash scripts/install.sh
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
 
 # ── Colours ──────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -48,7 +49,7 @@ check_prereqs() {
         warn "System has ${TOTAL_MEM_MB}MB RAM — 4GB+ recommended for stable operation"
     fi
 
-    DISK_FREE_GB=$(df -BG "$SCRIPT_DIR" | awk 'NR==2 {gsub(/G/,"",$4); print $4}' 2>/dev/null || echo 0)
+    DISK_FREE_GB=$(df -BG "$PROJECT_DIR" | awk 'NR==2 {gsub(/G/,"",$4); print $4}' 2>/dev/null || echo 0)
     if [ "$DISK_FREE_GB" -lt 15 ]; then
         warn "Only ${DISK_FREE_GB}GB free disk — 20GB+ recommended"
     fi
@@ -303,11 +304,11 @@ generate_certs() {
 
 # ── Render nginx config ──────────────────────────────────────────────
 render_nginx() {
-    if [ ! -f nginx.conf.tpl ]; then
-        die "nginx.conf.tpl not found — is this the Wire_Ghost project directory?"
+    if [ ! -f config/nginx.conf.tpl ]; then
+        die "config/nginx.conf.tpl not found — is this the Wire_Ghost project directory?"
     fi
 
-    sed "s/{{WIREGHOST_HOST}}/${WIREGHOST_HOST}/g" nginx.conf.tpl > nginx.conf
+    sed "s/{{WIREGHOST_HOST}}/${WIREGHOST_HOST}/g" config/nginx.conf.tpl > nginx.conf
     ok "nginx.conf rendered for ${WIREGHOST_HOST}"
 }
 
@@ -467,10 +468,10 @@ print_summary() {
     printf "  (Accept the self-signed certificate warning if prompted.)\n"
     printf "\n"
     printf "  ${BOLD}Management:${NC}\n"
-    printf "    ./wg-ctl status          Show service health\n"
-    printf "    ./wg-ctl backup          Create full backup\n"
-    printf "    ./wg-ctl logs [service]  Stream logs\n"
-    printf "    ./wg-ctl --help          All commands\n"
+    printf "    ./scripts/wg-ctl status          Show service health\n"
+    printf "    ./scripts/wg-ctl backup          Create full backup\n"
+    printf "    ./scripts/wg-ctl logs [service]  Stream logs\n"
+    printf "    ./scripts/wg-ctl --help          All commands\n"
     printf "\n"
     printf "  ${BOLD}Logs:${NC}      ./logs/\n"
     printf "  ${BOLD}Certs:${NC}     ./certs/\n"

@@ -30,16 +30,15 @@ wireghost update --feeds   # nuclei templates, searchsploit DB, OpenVAS NASL
 wireghost update --self    # git pull + pip install
 
 # Config
-wireghost config init      # copy wireghost.example.yml → wireghost.yml
+wireghost config init      # copy config/wireghost.example.yml → wireghost.yml
 wireghost config show      # print resolved config (after layering)
 
 # Tests
 python -m pytest tests/ -v
 python -m pytest tests/test_parsers.py::test_parse_nuclei_json -v   # single test
 
-# Full stack (portal at http://localhost:9995)
-cp .env.example .env       # required: DJANGO_SECRET_KEY, MYSQL_PASSWORD, REDIS_PASSWORD
-docker compose up -d
+# Full stack (interactive installer generates .env, TLS certs, starts stack)
+sudo bash scripts/install.sh
 
 # Standalone scanner image (tools profile)
 docker compose run --rm wireghost scan 10.0.0.0/24
