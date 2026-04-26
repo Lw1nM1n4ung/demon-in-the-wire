@@ -398,6 +398,10 @@ class UserPreference(models.Model):
     # scan events delivered to. Master switch controls whether we dispatch.
     telegram_chat_id = models.CharField(max_length=64, blank=True)
     telegram_enabled = models.BooleanField(default=False)
+    telegram_user_id = models.BigIntegerField(
+        unique=True, null=True, blank=True,
+        help_text='Telegram integer user ID for auth resolution',
+    )
 
     updated_at = models.DateTimeField(auto_now=True)
 
