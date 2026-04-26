@@ -379,6 +379,12 @@ def generate_report(self, scan_id, formats=None):
             file_size=path.stat().st_size if path.exists() else 0,
         )
 
+    try:
+        from scanner.notifications import notify
+        notify('report.ready', scan=scan)
+    except Exception:
+        logger.exception('notification dispatch failed for report %s', scan_id)
+
     return {'scan_id': scan_id, 'reports': len(report_paths)}
 
 

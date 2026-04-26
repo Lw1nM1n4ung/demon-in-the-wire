@@ -20,6 +20,9 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
+import redis as redis_lib
+from django.conf import settings
+
 log = logging.getLogger('scanner.notifications')
 
 TELEGRAM_API = 'https://api.telegram.org'
@@ -160,5 +163,23 @@ def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
                     send_telegram(prefs.telegram_chat_id, text, bot_token=bot_token)
                 except NotificationError as e:
                     log.warning('skipping DM for user=%s: %s', creator.username, e)
+
+        # Publish to Redis pub/sub for bot-enhanced delivery (inline buttons, file attachments)
+        try:
+            broker_url = getattr(settings, 'CELERY_BROKER_URL', '')
+            if broker_url:
+                r = redis_lib.Redis.from_url(broker_url)
+                pub_data = {
+                    'event': event_type,
+                    'text': text,
+                    'chat_id': '',
+                }
+                if scan and event_type == 'report.ready':
+                    reports = list(scan.reports.filter(format='docx').values_list('file_path', flat=True))
+                    if reports:
+                        pub_data['document_path'] = reports[0]
+                r.publish('wireghost:bot:notify', json.dumps(pub_data))
+        except Exception:
+            log.debug('Redis pub/sub publish failed (bot may not be running)', exc_info=True)
     except Exception:
         log.exception('notify() dispatch error event=%s', event_type)
