@@ -15,6 +15,7 @@ from scanner.auth_views import (
     audit_log,
     tokens_list_or_create, tokens_revoke,
     notifications_config, notifications_test, tools_health, system_stats,
+    telegram_link_code,
 )
 
 router = DefaultRouter()
@@ -57,6 +58,7 @@ urlpatterns = [
     path('api/site-config/setup-complete/', site_setup_complete, name='site-setup-complete'),
     path('api/site-config/reset-setup/', reset_setup, name='site-reset-setup'),
     path('api/preferences/', user_preferences, name='user-preferences'),
+    path('api/preferences/telegram-link/', telegram_link_code, name='telegram-link-code'),
     # Sessions
     path('api/sessions/', list_sessions, name='list-sessions'),
     path('api/sessions/revoke/', revoke_session, name='revoke-session'),

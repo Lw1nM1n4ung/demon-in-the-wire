@@ -13,6 +13,8 @@ from scanner.authentication import CsrfExemptAuth
 
 from scanner.models import SiteConfig, UserPreference, AuditLog
 import re
+import json
+import secrets
 
 class InputValidationError(Exception):
     """Raised when whitelist validation fails."""
@@ -1054,3 +1056,25 @@ def system_stats(request):
         'uptime': int(time.time() - psutil.boot_time()),
         'ts': int(time.time() * 1000),
     })
+
+
+@api_view(['POST'])
+def telegram_link_code(request):
+    """Generate a 6-digit one-time code for Telegram account linking."""
+    user_key = f'tg:linkgen:{request.user.id}'
+    gen_count = cache.get(user_key) or 0
+    if gen_count >= 3:
+        return Response({'error': 'Too many code requests. Try again in 5 minutes.'}, status=429)
+
+    reverse_key = f'tg:linkuser:{request.user.id}'
+    old_code = cache.get(reverse_key)
+    if old_code:
+        cache.delete(f'tg:link:{old_code}')
+        cache.delete(reverse_key)
+
+    code = str(secrets.randbelow(900000) + 100000)
+    cache.set(f'tg:link:{code}', json.dumps({'user_id': str(request.user.id)}), 300)
+    cache.set(reverse_key, code, 300)
+    cache.set(user_key, gen_count + 1, 300)
+
+    return Response({'code': code, 'expires_in': 300})
