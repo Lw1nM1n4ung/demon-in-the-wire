@@ -1,0 +1,150 @@
+import asyncio
+import json
+import logging
+import os
+import threading
+import time
+
+import redis
+from django.conf import settings
+from django.core.management.base import BaseCommand
+
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+)
+
+from scanner.bot.auth import require_permission
+from scanner.bot.callbacks import handle_callback
+from scanner.bot.handlers import (
+    cmd_assets,
+    cmd_cancel,
+    cmd_config,
+    cmd_findings,
+    cmd_health,
+    cmd_help,
+    cmd_link,
+    cmd_newscan,
+    cmd_no,
+    cmd_report,
+    cmd_scan,
+    cmd_scans,
+    cmd_schedule,
+    cmd_status,
+    cmd_unlink,
+    cmd_users,
+    cmd_yes,
+)
+from scanner.models import SiteConfig
+
+log = logging.getLogger('scanner.bot')
+
+
+class Command(BaseCommand):
+    help = 'Run the Telegram bot for Wire_Ghost remote control'
+
+    def handle(self, *args, **options):
+        while True:
+            cfg = SiteConfig.get()
+            token = cfg.telegram_bot_token
+            if not token:
+                self.stderr.write('No Telegram bot token configured. Retrying in 30s…')
+                time.sleep(30)
+                continue
+            break
+
+        self.stdout.write(f'Starting Telegram bot (long-polling)…')
+
+        app = Application.builder().token(token).build()
+
+        # Pre-auth commands (no permission gate)
+        app.add_handler(CommandHandler('link', cmd_link))
+        app.add_handler(CommandHandler('unlink', cmd_unlink))
+        app.add_handler(CommandHandler('yes', cmd_yes))
+        app.add_handler(CommandHandler('no', cmd_no))
+
+        # Viewer commands (scan:read)
+        app.add_handler(CommandHandler('status', require_permission('scan:read')(cmd_status)))
+        app.add_handler(CommandHandler('scans', require_permission('scan:read')(cmd_scans)))
+        app.add_handler(CommandHandler('scan', require_permission('scan:read')(cmd_scan)))
+        app.add_handler(CommandHandler('findings', require_permission('scan:read')(cmd_findings)))
+        app.add_handler(CommandHandler('assets', require_permission('scan:read')(cmd_assets)))
+        app.add_handler(CommandHandler('help', cmd_help))
+
+        # Engineer commands (scan:write)
+        app.add_handler(CommandHandler('newscan', require_permission('scan:write')(cmd_newscan)))
+        app.add_handler(CommandHandler('cancel', require_permission('scan:write')(cmd_cancel)))
+        app.add_handler(CommandHandler('schedule', require_permission('scan:write')(cmd_schedule)))
+        app.add_handler(CommandHandler('report', require_permission('scan:write')(cmd_report)))
+
+        # Owner commands
+        app.add_handler(CommandHandler('users', require_permission('user:manage')(cmd_users)))
+        app.add_handler(CommandHandler('config', require_permission('site:config')(cmd_config)))
+        app.add_handler(CommandHandler('health', require_permission('site:config')(cmd_health)))
+
+        # Callback queries (inline buttons)
+        app.add_handler(CallbackQueryHandler(handle_callback))
+
+        # Start Redis pub/sub listener in background thread
+        self._start_pubsub_listener(app, cfg)
+
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+        )
+
+    def _start_pubsub_listener(self, app, cfg):
+        """Listen for notification events from worker containers via Redis pub/sub."""
+        broker_url = getattr(settings, 'CELERY_BROKER_URL', '')
+        if not broker_url:
+            log.warning('No CELERY_BROKER_URL configured, skipping pub/sub listener')
+            return
+
+        def _listener():
+            try:
+                r = redis.Redis.from_url(broker_url)
+                pubsub = r.pubsub()
+                pubsub.subscribe('wireghost:bot:notify')
+                log.info('Redis pub/sub listener started on wireghost:bot:notify')
+
+                for message in pubsub.listen():
+                    if message['type'] != 'message':
+                        continue
+                    try:
+                        data = json.loads(message['data'])
+                        event = data.get('event')
+                        chat_id = data.get('chat_id')
+                        text = data.get('text', '')
+                        document_path = data.get('document_path')
+
+                        if not chat_id:
+                            chat_id = cfg.telegram_shared_chat_id
+                        if not chat_id:
+                            continue
+
+                        loop = asyncio.new_event_loop()
+                        if document_path:
+                            if os.path.isfile(document_path):
+                                loop.run_until_complete(
+                                    app.bot.send_document(
+                                        chat_id=int(chat_id),
+                                        document=open(document_path, 'rb'),
+                                        caption=text[:1024] if text else None,
+                                    )
+                                )
+                            else:
+                                log.warning('Document not found: %s', document_path)
+                        elif text:
+                            loop.run_until_complete(
+                                app.bot.send_message(chat_id=int(chat_id), text=text)
+                            )
+                        loop.close()
+                    except Exception:
+                        log.exception('Error processing pub/sub message')
+            except Exception:
+                log.exception('Redis pub/sub listener crashed')
+
+        thread = threading.Thread(target=_listener, daemon=True, name='bot-pubsub')
+        thread.start()
