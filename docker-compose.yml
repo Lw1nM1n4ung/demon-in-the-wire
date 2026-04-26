@@ -147,6 +147,25 @@ services:
           memory: 256M
           cpus: "0.5"
 
+  bot:
+    build: { context: ., dockerfile: web_portal/Dockerfile }
+    restart: unless-stopped
+    user: "1000:1000"
+    networks: [wireghost_net]
+    environment: *api-env
+    volumes: *api-vols
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    command: python manage.py telegrambot
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
   portal:
     image: nginx:alpine
     restart: unless-stopped
