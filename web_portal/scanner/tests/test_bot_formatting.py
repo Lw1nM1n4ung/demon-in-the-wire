@@ -1,4 +1,6 @@
+from datetime import datetime, timezone, timedelta
 from unittest import TestCase
+from unittest.mock import patch
 from scanner.bot.formatting import (
     esc,
     severity_emoji,
@@ -7,6 +9,8 @@ from scanner.bot.formatting import (
     status_icon,
     truncate_list,
     format_duration,
+    time_ago,
+    progress_bar,
 )
 
 
@@ -116,3 +120,67 @@ class TestFormatDuration:
 
     def test_none_returns_dash(self):
         assert format_duration(None) == '—'
+
+
+class TestTimeAgo:
+    def test_none_returns_dash(self):
+        assert time_ago(None) == '—'
+
+    def test_false_returns_dash(self):
+        assert time_ago(False) == '—'
+
+    @patch('django.utils.timezone.now')
+    def test_seconds_ago(self, mock_now):
+        mock_now.return_value = datetime(2026, 1, 1, 12, 0, 30, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert time_ago(dt) == '30s ago'
+
+    @patch('django.utils.timezone.now')
+    def test_minutes_ago(self, mock_now):
+        mock_now.return_value = datetime(2026, 1, 1, 12, 5, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert time_ago(dt) == '5m ago'
+
+    @patch('django.utils.timezone.now')
+    def test_hours_ago(self, mock_now):
+        mock_now.return_value = datetime(2026, 1, 1, 15, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert time_ago(dt) == '3h ago'
+
+    @patch('django.utils.timezone.now')
+    def test_days_ago(self, mock_now):
+        mock_now.return_value = datetime(2026, 1, 4, 12, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        assert time_ago(dt) == '3d ago'
+
+    @patch('django.utils.timezone.now')
+    def test_future_returns_just_now(self, mock_now):
+        mock_now.return_value = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 1, 12, 5, 0, tzinfo=timezone.utc)
+        assert time_ago(dt) == 'just now'
+
+
+class TestProgressBar:
+    def test_zero_total_returns_empty(self):
+        assert progress_bar(0, 0) == '░' * 10
+
+    def test_full_bar(self):
+        assert progress_bar(100, 100) == '▓' * 10
+
+    def test_half_bar(self):
+        result = progress_bar(50, 100)
+        assert result.count('▓') == 5
+        assert result.count('░') == 5
+
+    def test_custom_width(self):
+        result = progress_bar(50, 100, width=20)
+        assert len(result) == 20
+        assert result.count('▓') == 10
+
+    def test_zero_done_all_empty(self):
+        assert progress_bar(0, 100) == '░' * 10
+
+    def test_width_preserved(self):
+        for done in range(0, 101, 7):
+            result = progress_bar(done, 100, 10)
+            assert len(result) == 10

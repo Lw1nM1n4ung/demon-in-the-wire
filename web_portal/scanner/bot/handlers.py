@@ -12,7 +12,9 @@ from scanner.bot.auth import resolve_user, link_account, unlink_account, check_r
 from scanner.bot.formatting import (
     esc, severity_emoji, severity_line, short_id,
     status_icon, truncate_list, format_duration,
+    time_ago, progress_bar,
 )
+from scanner.bot.menus import main_menu_kb, scan_detail_kb
 from scanner.models import (
     AuditLog, Asset, Finding, Host, Scan, ScheduledScan,
     ScanPolicy, SiteConfig, User, UserPreference,
@@ -21,30 +23,6 @@ from scanner.models import (
 log = logging.getLogger('scanner.bot')
 
 HTML = 'HTML'
-
-
-def _time_ago(dt):
-    if not dt:
-        return '—'
-    delta = dj_tz.now() - dt
-    secs = int(delta.total_seconds())
-    if secs < 60:
-        return f'{secs}s ago'
-    mins = secs // 60
-    if mins < 60:
-        return f'{mins}m ago'
-    hours = mins // 60
-    if hours < 24:
-        return f'{hours}h ago'
-    days = hours // 24
-    return f'{days}d ago'
-
-
-def _progress_bar(done, total, width=10):
-    if total == 0:
-        return '░' * width
-    filled = round(done / total * width)
-    return '▓' * filled + '░' * (width - filled)
 
 
 # ── Pre-auth commands (no decorator) ─────────────────────
@@ -106,6 +84,19 @@ async def cmd_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('OK, group not set.')
 
 
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = context.user_data.get('wg_user')
+    role = user.role if user else 'viewer'
+    kb = main_menu_kb(role)
+    await update.message.reply_text(
+        '<b>🔰 Wire_Ghost Control Panel</b>\n'
+        '━━━━━━━━━━━━━━━━━━━━━━\n'
+        'Select a category:',
+        reply_markup=kb,
+        parse_mode=HTML,
+    )
+
+
 # ── Viewer commands ──────────────────────────────────────
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,12 +135,12 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last = d['last_scan']
     last_info = '—'
     if last:
-        last_info = f'{status_icon(last.status)} <code>{esc(short_id(last.id))}</code> {esc(last.target)} ({_time_ago(last.created_at)})'
+        last_info = f'{status_icon(last.status)} <code>{esc(short_id(last.id))}</code> {esc(last.target)} ({time_ago(last.created_at)})'
 
     next_info = '—'
     if d['next_sched']:
         ns = d['next_sched']
-        next_info = f'<code>{esc(ns.target)}</code> at {ns.time.strftime("%H:%M")} ({_time_ago(ns.next_run) if ns.next_run and ns.next_run < dj_tz.now() else ns.next_run.strftime("%Y-%m-%d %H:%M") if ns.next_run else "—"})'
+        next_info = f'<code>{esc(ns.target)}</code> at {ns.time.strftime("%H:%M")} ({time_ago(ns.next_run) if ns.next_run and ns.next_run < dj_tz.now() else ns.next_run.strftime("%Y-%m-%d %H:%M") if ns.next_run else "—"})'
 
     lines = [
         '🛡 <b>Wire_Ghost Dashboard</b>',
@@ -201,7 +192,7 @@ async def cmd_scans(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if high:
             sev_badges += f' 🟠{high}'
         dur_str = format_duration(dur) if dur else ''
-        time_str = _time_ago(created)
+        time_str = time_ago(created)
         lines.append(
             f'\n{icon} <code>{esc(sid)}</code> │ <b>{esc(target)}</b>'
             f'\n   {esc(stype)} │ {fcount} findings{sev_badges}'
@@ -291,13 +282,9 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             report_parts.append(f'{fmt} {size_str}'.strip())
         lines.extend(['', f'<b>📄 Reports:</b> {esc(", ".join(report_parts))}'])
 
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton('📋 All Findings', callback_data=f'scan:{sid}:findings'),
-            InlineKeyboardButton('📄 Report', callback_data=f'scan:{sid}:report'),
-        ]
-    ])
-    await update.message.reply_text('\n'.join(lines), reply_markup=keyboard, parse_mode=HTML)
+    has_screenshots = await sync_to_async(lambda: scan.screenshots.exists())()
+    kb = scan_detail_kb(sid, scan.status, has_screenshots)
+    await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
 async def cmd_findings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -351,7 +338,7 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return list(
             Asset.objects.order_by('-risk_score')[:10]
             .values_list('ip', 'hostname', 'service_name', 'risk_score',
-                         'findings_count', 'open_ports', 'last_seen')
+                         'findings_count', 'port', 'last_seen')
         )
 
     rows = await sync_to_async(_query)()
@@ -368,8 +355,8 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if hostname:
             host_label += f' ({hostname})'
         svc_label = svc or '—'
-        risk_bar = _progress_bar(min(risk, 100), 100, 5)
-        seen_str = _time_ago(last_seen) if last_seen else '—'
+        risk_bar = progress_bar(min(risk, 100), 100, 5)
+        seen_str = time_ago(last_seen) if last_seen else '—'
         lines.append(
             f'\n  ⚠️ <code>{esc(ip)}</code>'
             + (f' <i>{esc(hostname)}</i>' if hostname else '')
@@ -566,7 +553,7 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = [f'📅 <b>Scheduled Scans</b> ({len(rows)} active)', '━━━━━━━━━━━━━━━━━━━━━']
         for sid, name, target, freq, t, stop, nxt, last, stype in rows:
             nxt_str = nxt.strftime('%Y-%m-%d %H:%M') if nxt else '—'
-            last_str = _time_ago(last) if last else 'never'
+            last_str = time_ago(last) if last else 'never'
             time_str = t.strftime('%H:%M')
             stop_str = f' → {stop.strftime("%H:%M")}' if stop else ''
             lines.append(
@@ -714,7 +701,7 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for uname, role, linked, last_login in rows:
         icon = role_icons.get(role, '❓')
         link_str = '🔗' if linked else '—'
-        login_str = _time_ago(last_login) if last_login else 'never'
+        login_str = time_ago(last_login) if last_login else 'never'
         lines.append(
             f'\n  {icon} <b>{esc(uname)}</b> │ {esc(role)}'
             f'\n     Telegram: {link_str} │ Last login: {login_str}'
@@ -798,9 +785,9 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
     s = await sync_to_async(_query)()
-    cpu_bar = _progress_bar(int(s['cpu']), 100, 10)
-    ram_bar = _progress_bar(int(s['ram_pct']), 100, 10)
-    disk_bar = _progress_bar(int(s['disk_pct']), 100, 10)
+    cpu_bar = progress_bar(int(s['cpu']), 100, 10)
+    ram_bar = progress_bar(int(s['ram_pct']), 100, 10)
+    disk_bar = progress_bar(int(s['disk_pct']), 100, 10)
 
     lines = [
         '💻 <b>System Health</b>',

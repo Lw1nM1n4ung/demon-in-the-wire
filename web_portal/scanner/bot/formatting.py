@@ -66,3 +66,30 @@ def format_duration(seconds: Optional[int]) -> str:
         return f'{minutes}m {secs}s'
     hours, mins = divmod(minutes, 60)
     return f'{hours}h {mins}m {secs}s'
+
+
+def time_ago(dt) -> str:
+    if not dt:
+        return '—'
+    from django.utils import timezone as dj_tz
+    delta = dj_tz.now() - dt
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        return 'just now'
+    if secs < 60:
+        return f'{secs}s ago'
+    mins = secs // 60
+    if mins < 60:
+        return f'{mins}m ago'
+    hours = mins // 60
+    if hours < 24:
+        return f'{hours}h ago'
+    days = hours // 24
+    return f'{days}d ago'
+
+
+def progress_bar(done, total, width: int = 10) -> str:
+    if total == 0:
+        return '░' * width
+    filled = round(done / total * width)
+    return '▓' * filled + '░' * (width - filled)

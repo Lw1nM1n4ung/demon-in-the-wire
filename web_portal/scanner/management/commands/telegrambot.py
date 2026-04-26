@@ -26,6 +26,7 @@ from scanner.bot.handlers import (
     cmd_health,
     cmd_help,
     cmd_link,
+    cmd_menu,
     cmd_newscan,
     cmd_no,
     cmd_report,
@@ -60,6 +61,8 @@ class Command(BaseCommand):
         app = Application.builder().token(token).build()
 
         # Pre-auth commands (no permission gate)
+        app.add_handler(CommandHandler('start', cmd_menu))
+        app.add_handler(CommandHandler('menu', cmd_menu))
         app.add_handler(CommandHandler('link', cmd_link))
         app.add_handler(CommandHandler('unlink', cmd_unlink))
         app.add_handler(CommandHandler('yes', cmd_yes))
