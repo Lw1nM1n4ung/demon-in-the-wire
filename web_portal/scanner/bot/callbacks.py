@@ -36,6 +36,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == 'findings':
             await _scan_findings(query, entity_id)
         elif action == 'report':
+            has_perm = await sync_to_async(user.has_permission)('scan:write')
+            if not has_perm:
+                await query.edit_message_text('Permission denied (requires scan:write).')
+                return
             await _scan_report(query, entity_id, context)
 
     elif entity == 'findings':

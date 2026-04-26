@@ -96,11 +96,12 @@ def unlink_account(tg_user_id: int) -> tuple[bool, str]:
 
 def check_rate_limit(prefix: str, key: str, max_count: int, ttl: int) -> bool:
     cache_key = f'{prefix}{key}'
-    count = cache.get(cache_key, 0)
-    if count >= max_count:
-        return False
-    cache.set(cache_key, count + 1, ttl)
-    return True
+    try:
+        count = cache.incr(cache_key)
+    except ValueError:
+        cache.set(cache_key, 1, ttl)
+        count = 1
+    return count <= max_count
 
 
 def require_permission(perm_code: str):

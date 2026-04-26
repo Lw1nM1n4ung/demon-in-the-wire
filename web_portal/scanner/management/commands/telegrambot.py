@@ -87,15 +87,18 @@ class Command(BaseCommand):
         # Callback queries (inline buttons)
         app.add_handler(CallbackQueryHandler(handle_callback))
 
-        # Start Redis pub/sub listener in background thread
-        self._start_pubsub_listener(app, cfg)
+        # Start Redis pub/sub listener in background thread.
+        # Must capture the main event loop BEFORE run_polling() takes ownership.
+        main_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(main_loop)
+        self._start_pubsub_listener(app, cfg, main_loop)
 
         app.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
         )
 
-    def _start_pubsub_listener(self, app, cfg):
+    def _start_pubsub_listener(self, app, cfg, main_loop):
         """Listen for notification events from worker containers via Redis pub/sub."""
         broker_url = getattr(settings, 'CELERY_BROKER_URL', '')
         if not broker_url:
@@ -103,48 +106,51 @@ class Command(BaseCommand):
             return
 
         def _listener():
-            try:
-                r = redis.Redis.from_url(broker_url)
-                pubsub = r.pubsub()
-                pubsub.subscribe('wireghost:bot:notify')
-                log.info('Redis pub/sub listener started on wireghost:bot:notify')
+            while True:
+                try:
+                    r = redis.Redis.from_url(broker_url)
+                    pubsub = r.pubsub()
+                    pubsub.subscribe('wireghost:bot:notify')
+                    log.info('Redis pub/sub listener started on wireghost:bot:notify')
 
-                for message in pubsub.listen():
-                    if message['type'] != 'message':
-                        continue
-                    try:
-                        data = json.loads(message['data'])
-                        event = data.get('event')
-                        chat_id = data.get('chat_id')
-                        text = data.get('text', '')
-                        document_path = data.get('document_path')
-
-                        if not chat_id:
-                            chat_id = cfg.telegram_shared_chat_id
-                        if not chat_id:
+                    for message in pubsub.listen():
+                        if message['type'] != 'message':
                             continue
+                        try:
+                            data = json.loads(message['data'])
+                            chat_id = data.get('chat_id')
+                            text = data.get('text', '')
+                            document_path = data.get('document_path')
 
-                        loop = asyncio.new_event_loop()
-                        if document_path:
-                            if os.path.isfile(document_path):
-                                loop.run_until_complete(
-                                    app.bot.send_document(
-                                        chat_id=int(chat_id),
-                                        document=open(document_path, 'rb'),
-                                        caption=text[:1024] if text else None,
+                            if not chat_id:
+                                chat_id = cfg.telegram_shared_chat_id
+                            if not chat_id:
+                                continue
+
+                            cid = int(chat_id)
+                            if document_path and os.path.isfile(document_path):
+                                with open(document_path, 'rb') as f:
+                                    future = asyncio.run_coroutine_threadsafe(
+                                        app.bot.send_document(
+                                            chat_id=cid, document=f,
+                                            caption=text[:1024] if text else None,
+                                        ),
+                                        main_loop,
                                     )
-                                )
-                            else:
+                                    future.result(timeout=30)
+                            elif document_path:
                                 log.warning('Document not found: %s', document_path)
-                        elif text:
-                            loop.run_until_complete(
-                                app.bot.send_message(chat_id=int(chat_id), text=text)
-                            )
-                        loop.close()
-                    except Exception:
-                        log.exception('Error processing pub/sub message')
-            except Exception:
-                log.exception('Redis pub/sub listener crashed')
+                            elif text:
+                                future = asyncio.run_coroutine_threadsafe(
+                                    app.bot.send_message(chat_id=cid, text=text),
+                                    main_loop,
+                                )
+                                future.result(timeout=30)
+                        except Exception:
+                            log.exception('Error processing pub/sub message')
+                except Exception:
+                    log.exception('Redis pub/sub listener crashed, reconnecting in 10s')
+                    time.sleep(10)
 
         thread = threading.Thread(target=_listener, daemon=True, name='bot-pubsub')
         thread.start()

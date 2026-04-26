@@ -476,7 +476,7 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         link_str = '🔗 linked' if linked else '❌ not linked'
         lines.append(f'{icon} {uname} | {role} | {link_str}')
 
-    # Send via DM for privacy
+    # Send via DM for privacy — never fall back to group
     try:
         await context.bot.send_message(
             chat_id=update.effective_user.id,
@@ -485,7 +485,7 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_chat.type in ('group', 'supergroup'):
             await update.message.reply_text('User list sent via DM.')
     except Exception:
-        await update.message.reply_text('\n'.join(lines))
+        await update.message.reply_text('Could not send DM. Please start a private chat with me first, then retry.')
 
 
 async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -518,7 +518,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_chat.type in ('group', 'supergroup'):
             await update.message.reply_text('Config sent via DM.')
     except Exception:
-        await update.message.reply_text('\n'.join(lines))
+        await update.message.reply_text('Could not send DM. Please start a private chat with me first, then retry.')
 
 
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
