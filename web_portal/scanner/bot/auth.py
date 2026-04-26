@@ -120,15 +120,17 @@ def require_permission(perm_code: str):
 
             if user is None:
                 await update.message.reply_text(
-                    'Not linked. Generate a code at Settings > Telegram in the web portal, '
-                    'then send /link <code>',
+                    'Not linked. Generate a code at Settings → Telegram in the web portal, '
+                    'then send <code>/link &lt;code&gt;</code>',
+                    parse_mode='HTML',
                 )
                 return
 
             has_perm = await sync_to_async(user.has_permission)(perm_code)
             if not has_perm:
                 await update.message.reply_text(
-                    f'Permission denied (requires {perm_code})',
+                    f'Permission denied (requires <code>{perm_code}</code>)',
+                    parse_mode='HTML',
                 )
                 return
 

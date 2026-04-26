@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import re
+import html as _html
 from typing import Optional
-
-_MDV2_ESCAPE = re.compile(r'([_*\[\]()~`>#\+\-=|{}.!])')
 
 _SEVERITY_EMOJI = {
     'critical': '🔴',
@@ -22,8 +20,8 @@ _STATUS_ICON = {
 }
 
 
-def escape_md(text: str) -> str:
-    return _MDV2_ESCAPE.sub(r'\\\1', text)
+def esc(text) -> str:
+    return _html.escape(str(text))
 
 
 def severity_emoji(severity: str) -> str:

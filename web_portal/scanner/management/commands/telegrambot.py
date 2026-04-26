@@ -134,6 +134,7 @@ class Command(BaseCommand):
                                         app.bot.send_document(
                                             chat_id=cid, document=f,
                                             caption=text[:1024] if text else None,
+                                            parse_mode='HTML',
                                         ),
                                         main_loop,
                                     )
@@ -142,7 +143,9 @@ class Command(BaseCommand):
                                 log.warning('Document not found: %s', document_path)
                             elif text:
                                 future = asyncio.run_coroutine_threadsafe(
-                                    app.bot.send_message(chat_id=cid, text=text),
+                                    app.bot.send_message(
+                                        chat_id=cid, text=text, parse_mode='HTML',
+                                    ),
                                     main_loop,
                                 )
                                 future.result(timeout=30)

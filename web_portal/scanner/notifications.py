@@ -13,6 +13,7 @@ Design goals:
 
 from __future__ import annotations
 
+import html as _html
 import json
 import logging
 import re
@@ -68,6 +69,7 @@ def send_telegram(chat_id: str, text: str, *, bot_token: str, timeout: float = 5
     payload = json.dumps({
         'chat_id': chat_id,
         'text': text,
+        'parse_mode': 'HTML',
         'disable_web_page_preview': True,
     }).encode('utf-8')
     req = urllib.request.Request(url, data=payload, method='POST')
@@ -97,31 +99,32 @@ def send_telegram(chat_id: str, text: str, *, bot_token: str, timeout: float = 5
 # ─── Message rendering ───────────────────────────────────────────────────
 
 def _render(event_type: str, *, scan=None, extra: Optional[dict] = None) -> str:
-    """Plain-text message body for an event. v1 — no markdown, no buttons."""
+    """HTML message body for an event."""
+    e = _html.escape
     extra = extra or {}
     if event_type == 'scan.complete':
         return (
-            f'✅ Scan complete — {scan.name}\n'
-            f'Target: {scan.target}\n'
-            f'Hosts: {scan.hosts_count}  Findings: {scan.findings_count}  '
-            f'(crit {scan.critical_count} / high {scan.high_count} / med {scan.medium_count})\n'
-            f'Duration: {scan.duration_seconds}s'
+            f'✅ <b>Scan complete</b> — {e(scan.name)}\n'
+            f'<b>Target:</b> <code>{e(scan.target)}</code>\n'
+            f'<b>Hosts:</b> {scan.hosts_count}  <b>Findings:</b> {scan.findings_count}  '
+            f'(🔴 {scan.critical_count} / 🟠 {scan.high_count} / 🟡 {scan.medium_count})\n'
+            f'<b>Duration:</b> {scan.duration_seconds}s'
         )
     if event_type == 'scan.failed':
         err = (scan.error_message or 'unknown error')[:200]
         return (
-            f'❌ Scan failed — {scan.name}\n'
-            f'Target: {scan.target}\n'
-            f'Error: {err}'
+            f'❌ <b>Scan failed</b> — {e(scan.name)}\n'
+            f'<b>Target:</b> <code>{e(scan.target)}</code>\n'
+            f'<b>Error:</b> {e(err)}'
         )
     if event_type == 'critical.discovered':
         count = extra.get('count', scan.critical_count if scan else 0)
         return (
-            f'🚨 Critical findings discovered — {scan.name if scan else "unknown scan"}\n'
+            f'🚨 <b>Critical findings discovered</b> — {e(scan.name) if scan else "unknown scan"}\n'
             f'{count} critical-severity finding(s).\n'
-            f'Target: {scan.target if scan else "?"}'
+            f'<b>Target:</b> <code>{e(scan.target) if scan else "?"}</code>'
         )
-    return f'Wire_Ghost event: {event_type}'
+    return f'Wire_Ghost event: {e(event_type)}'
 
 
 # ─── Fan-out ─────────────────────────────────────────────────────────────

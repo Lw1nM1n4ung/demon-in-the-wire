@@ -7,10 +7,12 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from scanner.bot.auth import resolve_user
-from scanner.bot.formatting import severity_emoji, short_id, truncate_list
+from scanner.bot.formatting import esc, severity_emoji, short_id, truncate_list
 from scanner.models import Finding, Scan
 
 log = logging.getLogger('scanner.bot')
+
+HTML = 'HTML'
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -23,7 +25,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user_id = query.from_user.id
     user = await sync_to_async(resolve_user)(tg_user_id)
     if not user:
-        await query.edit_message_text('Not linked. Use /link <code> first.')
+        await query.edit_message_text(
+            'Not linked. Use <code>/link &lt;code&gt;</code> first.', parse_mode=HTML,
+        )
         return
 
     parts = query.data.split(':')
@@ -38,7 +42,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == 'report':
             has_perm = await sync_to_async(user.has_permission)('scan:write')
             if not has_perm:
-                await query.edit_message_text('Permission denied (requires scan:write).')
+                await query.edit_message_text(
+                    'Permission denied (requires <code>scan:write</code>).', parse_mode=HTML,
+                )
                 return
             await _scan_report(query, entity_id, context)
 
@@ -60,23 +66,27 @@ async def _scan_findings(query, scan_prefix: str):
 
     scan, rows = await sync_to_async(_query)()
     if not scan:
-        await query.edit_message_text(f'Scan {scan_prefix} not found.')
+        await query.edit_message_text(
+            f'Scan <code>{esc(scan_prefix)}</code> not found.', parse_mode=HTML,
+        )
         return
 
     if not rows:
-        await query.edit_message_text(f'No findings for scan {short_id(scan.id)}.')
+        await query.edit_message_text(
+            f'<i>No findings for scan</i> <code>{esc(short_id(scan.id))}</code>.', parse_mode=HTML,
+        )
         return
 
-    lines = [f'Findings for {short_id(scan.id)}', '━━━━━━━━━━━━━━━━━']
+    lines = [f'<b>Findings for</b> <code>{esc(short_id(scan.id))}</code>', '━━━━━━━━━━━━━━━━━']
     shown, remaining = truncate_list(rows, 15)
     for sev, title, ip, port in shown:
         emoji = severity_emoji(sev)
         loc = f'{ip}:{port}' if port else ip or ''
-        lines.append(f'{emoji} {title} ({loc})')
+        lines.append(f'{emoji} {esc(title)} (<code>{esc(loc)}</code>)')
     if remaining:
-        lines.append(f'… and {remaining} more')
+        lines.append(f'<i>… and {remaining} more</i>')
 
-    await query.edit_message_text('\n'.join(lines))
+    await query.edit_message_text('\n'.join(lines), parse_mode=HTML)
 
 
 async def _scan_report(query, scan_prefix: str, context):
@@ -90,11 +100,14 @@ async def _scan_report(query, scan_prefix: str, context):
 
     scan = await sync_to_async(_launch)()
     if not scan:
-        await query.edit_message_text(f'No completed scan found with ID {scan_prefix}.')
+        await query.edit_message_text(
+            f'No completed scan found with ID <code>{esc(scan_prefix)}</code>.', parse_mode=HTML,
+        )
         return
 
     await query.edit_message_text(
-        f'Generating reports for scan `{short_id(scan.id)}`… File will be sent when ready.',
+        f'Generating reports for scan <code>{esc(short_id(scan.id))}</code>… File will be sent when ready.',
+        parse_mode=HTML,
     )
 
 
@@ -108,16 +121,18 @@ async def _severity_findings(query, severity: str):
 
     rows = await sync_to_async(_query)()
     if not rows:
-        await query.edit_message_text(f'No {severity} findings found.')
+        await query.edit_message_text(
+            f'<i>No {esc(severity)} findings found.</i>', parse_mode=HTML,
+        )
         return
 
-    lines = [f'{severity.title()} Findings', '━━━━━━━━━━━━━━━━━']
+    lines = [f'<b>{esc(severity.title())} Findings</b>', '━━━━━━━━━━━━━━━━━']
     shown, remaining = truncate_list(rows, 15)
     for sev, title, ip, port in shown:
         emoji = severity_emoji(sev)
         loc = f'{ip}:{port}' if port else ip or ''
-        lines.append(f'{emoji} {title} ({loc})')
+        lines.append(f'{emoji} {esc(title)} (<code>{esc(loc)}</code>)')
     if remaining:
-        lines.append(f'… and {remaining} more')
+        lines.append(f'<i>… and {remaining} more</i>')
 
-    await query.edit_message_text('\n'.join(lines))
+    await query.edit_message_text('\n'.join(lines), parse_mode=HTML)

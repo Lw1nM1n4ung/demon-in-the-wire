@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from scanner.bot.auth import resolve_user, link_account, unlink_account, check_rate_limit
 from scanner.bot.formatting import (
-    escape_md, severity_emoji, severity_line, short_id,
+    esc, severity_emoji, severity_line, short_id,
     status_icon, truncate_list, format_duration,
 )
 from scanner.models import (
@@ -19,12 +19,16 @@ from scanner.models import (
 
 log = logging.getLogger('scanner.bot')
 
+HTML = 'HTML'
+
 
 # ── Pre-auth commands (no decorator) ─────────────────────
 
 async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text('Usage: /link <6-digit code>')
+        await update.message.reply_text(
+            'Usage: <code>/link &lt;6-digit code&gt;</code>', parse_mode=HTML,
+        )
         return
     code = context.args[0].strip()
     tg_user = update.effective_user
@@ -33,21 +37,23 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok, msg = await sync_to_async(link_account)(
         tg_user_id=tg_user.id, tg_chat_id=chat_id, code=code,
     )
-    await update.message.reply_text(msg)
+    await update.message.reply_text(esc(msg), parse_mode=HTML)
 
     if ok and update.effective_chat.type in ('group', 'supergroup'):
         cfg = await sync_to_async(SiteConfig.get)()
         user = await sync_to_async(resolve_user)(tg_user.id)
         if not cfg.telegram_shared_chat_id and user and user.role == 'owner':
             await update.message.reply_text(
-                'Use this group for Wire_Ghost notifications? Send /yes or /no',
+                'Use this group for Wire_Ghost notifications? '
+                'Send <code>/yes</code> or <code>/no</code>',
+                parse_mode=HTML,
             )
             context.user_data['_pending_group_confirm'] = str(update.effective_chat.id)
 
 
 async def cmd_unlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok, msg = await sync_to_async(unlink_account)(update.effective_user.id)
-    await update.message.reply_text(msg)
+    await update.message.reply_text(esc(msg), parse_mode=HTML)
 
 
 async def cmd_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -57,7 +63,7 @@ async def cmd_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg = await sync_to_async(SiteConfig.get)()
     cfg.telegram_shared_chat_id = chat_id
     await sync_to_async(cfg.save)(update_fields=['telegram_shared_chat_id'])
-    await update.message.reply_text('This group is now set for Wire_Ghost notifications.')
+    await update.message.reply_text('✅ This group is now set for Wire_Ghost notifications.')
 
 
 async def cmd_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83,17 +89,17 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active, agg = await sync_to_async(_query)()
 
     lines = [
-        'Wire_Ghost Status',
+        '<b>Wire_Ghost Status</b>',
         '━━━━━━━━━━━━━━━━━',
-        f'Active scans: {active}',
-        f'Total hosts: {agg["hosts"] or 0}',
-        f'Total findings: {agg["findings"] or 0}',
+        f'<b>Active scans:</b> {active}',
+        f'<b>Total hosts:</b> {agg["hosts"] or 0}',
+        f'<b>Total findings:</b> {agg["findings"] or 0}',
         f'  🔴 Critical: {agg["critical"] or 0}',
         f'  🟠 High: {agg["high"] or 0}',
         f'  🟡 Medium: {agg["medium"] or 0}',
         f'  🔵 Low: {agg["low"] or 0}',
     ]
-    await update.message.reply_text('\n'.join(lines))
+    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
 
 async def cmd_scans(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -105,21 +111,23 @@ async def cmd_scans(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = await sync_to_async(_query)()
     if not rows:
-        await update.message.reply_text('No scans found.')
+        await update.message.reply_text('<i>No scans found.</i>', parse_mode=HTML)
         return
 
-    lines = ['Recent Scans', '━━━━━━━━━━━━']
+    lines = ['<b>Recent Scans</b>', '━━━━━━━━━━━━']
     for scan_id, target, stype, st, fcount in rows:
         icon = status_icon(st)
         sid = short_id(scan_id)
-        lines.append(f'{icon} {sid} | {target} | {stype} | {fcount} findings')
+        lines.append(f'{icon} <code>{esc(sid)}</code> │ <code>{esc(target)}</code> │ {esc(stype)} │ {fcount} findings')
 
-    await update.message.reply_text('\n'.join(lines))
+    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text('Usage: /scan <id>')
+        await update.message.reply_text(
+            'Usage: <code>/scan &lt;id&gt;</code>', parse_mode=HTML,
+        )
         return
 
     prefix = context.args[0].strip()
@@ -132,7 +140,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     scan = await sync_to_async(_query)()
     if not scan:
-        await update.message.reply_text(f'Scan {prefix} not found.')
+        await update.message.reply_text(f'Scan <code>{esc(prefix)}</code> not found.', parse_mode=HTML)
         return
 
     sid = short_id(scan.id)
@@ -142,20 +150,20 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         medium=scan.medium_count, low=scan.low_count,
     )
     lines = [
-        f'Scan: {sid}',
+        f'<b>Scan:</b> <code>{esc(sid)}</code>',
         '━━━━━━━━━━━━━━',
-        f'Target: {scan.target}',
-        f'Type: {scan.scan_type} | Status: {scan.status}',
-        f'Duration: {dur}',
-        f'Hosts: {scan.hosts_count} | Ports: {scan.ports_count}',
-        f'Findings: {scan.findings_count}',
+        f'<b>Target:</b> <code>{esc(scan.target)}</code>',
+        f'<b>Type:</b> {esc(scan.scan_type)} │ <b>Status:</b> {esc(scan.status)}',
+        f'<b>Duration:</b> {dur}',
+        f'<b>Hosts:</b> {scan.hosts_count} │ <b>Ports:</b> {scan.ports_count}',
+        f'<b>Findings:</b> {scan.findings_count}',
         f'  {sev}',
     ]
     reports = await sync_to_async(
         lambda: list(scan.reports.values_list('format', flat=True))
     )()
     if reports:
-        lines.append(f'Reports: {", ".join(reports)}')
+        lines.append(f'<b>Reports:</b> {esc(", ".join(reports))}')
 
     keyboard = InlineKeyboardMarkup([
         [
@@ -163,7 +171,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton('Report', callback_data=f'scan:{sid}:report'),
         ]
     ])
-    await update.message.reply_text('\n'.join(lines), reply_markup=keyboard)
+    await update.message.reply_text('\n'.join(lines), reply_markup=keyboard, parse_mode=HTML)
 
 
 async def cmd_findings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -183,20 +191,20 @@ async def cmd_findings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = await sync_to_async(_query)()
     if not rows:
-        await update.message.reply_text('No findings found.')
+        await update.message.reply_text('<i>No findings found.</i>', parse_mode=HTML)
         return
 
     label = f'{severity_filter.title()} Findings' if severity_filter else 'Recent Findings'
-    lines = [label, '━━━━━━━━━━━━━━━━━']
+    lines = [f'<b>{esc(label)}</b>', '━━━━━━━━━━━━━━━━━']
     shown, remaining = truncate_list(rows, 15)
     for sev, title, ip, port in shown:
         emoji = severity_emoji(sev)
         loc = f'{ip}:{port}' if port else ip or ''
-        lines.append(f'{emoji} {title} ({loc})')
+        lines.append(f'{emoji} {esc(title)} (<code>{esc(loc)}</code>)')
     if remaining:
-        lines.append(f'… and {remaining} more')
+        lines.append(f'<i>… and {remaining} more</i>')
 
-    await update.message.reply_text('\n'.join(lines))
+    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
 
 async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,43 +216,43 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = await sync_to_async(_query)()
     if not rows:
-        await update.message.reply_text('No assets found.')
+        await update.message.reply_text('<i>No assets found.</i>', parse_mode=HTML)
         return
 
-    lines = ['High-Risk Assets', '━━━━━━━━━━━━━━━━']
+    lines = ['<b>High-Risk Assets</b>', '━━━━━━━━━━━━━━━━']
     for ip, svc, risk, fcount in rows:
         svc_label = svc or 'unknown'
-        lines.append(f'⚠️ {ip} | {svc_label} | risk: {risk} | {fcount} findings')
+        lines.append(f'⚠️ <code>{esc(ip)}</code> │ {esc(svc_label)} │ risk: {risk} │ {fcount} findings')
 
-    await update.message.reply_text('\n'.join(lines))
+    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = context.user_data.get('wg_user')
 
     viewer_cmds = [
-        '/status — Dashboard summary',
-        '/scans — Recent scans',
-        '/scan <id> — Scan detail',
-        '/findings [severity] — List findings',
-        '/assets — Top assets by risk',
-        '/help — This message',
-        '/link <code> — Link Telegram account',
-        '/unlink — Unlink account',
+        '<code>/status</code> — Dashboard summary',
+        '<code>/scans</code> — Recent scans',
+        '<code>/scan</code> &lt;id&gt; — Scan detail',
+        '<code>/findings</code> [severity] — List findings',
+        '<code>/assets</code> — Top assets by risk',
+        '<code>/help</code> — This message',
+        '<code>/link</code> &lt;code&gt; — Link Telegram account',
+        '<code>/unlink</code> — Unlink account',
     ]
     engineer_cmds = [
-        '/newscan <target> [type] — Launch scan',
-        '/cancel <id> — Cancel scan',
-        '/schedule list|add|del — Manage schedules',
-        '/report <id> — Regenerate reports',
+        '<code>/newscan</code> &lt;target&gt; [type] — Launch scan',
+        '<code>/cancel</code> &lt;id&gt; — Cancel scan',
+        '<code>/schedule</code> list|add|del — Manage schedules',
+        '<code>/report</code> &lt;id&gt; — Regenerate reports',
     ]
     owner_cmds = [
-        '/users — List users',
-        '/config — Site configuration',
-        '/health — System health',
+        '<code>/users</code> — List users',
+        '<code>/config</code> — Site configuration',
+        '<code>/health</code> — System health',
     ]
 
-    lines = ['Wire_Ghost Bot Commands', '━━━━━━━━━━━━━━━━━━━━━━━']
+    lines = ['<b>Wire_Ghost Bot Commands</b>', '━━━━━━━━━━━━━━━━━━━━━━━']
     lines.extend(viewer_cmds)
 
     if user:
@@ -257,14 +265,17 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append('')
         lines.extend(owner_cmds)
 
-    await update.message.reply_text('\n'.join(lines))
+    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
 
 # ── Engineer commands ────────────────────────────────────
 
 async def cmd_newscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text('Usage: /newscan <target> [full|quick|port|web]')
+        await update.message.reply_text(
+            'Usage: <code>/newscan</code> &lt;target&gt; [full|quick|port|web]',
+            parse_mode=HTML,
+        )
         return
 
     user = context.user_data['wg_user']
@@ -306,12 +317,17 @@ async def cmd_newscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     scan = await sync_to_async(_create)()
     sid = short_id(scan.id)
-    await update.message.reply_text(f'Scan `{sid}` launched against `{target}` (type: {scan_type})')
+    await update.message.reply_text(
+        f'Scan <code>{esc(sid)}</code> launched against <code>{esc(target)}</code> (type: {esc(scan_type)})',
+        parse_mode=HTML,
+    )
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text('Usage: /cancel <id>')
+        await update.message.reply_text(
+            'Usage: <code>/cancel</code> &lt;id&gt;', parse_mode=HTML,
+        )
         return
 
     prefix = context.args[0].strip()
@@ -335,12 +351,16 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if err:
         await update.message.reply_text(err)
         return
-    await update.message.reply_text(f'Scan `{short_id(scan.id)}` cancelled.')
+    await update.message.reply_text(
+        f'Scan <code>{esc(short_id(scan.id))}</code> cancelled.', parse_mode=HTML,
+    )
 
 
 async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text('Usage: /schedule list|add|del')
+        await update.message.reply_text(
+            'Usage: <code>/schedule</code> list|add|del', parse_mode=HTML,
+        )
         return
 
     sub = context.args[0].lower()
@@ -355,17 +375,23 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         rows = await sync_to_async(_list)()
         if not rows:
-            await update.message.reply_text('No active schedules.')
+            await update.message.reply_text('<i>No active schedules.</i>', parse_mode=HTML)
             return
-        lines = ['Scheduled Scans', '━━━━━━━━━━━━━━━']
+        lines = ['<b>Scheduled Scans</b>', '━━━━━━━━━━━━━━━']
         for sid, target, freq, t, nxt in rows:
             nxt_str = nxt.strftime('%Y-%m-%d %H:%M') if nxt else '—'
-            lines.append(f'📅 {short_id(sid)} | {target} | {freq} {t.strftime("%H:%M")} | next: {nxt_str}')
-        await update.message.reply_text('\n'.join(lines))
+            lines.append(
+                f'📅 <code>{esc(short_id(sid))}</code> │ <code>{esc(target)}</code> │ '
+                f'{esc(freq)} {t.strftime("%H:%M")} │ next: {esc(nxt_str)}'
+            )
+        await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
     elif sub == 'add':
         if len(context.args) < 4:
-            await update.message.reply_text('Usage: /schedule add <target> <daily|weekly|biweekly|monthly> <HH:MM>')
+            await update.message.reply_text(
+                'Usage: <code>/schedule add</code> &lt;target&gt; &lt;daily|weekly|biweekly|monthly&gt; &lt;HH:MM&gt;',
+                parse_mode=HTML,
+            )
             return
         import re
         from datetime import time as dt_time
@@ -403,11 +429,16 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return sched
 
         sched = await sync_to_async(_create)()
-        await update.message.reply_text(f'Schedule created: `{target}` every {freq} at {time_str}')
+        await update.message.reply_text(
+            f'Schedule created: <code>{esc(target)}</code> every {esc(freq)} at {esc(time_str)}',
+            parse_mode=HTML,
+        )
 
     elif sub == 'del':
         if len(context.args) < 2:
-            await update.message.reply_text('Usage: /schedule del <id>')
+            await update.message.reply_text(
+                'Usage: <code>/schedule del</code> &lt;id&gt;', parse_mode=HTML,
+            )
             return
         prefix = context.args[1]
 
@@ -428,12 +459,16 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text('Schedule deleted.')
 
     else:
-        await update.message.reply_text('Usage: /schedule list|add|del')
+        await update.message.reply_text(
+            'Usage: <code>/schedule</code> list|add|del', parse_mode=HTML,
+        )
 
 
 async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text('Usage: /report <scan_id>')
+        await update.message.reply_text(
+            'Usage: <code>/report</code> &lt;scan_id&gt;', parse_mode=HTML,
+        )
         return
 
     prefix = context.args[0].strip()
@@ -444,7 +479,9 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     scan = await sync_to_async(_find)()
     if not scan:
-        await update.message.reply_text(f'No completed scan found with ID {prefix}.')
+        await update.message.reply_text(
+            f'No completed scan found with ID <code>{esc(prefix)}</code>.', parse_mode=HTML,
+        )
         return
 
     def _launch():
@@ -453,7 +490,10 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await sync_to_async(_launch)()
     sid = short_id(scan.id)
-    await update.message.reply_text(f'Generating reports for scan `{sid}`… I\'ll send the file when ready.')
+    await update.message.reply_text(
+        f'Generating reports for scan <code>{esc(sid)}</code>… I\'ll send the file when ready.',
+        parse_mode=HTML,
+    )
 
 
 # ── Owner commands ───────────────────────────────────────
@@ -470,17 +510,17 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = await sync_to_async(_query)()
     role_icons = {'owner': '👑', 'engineer': '🔧', 'viewer': '👁'}
-    lines = ['Users', '━━━━━']
+    lines = ['<b>Users</b>', '━━━━━']
     for uname, role, linked in rows:
         icon = role_icons.get(role, '❓')
         link_str = '🔗 linked' if linked else '❌ not linked'
-        lines.append(f'{icon} {uname} | {role} | {link_str}')
+        lines.append(f'{icon} <b>{esc(uname)}</b> │ {esc(role)} │ {link_str}')
 
-    # Send via DM for privacy — never fall back to group
     try:
         await context.bot.send_message(
             chat_id=update.effective_user.id,
             text='\n'.join(lines),
+            parse_mode=HTML,
         )
         if update.effective_chat.type in ('group', 'supergroup'):
             await update.message.reply_text('User list sent via DM.')
@@ -501,19 +541,20 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = await sync_to_async(_query)()
     lines = [
-        'Site Config',
+        '<b>Site Config</b>',
         '━━━━━━━━━━━',
-        f'Timezone: {data["timezone"]}',
-        f'Default parallelism: {data["parallelism"]}',
-        f'Default timeout: {data["timeout"]}s',
-        f'Telegram bot: {"✅ configured" if data["bot_configured"] else "❌ not configured"}',
-        f'Shared chat: {"✅ set" if data["shared_chat"] else "❌ not set"}',
+        f'<b>Timezone:</b> {esc(data["timezone"])}',
+        f'<b>Default parallelism:</b> {data["parallelism"]}',
+        f'<b>Default timeout:</b> {data["timeout"]}s',
+        f'<b>Telegram bot:</b> {"✅ configured" if data["bot_configured"] else "❌ not configured"}',
+        f'<b>Shared chat:</b> {"✅ set" if data["shared_chat"] else "❌ not set"}',
     ]
 
     try:
         await context.bot.send_message(
             chat_id=update.effective_user.id,
             text='\n'.join(lines),
+            parse_mode=HTML,
         )
         if update.effective_chat.type in ('group', 'supergroup'):
             await update.message.reply_text('Config sent via DM.')
@@ -535,8 +576,8 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats = await sync_to_async(_query)()
     lines = [
-        'System Health',
+        '<b>System Health</b>',
         '━━━━━━━━━━━━━',
-        f'CPU: {stats["cpu"]} | RAM: {stats["ram"]} | Disk: {stats["disk"]}',
+        f'<b>CPU:</b> {esc(stats["cpu"])} │ <b>RAM:</b> {esc(stats["ram"])} │ <b>Disk:</b> {esc(stats["disk"])}',
     ]
-    await update.message.reply_text('\n'.join(lines))
+    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)

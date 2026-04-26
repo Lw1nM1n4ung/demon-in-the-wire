@@ -1,6 +1,6 @@
 from unittest import TestCase
 from scanner.bot.formatting import (
-    escape_md,
+    esc,
     severity_emoji,
     severity_line,
     short_id,
@@ -10,19 +10,24 @@ from scanner.bot.formatting import (
 )
 
 
-class TestEscapeMd:
-    def test_escapes_special_chars(self):
-        assert escape_md('hello_world') == 'hello\\_world'
+class TestEsc:
+    def test_escapes_angle_brackets(self):
+        assert esc('<script>') == '&lt;script&gt;'
 
-    def test_escapes_all_mdv2_chars(self):
-        for ch in '_*[]()~`>#+-=|{}.!':
-            assert f'\\{ch}' in escape_md(ch)
+    def test_escapes_ampersand(self):
+        assert esc('a & b') == 'a &amp; b'
+
+    def test_escapes_quotes(self):
+        assert '&quot;' in esc('"hello"')
 
     def test_leaves_plain_text_alone(self):
-        assert escape_md('hello world') == 'hello world'
+        assert esc('hello world') == 'hello world'
 
     def test_handles_empty_string(self):
-        assert escape_md('') == ''
+        assert esc('') == ''
+
+    def test_coerces_non_string(self):
+        assert esc(12345) == '12345'
 
 
 class TestSeverityEmoji:
