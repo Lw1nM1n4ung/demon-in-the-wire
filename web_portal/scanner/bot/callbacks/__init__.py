@@ -4,6 +4,7 @@ import logging
 
 from asgiref.sync import sync_to_async
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from scanner.bot.auth import resolve_user
@@ -96,6 +97,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if handler:
         try:
             await handler(query, user, rest, context)
+        except BadRequest as e:
+            if 'message is not modified' in str(e).lower():
+                pass
+            else:
+                log.exception('Callback error: %s', query.data)
+                try:
+                    await query.edit_message_text(
+                        'Something went wrong. Try again.',
+                        parse_mode=HTML,
+                    )
+                except Exception:
+                    log.warning('Failed to send error message for callback %s', query.data)
         except Exception:
             log.exception('Callback error: %s', query.data)
             try:

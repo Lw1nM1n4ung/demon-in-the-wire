@@ -2,6 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import TestCase
+from telegram.error import BadRequest
 
 from scanner.bot.callbacks import handle_callback, PERMS
 
@@ -143,3 +144,55 @@ class TestCallbackDataParsing(TestCase):
                 self.assertEqual(rest, ['abc12345', '0', 'high'])
             finally:
                 cb_mod.ROUTES = original or None
+
+
+class TestMessageNotModified(TestCase):
+
+    @patch('scanner.bot.callbacks.resolve_user')
+    def test_message_not_modified_silently_ignored(self, mock_resolve):
+        mock_user = MagicMock()
+        mock_user.has_permission.return_value = True
+        mock_resolve.return_value = mock_user
+
+        import scanner.bot.callbacks as cb_mod
+        original = cb_mod.ROUTES
+
+        async def _raise_not_modified(query, user, rest, context):
+            raise BadRequest(
+                'Message is not modified: specified new message content and '
+                'reply markup are exactly the same as a current content and '
+                'reply markup of the message'
+            )
+
+        try:
+            cb_mod.ROUTES = cb_mod._build_routes()
+            cb_mod.ROUTES['mn'] = _raise_not_modified
+
+            update, query = _make_update(10001, 'mn:dash')
+            run_async(handle_callback(update, MagicMock()))
+            query.edit_message_text.assert_not_called()
+        finally:
+            cb_mod.ROUTES = original
+
+    @patch('scanner.bot.callbacks.resolve_user')
+    def test_other_bad_request_still_shows_error(self, mock_resolve):
+        mock_user = MagicMock()
+        mock_user.has_permission.return_value = True
+        mock_resolve.return_value = mock_user
+
+        import scanner.bot.callbacks as cb_mod
+        original = cb_mod.ROUTES
+
+        async def _raise_other_bad_request(query, user, rest, context):
+            raise BadRequest('Chat not found')
+
+        try:
+            cb_mod.ROUTES = cb_mod._build_routes()
+            cb_mod.ROUTES['mn'] = _raise_other_bad_request
+
+            update, query = _make_update(10001, 'mn')
+            run_async(handle_callback(update, MagicMock()))
+            query.edit_message_text.assert_called()
+            self.assertIn('Something went wrong', query.edit_message_text.call_args[0][0])
+        finally:
+            cb_mod.ROUTES = original
