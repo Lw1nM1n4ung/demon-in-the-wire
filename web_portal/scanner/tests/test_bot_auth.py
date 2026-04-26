@@ -93,10 +93,17 @@ class TestUnlinkAccount(TestCase):
 class TestCheckRateLimit(TestCase):
     @patch('scanner.bot.auth.cache')
     def test_allows_under_limit(self, mock_cache):
-        mock_cache.get.return_value = 0
+        mock_cache.incr.return_value = 1
         assert check_rate_limit('test:', 'key', 5, 60) is True
 
     @patch('scanner.bot.auth.cache')
     def test_blocks_at_limit(self, mock_cache):
-        mock_cache.get.return_value = 5
+        mock_cache.incr.return_value = 6
         assert check_rate_limit('test:', 'key', 5, 60) is False
+
+    @patch('scanner.bot.auth.cache')
+    def test_creates_key_on_first_call(self, mock_cache):
+        mock_cache.incr.side_effect = ValueError('Key not found')
+        mock_cache.set.return_value = True
+        assert check_rate_limit('test:', 'key', 5, 60) is True
+        mock_cache.set.assert_called_once_with('test:key', 1, 60)

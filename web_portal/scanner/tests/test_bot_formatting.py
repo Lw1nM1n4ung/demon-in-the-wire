@@ -1,4 +1,4 @@
-import pytest
+from unittest import TestCase
 from scanner.bot.formatting import (
     escape_md,
     severity_emoji,
