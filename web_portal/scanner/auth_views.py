@@ -6,7 +6,7 @@ from django.utils import timezone
 User = get_user_model()
 from django.core.cache import cache
 from django.middleware.csrf import get_token
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, throttle_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from scanner.authentication import CsrfExemptAuth
@@ -1013,7 +1013,22 @@ def tools_health(request):
     return Response(probe_all(refresh=refresh))
 
 
+from rest_framework.throttling import UserRateThrottle
+
+
+class StatsThrottle(UserRateThrottle):
+    rate = '60/min'
+    scope = 'system_stats'
+
+    def get_cache_key(self, request, view):
+        if request.user.is_authenticated:
+            return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+        ident = self.get_ident(request)
+        return self.cache_format % {'scope': self.scope, 'ident': ident}
+
+
 @api_view(['GET'])
+@throttle_classes([StatsThrottle])
 def system_stats(request):
     """Real-time container resource usage (CPU / memory / disk / network).
 
