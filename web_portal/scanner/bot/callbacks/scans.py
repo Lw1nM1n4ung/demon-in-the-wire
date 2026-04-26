@@ -55,17 +55,18 @@ async def handle_detail(query, user, rest, context):
     sid = rest[0] if rest else ''
 
     def _q():
-        scan = Scan.objects.filter(id__startswith=sid).first()
+        scan = Scan.objects.select_related('created_by').filter(id__startswith=sid).first()
         if not scan:
-            return None, False, []
+            return None, False, [], None
         has_ss = Screenshot.objects.filter(scan=scan).exists()
         reports = list(
             Report.objects.filter(scan=scan)
             .values_list('format', 'file_size')
         )
-        return scan, has_ss, reports
+        creator = scan.created_by.username if scan.created_by else None
+        return scan, has_ss, reports, creator
 
-    scan, has_ss, reports = await sync_to_async(_q)()
+    scan, has_ss, reports, creator = await sync_to_async(_q)()
     if not scan:
         await query.edit_message_text(
             f'Scan <code>{esc(sid)}</code> not found.',
@@ -84,8 +85,8 @@ async def handle_detail(query, user, rest, context):
         f'  <b>Type:</b> {esc(s.scan_type)}',
         f'  <b>Status:</b> {status_icon(s.status)} {esc(s.status)}',
     ]
-    if s.created_by:
-        lines.append(f'  <b>By:</b> {esc(s.created_by.username)}')
+    if creator:
+        lines.append(f'  <b>By:</b> {esc(creator)}')
 
     lines.append('')
     lines.append('<b>Timing</b>')
