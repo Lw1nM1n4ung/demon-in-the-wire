@@ -4,6 +4,7 @@ import logging
 
 from asgiref.sync import sync_to_async
 from django.db.models import Sum, Q, Count
+from django.utils import timezone as dj_tz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -22,12 +23,42 @@ log = logging.getLogger('scanner.bot')
 HTML = 'HTML'
 
 
+def _time_ago(dt):
+    if not dt:
+        return '—'
+    delta = dj_tz.now() - dt
+    secs = int(delta.total_seconds())
+    if secs < 60:
+        return f'{secs}s ago'
+    mins = secs // 60
+    if mins < 60:
+        return f'{mins}m ago'
+    hours = mins // 60
+    if hours < 24:
+        return f'{hours}h ago'
+    days = hours // 24
+    return f'{days}d ago'
+
+
+def _progress_bar(done, total, width=10):
+    if total == 0:
+        return '░' * width
+    filled = round(done / total * width)
+    return '▓' * filled + '░' * (width - filled)
+
+
 # ── Pre-auth commands (no decorator) ─────────────────────
 
 async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            'Usage: <code>/link &lt;6-digit code&gt;</code>', parse_mode=HTML,
+            '🔗 <b>Link Your Account</b>\n'
+            '━━━━━━━━━━━━━━━━━━━\n'
+            '1. Open Wire_Ghost web portal\n'
+            '2. Go to <b>Settings → Telegram</b>\n'
+            '3. Click <b>Generate Code</b>\n'
+            '4. Send: <code>/link &lt;6-digit code&gt;</code>',
+            parse_mode=HTML,
         )
         return
     code = context.args[0].strip()
@@ -37,14 +68,17 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok, msg = await sync_to_async(link_account)(
         tg_user_id=tg_user.id, tg_chat_id=chat_id, code=code,
     )
-    await update.message.reply_text(esc(msg), parse_mode=HTML)
+    if ok:
+        await update.message.reply_text(f'✅ {esc(msg)}', parse_mode=HTML)
+    else:
+        await update.message.reply_text(f'❌ {esc(msg)}', parse_mode=HTML)
 
     if ok and update.effective_chat.type in ('group', 'supergroup'):
         cfg = await sync_to_async(SiteConfig.get)()
         user = await sync_to_async(resolve_user)(tg_user.id)
         if not cfg.telegram_shared_chat_id and user and user.role == 'owner':
             await update.message.reply_text(
-                'Use this group for Wire_Ghost notifications? '
+                '📢 Use this group for Wire_Ghost notifications?\n'
                 'Send <code>/yes</code> or <code>/no</code>',
                 parse_mode=HTML,
             )
@@ -53,7 +87,8 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_unlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok, msg = await sync_to_async(unlink_account)(update.effective_user.id)
-    await update.message.reply_text(esc(msg), parse_mode=HTML)
+    prefix = '✅' if ok else '❌'
+    await update.message.reply_text(f'{prefix} {esc(msg)}', parse_mode=HTML)
 
 
 async def cmd_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -76,6 +111,10 @@ async def cmd_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def _query():
         active = Scan.objects.filter(status='running').count()
+        pending = Scan.objects.filter(status='pending').count()
+        total_scans = Scan.objects.count()
+        completed = Scan.objects.filter(status='completed').count()
+        failed = Scan.objects.filter(status='failed').count()
         agg = Scan.objects.filter(status='completed').aggregate(
             hosts=Sum('hosts_count'),
             findings=Sum('findings_count'),
@@ -84,20 +123,53 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             medium=Sum('medium_count'),
             low=Sum('low_count'),
         )
-        return active, agg
+        last_scan = Scan.objects.order_by('-created_at').first()
+        next_sched = ScheduledScan.objects.filter(
+            enabled=True, next_run__isnull=False,
+        ).order_by('next_run').first()
+        return {
+            'active': active, 'pending': pending,
+            'total': total_scans, 'completed': completed, 'failed': failed,
+            'agg': agg, 'last_scan': last_scan, 'next_sched': next_sched,
+        }
 
-    active, agg = await sync_to_async(_query)()
+    d = await sync_to_async(_query)()
+    agg = d['agg']
+    total_findings = agg['findings'] or 0
+    crit = agg['critical'] or 0
+    high = agg['high'] or 0
+    med = agg['medium'] or 0
+    low = agg['low'] or 0
+
+    last = d['last_scan']
+    last_info = '—'
+    if last:
+        last_info = f'{status_icon(last.status)} <code>{esc(short_id(last.id))}</code> {esc(last.target)} ({_time_ago(last.created_at)})'
+
+    next_info = '—'
+    if d['next_sched']:
+        ns = d['next_sched']
+        next_info = f'<code>{esc(ns.target)}</code> at {ns.time.strftime("%H:%M")} ({_time_ago(ns.next_run) if ns.next_run and ns.next_run < dj_tz.now() else ns.next_run.strftime("%Y-%m-%d %H:%M") if ns.next_run else "—"})'
 
     lines = [
-        '<b>Wire_Ghost Status</b>',
-        '━━━━━━━━━━━━━━━━━',
-        f'<b>Active scans:</b> {active}',
-        f'<b>Total hosts:</b> {agg["hosts"] or 0}',
-        f'<b>Total findings:</b> {agg["findings"] or 0}',
-        f'  🔴 Critical: {agg["critical"] or 0}',
-        f'  🟠 High: {agg["high"] or 0}',
-        f'  🟡 Medium: {agg["medium"] or 0}',
-        f'  🔵 Low: {agg["low"] or 0}',
+        '🛡 <b>Wire_Ghost Dashboard</b>',
+        '━━━━━━━━━━━━━━━━━━━━━',
+        '',
+        f'<b>📊 Scan Activity</b>',
+        f'  🔄 Running: <b>{d["active"]}</b>  │  ⏳ Pending: <b>{d["pending"]}</b>',
+        f'  ✅ Completed: {d["completed"]}  │  ❌ Failed: {d["failed"]}',
+        f'  📁 Total: {d["total"]}',
+        '',
+        f'<b>🎯 Findings Summary</b>',
+        f'  🔴 Critical: <b>{crit}</b>',
+        f'  🟠 High: <b>{high}</b>',
+        f'  🟡 Medium: {med}',
+        f'  🔵 Low: {low}',
+        f'  📊 Total: <b>{total_findings}</b>  │  Hosts: <b>{agg["hosts"] or 0}</b>',
+        '',
+        f'<b>🕐 Timeline</b>',
+        f'  Last scan: {last_info}',
+        f'  Next scheduled: {next_info}',
     ]
     await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
@@ -106,20 +178,37 @@ async def cmd_scans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def _query():
         return list(
             Scan.objects.order_by('-created_at')[:10]
-            .values_list('id', 'target', 'scan_type', 'status', 'findings_count')
+            .values_list('id', 'name', 'target', 'scan_type', 'status',
+                         'findings_count', 'critical_count', 'high_count',
+                         'duration_seconds', 'created_at', 'created_by__username')
         )
 
     rows = await sync_to_async(_query)()
     if not rows:
-        await update.message.reply_text('<i>No scans found.</i>', parse_mode=HTML)
+        await update.message.reply_text(
+            '📋 <b>Recent Scans</b>\n━━━━━━━━━━━━\n\n<i>No scans found.</i>',
+            parse_mode=HTML,
+        )
         return
 
-    lines = ['<b>Recent Scans</b>', '━━━━━━━━━━━━']
-    for scan_id, target, stype, st, fcount in rows:
+    lines = [f'📋 <b>Recent Scans</b> ({len(rows)} shown)', '━━━━━━━━━━━━━━━━━━━']
+    for scan_id, name, target, stype, st, fcount, crit, high, dur, created, creator in rows:
         icon = status_icon(st)
         sid = short_id(scan_id)
-        lines.append(f'{icon} <code>{esc(sid)}</code> │ <code>{esc(target)}</code> │ {esc(stype)} │ {fcount} findings')
+        sev_badges = ''
+        if crit:
+            sev_badges += f' 🔴{crit}'
+        if high:
+            sev_badges += f' 🟠{high}'
+        dur_str = format_duration(dur) if dur else ''
+        time_str = _time_ago(created)
+        lines.append(
+            f'\n{icon} <code>{esc(sid)}</code> │ <b>{esc(target)}</b>'
+            f'\n   {esc(stype)} │ {fcount} findings{sev_badges}'
+            f' │ {dur_str} │ {time_str}'
+        )
 
+    lines.append(f'\n💡 <i>Detail: </i><code>/scan &lt;id&gt;</code>')
     await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
 
@@ -133,42 +222,79 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefix = context.args[0].strip()
 
     def _query():
-        qs = Scan.objects.filter(id__startswith=prefix)
-        if not qs.exists():
-            return None
-        return qs.first()
+        scan = Scan.objects.filter(id__startswith=prefix).first()
+        if not scan:
+            return None, [], 0
+        reports = list(scan.reports.values_list('format', 'file_size'))
+        top_findings = list(
+            Finding.objects.filter(scan=scan, severity__in=['critical', 'high'])
+            .order_by('severity', '-id')[:5]
+            .values_list('severity', 'title', 'host_ip', 'port', 'cve', 'source')
+        )
+        return scan, reports, top_findings
 
-    scan = await sync_to_async(_query)()
+    scan, reports, top_findings = await sync_to_async(_query)()
     if not scan:
         await update.message.reply_text(f'Scan <code>{esc(prefix)}</code> not found.', parse_mode=HTML)
         return
 
     sid = short_id(scan.id)
     dur = format_duration(scan.duration_seconds)
-    sev = severity_line(
-        critical=scan.critical_count, high=scan.high_count,
-        medium=scan.medium_count, low=scan.low_count,
-    )
+    started = scan.started_at.strftime('%Y-%m-%d %H:%M') if scan.started_at else '—'
+    finished = scan.completed_at.strftime('%Y-%m-%d %H:%M') if scan.completed_at else '—'
+    creator = scan.created_by.username if scan.created_by else '—'
+
     lines = [
-        f'<b>Scan:</b> <code>{esc(sid)}</code>',
-        '━━━━━━━━━━━━━━',
-        f'<b>Target:</b> <code>{esc(scan.target)}</code>',
-        f'<b>Type:</b> {esc(scan.scan_type)} │ <b>Status:</b> {esc(scan.status)}',
-        f'<b>Duration:</b> {dur}',
-        f'<b>Hosts:</b> {scan.hosts_count} │ <b>Ports:</b> {scan.ports_count}',
-        f'<b>Findings:</b> {scan.findings_count}',
-        f'  {sev}',
+        f'{status_icon(scan.status)} <b>Scan Detail</b> — <code>{esc(sid)}</code>',
+        '━━━━━━━━━━━━━━━━━━━━━━',
+        '',
+        f'<b>📋 General</b>',
+        f'  <b>Name:</b> {esc(scan.name)}',
+        f'  <b>Target:</b> <code>{esc(scan.target)}</code>',
+        f'  <b>Type:</b> {esc(scan.scan_type)} │ <b>Status:</b> {esc(scan.status)}',
+        f'  <b>Created by:</b> {esc(creator)}',
+        '',
+        f'<b>⏱ Timing</b>',
+        f'  <b>Started:</b> {esc(started)}',
+        f'  <b>Finished:</b> {esc(finished)}',
+        f'  <b>Duration:</b> {dur}',
     ]
-    reports = await sync_to_async(
-        lambda: list(scan.reports.values_list('format', flat=True))
-    )()
+
+    if scan.deadline:
+        lines.append(f'  <b>Deadline:</b> {scan.deadline.strftime("%Y-%m-%d %H:%M %Z")}')
+
+    lines.extend([
+        '',
+        f'<b>🎯 Results</b>',
+        f'  <b>Hosts:</b> {scan.hosts_count} │ <b>Ports:</b> {scan.ports_count}',
+        f'  <b>Findings:</b> {scan.findings_count}',
+        f'  🔴 {scan.critical_count}  🟠 {scan.high_count}  🟡 {scan.medium_count}  🔵 {scan.low_count}  ℹ️ {scan.info_count}',
+    ])
+
+    if scan.error_message:
+        err = scan.error_message[:200]
+        lines.extend(['', f'<b>⚠️ Error:</b> {esc(err)}'])
+
+    if top_findings:
+        lines.extend(['', '<b>🔍 Top Findings</b>'])
+        for sev, title, ip, port, cve, source in top_findings:
+            emoji = severity_emoji(sev)
+            loc = f'{ip}:{port}' if port else ip or ''
+            cve_str = f' [{esc(cve)}]' if cve else ''
+            lines.append(f'  {emoji} {esc(title)}{cve_str}')
+            lines.append(f'     <code>{esc(loc)}</code> via {esc(source)}')
+
     if reports:
-        lines.append(f'<b>Reports:</b> {esc(", ".join(reports))}')
+        report_parts = []
+        for fmt, size in reports:
+            size_str = f'{size // 1024}KB' if size else ''
+            report_parts.append(f'{fmt} {size_str}'.strip())
+        lines.extend(['', f'<b>📄 Reports:</b> {esc(", ".join(report_parts))}'])
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton('Findings', callback_data=f'scan:{sid}:findings'),
-            InlineKeyboardButton('Report', callback_data=f'scan:{sid}:report'),
+            InlineKeyboardButton('📋 All Findings', callback_data=f'scan:{sid}:findings'),
+            InlineKeyboardButton('📄 Report', callback_data=f'scan:{sid}:report'),
         ]
     ])
     await update.message.reply_text('\n'.join(lines), reply_markup=keyboard, parse_mode=HTML)
@@ -187,22 +313,35 @@ async def cmd_findings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         qs = Finding.objects.order_by('-id')
         if severity_filter:
             qs = qs.filter(severity=severity_filter)
-        return list(qs[:15].values_list('severity', 'title', 'host_ip', 'port'))
+        total = qs.count()
+        rows = list(qs[:15].values_list(
+            'severity', 'title', 'host_ip', 'port', 'cve', 'source', 'scan__target',
+        ))
+        return total, rows
 
-    rows = await sync_to_async(_query)()
+    total, rows = await sync_to_async(_query)()
     if not rows:
-        await update.message.reply_text('<i>No findings found.</i>', parse_mode=HTML)
+        await update.message.reply_text(
+            f'🔍 <b>Findings</b>\n━━━━━━━━━━━\n\n<i>No findings found.</i>',
+            parse_mode=HTML,
+        )
         return
 
-    label = f'{severity_filter.title()} Findings' if severity_filter else 'Recent Findings'
-    lines = [f'<b>{esc(label)}</b>', '━━━━━━━━━━━━━━━━━']
+    label = f'{severity_filter.title()}' if severity_filter else 'Recent'
+    emoji_header = severity_emoji(severity_filter) + ' ' if severity_filter else '🔍 '
+    lines = [
+        f'{emoji_header}<b>{esc(label)} Findings</b> ({total} total)',
+        '━━━━━━━━━━━━━━━━━━━━',
+    ]
     shown, remaining = truncate_list(rows, 15)
-    for sev, title, ip, port in shown:
+    for sev, title, ip, port, cve, source, scan_target in shown:
         emoji = severity_emoji(sev)
         loc = f'{ip}:{port}' if port else ip or ''
-        lines.append(f'{emoji} {esc(title)} (<code>{esc(loc)}</code>)')
+        cve_str = f' <code>{esc(cve)}</code>' if cve else ''
+        lines.append(f'\n  {emoji} <b>{esc(title)}</b>{cve_str}')
+        lines.append(f'     <code>{esc(loc)}</code> │ {esc(source)} │ {esc(scan_target or "")}')
     if remaining:
-        lines.append(f'<i>… and {remaining} more</i>')
+        lines.append(f'\n<i>… and {remaining} more</i>')
 
     await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
@@ -211,18 +350,34 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def _query():
         return list(
             Asset.objects.order_by('-risk_score')[:10]
-            .values_list('ip', 'service_name', 'risk_score', 'findings_count')
+            .values_list('ip', 'hostname', 'service_name', 'risk_score',
+                         'findings_count', 'open_ports', 'last_seen')
         )
 
     rows = await sync_to_async(_query)()
     if not rows:
-        await update.message.reply_text('<i>No assets found.</i>', parse_mode=HTML)
+        await update.message.reply_text(
+            '🏠 <b>Assets</b>\n━━━━━━━\n\n<i>No assets found.</i>',
+            parse_mode=HTML,
+        )
         return
 
-    lines = ['<b>High-Risk Assets</b>', '━━━━━━━━━━━━━━━━']
-    for ip, svc, risk, fcount in rows:
-        svc_label = svc or 'unknown'
-        lines.append(f'⚠️ <code>{esc(ip)}</code> │ {esc(svc_label)} │ risk: {risk} │ {fcount} findings')
+    lines = [f'🏠 <b>High-Risk Assets</b> (top {len(rows)})', '━━━━━━━━━━━━━━━━━━━━━']
+    for ip, hostname, svc, risk, fcount, ports, last_seen in rows:
+        host_label = f'{ip}'
+        if hostname:
+            host_label += f' ({hostname})'
+        svc_label = svc or '—'
+        risk_bar = _progress_bar(min(risk, 100), 100, 5)
+        seen_str = _time_ago(last_seen) if last_seen else '—'
+        lines.append(
+            f'\n  ⚠️ <code>{esc(ip)}</code>'
+            + (f' <i>{esc(hostname)}</i>' if hostname else '')
+        )
+        lines.append(
+            f'     Risk: {risk_bar} {risk} │ {fcount} findings │ {ports or 0} ports'
+            f' │ {esc(svc_label)} │ {seen_str}'
+        )
 
     await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
@@ -230,40 +385,48 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = context.user_data.get('wg_user')
 
-    viewer_cmds = [
-        '<code>/status</code> — Dashboard summary',
-        '<code>/scans</code> — Recent scans',
-        '<code>/scan</code> &lt;id&gt; — Scan detail',
-        '<code>/findings</code> [severity] — List findings',
-        '<code>/assets</code> — Top assets by risk',
-        '<code>/help</code> — This message',
-        '<code>/link</code> &lt;code&gt; — Link Telegram account',
-        '<code>/unlink</code> — Unlink account',
+    lines = [
+        '🛡 <b>Wire_Ghost Bot Commands</b>',
+        '━━━━━━━━━━━━━━━━━━━━━━━━━',
+        '',
+        '<b>📊 Information</b>',
+        '  <code>/status</code> — Dashboard &amp; stats',
+        '  <code>/scans</code> — Recent scan history',
+        '  <code>/scan</code> <i>&lt;id&gt;</i> — Full scan detail',
+        '  <code>/findings</code> <i>[severity]</i> — Browse findings',
+        '  <code>/assets</code> — Top assets by risk score',
+        '',
+        '<b>🔗 Account</b>',
+        '  <code>/link</code> <i>&lt;code&gt;</i> — Link Telegram account',
+        '  <code>/unlink</code> — Unlink account',
+        '  <code>/help</code> — This message',
     ]
-    engineer_cmds = [
-        '<code>/newscan</code> &lt;target&gt; [type] — Launch scan',
-        '<code>/cancel</code> &lt;id&gt; — Cancel scan',
-        '<code>/schedule</code> list|add|del — Manage schedules',
-        '<code>/report</code> &lt;id&gt; — Regenerate reports',
-    ]
-    owner_cmds = [
-        '<code>/users</code> — List users',
-        '<code>/config</code> — Site configuration',
-        '<code>/health</code> — System health',
-    ]
-
-    lines = ['<b>Wire_Ghost Bot Commands</b>', '━━━━━━━━━━━━━━━━━━━━━━━']
-    lines.extend(viewer_cmds)
 
     if user:
         has_write = await sync_to_async(user.has_permission)('scan:write')
         if has_write:
-            lines.append('')
-            lines.extend(engineer_cmds)
+            lines.extend([
+                '',
+                '<b>⚡ Operations</b>',
+                '  <code>/newscan</code> <i>&lt;target&gt;</i> [type] — Launch scan',
+                '  <code>/cancel</code> <i>&lt;id&gt;</i> — Cancel running scan',
+                '  <code>/schedule</code> list|add|del — Manage schedules',
+                '  <code>/report</code> <i>&lt;id&gt;</i> — Regenerate reports',
+            ])
 
     if user and user.role == 'owner':
-        lines.append('')
-        lines.extend(owner_cmds)
+        lines.extend([
+            '',
+            '<b>👑 Administration</b>',
+            '  <code>/users</code> — User accounts &amp; link status',
+            '  <code>/config</code> — Site configuration',
+            '  <code>/health</code> — System resources',
+        ])
+
+    lines.extend([
+        '',
+        '<i>Scan types: full, quick, port, web, service</i>',
+    ])
 
     await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
@@ -273,7 +436,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_newscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            'Usage: <code>/newscan</code> &lt;target&gt; [full|quick|port|web]',
+            '⚡ <b>Launch New Scan</b>\n'
+            '━━━━━━━━━━━━━━━━\n\n'
+            'Usage: <code>/newscan &lt;target&gt; [type]</code>\n\n'
+            '<b>Examples:</b>\n'
+            '  <code>/newscan 192.168.1.0/24</code>\n'
+            '  <code>/newscan example.com web</code>\n'
+            '  <code>/newscan 10.0.0.0/16 quick</code>\n\n'
+            '<b>Types:</b> full │ quick │ port │ web │ service',
             parse_mode=HTML,
         )
         return
@@ -281,15 +451,15 @@ async def cmd_newscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = context.user_data['wg_user']
 
     if not check_rate_limit('tg:scanrate:', str(update.effective_user.id), 5, 3600):
-        await update.message.reply_text('Scan rate limit: max 5 per hour.')
+        await update.message.reply_text('⏱ Scan rate limit: max 5 per hour.')
         return
 
     import re
     target = context.args[0].strip()
     scan_type = context.args[1].strip().lower() if len(context.args) > 1 else 'full'
 
-    if scan_type not in ('full', 'quick', 'port', 'web'):
-        await update.message.reply_text('Invalid scan type. Use: full, quick, port, web')
+    if scan_type not in ('full', 'quick', 'port', 'web', 'service'):
+        await update.message.reply_text('Invalid scan type. Use: full, quick, port, web, service')
         return
 
     if not re.match(r'^[a-zA-Z0-9.:/,\-]+$', target):
@@ -318,7 +488,12 @@ async def cmd_newscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scan = await sync_to_async(_create)()
     sid = short_id(scan.id)
     await update.message.reply_text(
-        f'Scan <code>{esc(sid)}</code> launched against <code>{esc(target)}</code> (type: {esc(scan_type)})',
+        f'🚀 <b>Scan Launched</b>\n'
+        f'━━━━━━━━━━━━━━\n\n'
+        f'  <b>ID:</b> <code>{esc(sid)}</code>\n'
+        f'  <b>Target:</b> <code>{esc(target)}</code>\n'
+        f'  <b>Type:</b> {esc(scan_type)}\n\n'
+        f'Track: <code>/scan {esc(sid)}</code>',
         parse_mode=HTML,
     )
 
@@ -326,7 +501,7 @@ async def cmd_newscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            'Usage: <code>/cancel</code> &lt;id&gt;', parse_mode=HTML,
+            'Usage: <code>/cancel &lt;id&gt;</code>', parse_mode=HTML,
         )
         return
 
@@ -349,17 +524,24 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     scan, err = await sync_to_async(_cancel)()
     if err:
-        await update.message.reply_text(err)
+        await update.message.reply_text(f'❌ {err}')
         return
     await update.message.reply_text(
-        f'Scan <code>{esc(short_id(scan.id))}</code> cancelled.', parse_mode=HTML,
+        f'⏹ Scan <code>{esc(short_id(scan.id))}</code> │ <code>{esc(scan.target)}</code> — cancelled.',
+        parse_mode=HTML,
     )
 
 
 async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            'Usage: <code>/schedule</code> list|add|del', parse_mode=HTML,
+            '📅 <b>Schedule Management</b>\n'
+            '━━━━━━━━━━━━━━━━━━━━\n\n'
+            '<code>/schedule list</code> — View active schedules\n'
+            '<code>/schedule add &lt;target&gt; &lt;freq&gt; &lt;HH:MM&gt;</code>\n'
+            '<code>/schedule del &lt;id&gt;</code>\n\n'
+            '<b>Frequencies:</b> daily │ weekly │ biweekly │ monthly',
+            parse_mode=HTML,
         )
         return
 
@@ -371,25 +553,33 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return list(
                 ScheduledScan.objects.filter(enabled=True)
                 .order_by('next_run')[:10]
-                .values_list('id', 'target', 'frequency', 'time', 'next_run')
+                .values_list('id', 'name', 'target', 'frequency', 'time',
+                             'stop_time', 'next_run', 'last_run', 'scan_type')
             )
         rows = await sync_to_async(_list)()
         if not rows:
-            await update.message.reply_text('<i>No active schedules.</i>', parse_mode=HTML)
+            await update.message.reply_text(
+                '📅 <b>Scheduled Scans</b>\n━━━━━━━━━━━━━━━\n\n<i>No active schedules.</i>',
+                parse_mode=HTML,
+            )
             return
-        lines = ['<b>Scheduled Scans</b>', '━━━━━━━━━━━━━━━']
-        for sid, target, freq, t, nxt in rows:
+        lines = [f'📅 <b>Scheduled Scans</b> ({len(rows)} active)', '━━━━━━━━━━━━━━━━━━━━━']
+        for sid, name, target, freq, t, stop, nxt, last, stype in rows:
             nxt_str = nxt.strftime('%Y-%m-%d %H:%M') if nxt else '—'
+            last_str = _time_ago(last) if last else 'never'
+            time_str = t.strftime('%H:%M')
+            stop_str = f' → {stop.strftime("%H:%M")}' if stop else ''
             lines.append(
-                f'📅 <code>{esc(short_id(sid))}</code> │ <code>{esc(target)}</code> │ '
-                f'{esc(freq)} {t.strftime("%H:%M")} │ next: {esc(nxt_str)}'
+                f'\n  <code>{esc(short_id(sid))}</code> <b>{esc(target)}</b>'
+                f'\n     {esc(freq)} at {time_str}{stop_str} │ {esc(stype)}'
+                f'\n     Next: {esc(nxt_str)} │ Last: {last_str}'
             )
         await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
 
     elif sub == 'add':
         if len(context.args) < 4:
             await update.message.reply_text(
-                'Usage: <code>/schedule add</code> &lt;target&gt; &lt;daily|weekly|biweekly|monthly&gt; &lt;HH:MM&gt;',
+                'Usage: <code>/schedule add &lt;target&gt; &lt;daily|weekly|biweekly|monthly&gt; &lt;HH:MM&gt;</code>',
                 parse_mode=HTML,
             )
             return
@@ -430,14 +620,19 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         sched = await sync_to_async(_create)()
         await update.message.reply_text(
-            f'Schedule created: <code>{esc(target)}</code> every {esc(freq)} at {esc(time_str)}',
+            f'✅ <b>Schedule Created</b>\n'
+            f'━━━━━━━━━━━━━━━━\n\n'
+            f'  <b>Target:</b> <code>{esc(target)}</code>\n'
+            f'  <b>Frequency:</b> {esc(freq)}\n'
+            f'  <b>Run at:</b> {esc(time_str)}\n'
+            f'  <b>ID:</b> <code>{esc(short_id(sched.id))}</code>',
             parse_mode=HTML,
         )
 
     elif sub == 'del':
         if len(context.args) < 2:
             await update.message.reply_text(
-                'Usage: <code>/schedule del</code> &lt;id&gt;', parse_mode=HTML,
+                'Usage: <code>/schedule del &lt;id&gt;</code>', parse_mode=HTML,
             )
             return
         prefix = context.args[1]
@@ -446,28 +641,32 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             qs = ScheduledScan.objects.filter(id__startswith=prefix)
             sched = qs.first()
             if not sched:
-                return 'Schedule not found.'
+                return None, 'Schedule not found.'
             if sched.created_by != user and user.role != 'owner':
-                return 'Only the creator or Owner can delete.'
+                return None, 'Only the creator or Owner can delete.'
+            target = sched.target
             sched.delete()
-            return None
+            return target, None
 
-        err = await sync_to_async(_delete)()
+        target, err = await sync_to_async(_delete)()
         if err:
-            await update.message.reply_text(err)
+            await update.message.reply_text(f'❌ {err}')
         else:
-            await update.message.reply_text('Schedule deleted.')
+            await update.message.reply_text(
+                f'🗑 Schedule for <code>{esc(target)}</code> deleted.',
+                parse_mode=HTML,
+            )
 
     else:
         await update.message.reply_text(
-            'Usage: <code>/schedule</code> list|add|del', parse_mode=HTML,
+            'Usage: <code>/schedule</code> list │ add │ del', parse_mode=HTML,
         )
 
 
 async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            'Usage: <code>/report</code> &lt;scan_id&gt;', parse_mode=HTML,
+            'Usage: <code>/report &lt;scan_id&gt;</code>', parse_mode=HTML,
         )
         return
 
@@ -491,7 +690,8 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await sync_to_async(_launch)()
     sid = short_id(scan.id)
     await update.message.reply_text(
-        f'Generating reports for scan <code>{esc(sid)}</code>… I\'ll send the file when ready.',
+        f'📄 Generating reports for <code>{esc(sid)}</code> │ <code>{esc(scan.target)}</code>\n'
+        f'<i>I\'ll send the file when ready.</i>',
         parse_mode=HTML,
     )
 
@@ -505,16 +705,20 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for u in users:
             prefs = UserPreference.for_user(u)
             linked = bool(prefs.telegram_user_id)
-            result.append((u.username, u.role, linked))
+            result.append((u.username, u.role, linked, u.last_login))
         return result
 
     rows = await sync_to_async(_query)()
     role_icons = {'owner': '👑', 'engineer': '🔧', 'viewer': '👁'}
-    lines = ['<b>Users</b>', '━━━━━']
-    for uname, role, linked in rows:
+    lines = [f'👥 <b>Users</b> ({len(rows)})', '━━━━━━━━━━']
+    for uname, role, linked, last_login in rows:
         icon = role_icons.get(role, '❓')
-        link_str = '🔗 linked' if linked else '❌ not linked'
-        lines.append(f'{icon} <b>{esc(uname)}</b> │ {esc(role)} │ {link_str}')
+        link_str = '🔗' if linked else '—'
+        login_str = _time_ago(last_login) if last_login else 'never'
+        lines.append(
+            f'\n  {icon} <b>{esc(uname)}</b> │ {esc(role)}'
+            f'\n     Telegram: {link_str} │ Last login: {login_str}'
+        )
 
     try:
         await context.bot.send_message(
@@ -523,7 +727,7 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=HTML,
         )
         if update.effective_chat.type in ('group', 'supergroup'):
-            await update.message.reply_text('User list sent via DM.')
+            await update.message.reply_text('<i>User list sent via DM.</i>', parse_mode=HTML)
     except Exception:
         await update.message.reply_text('Could not send DM. Please start a private chat with me first, then retry.')
 
@@ -531,23 +735,34 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def _query():
         cfg = SiteConfig.get()
+        sched_count = ScheduledScan.objects.filter(enabled=True).count()
         return {
-            'timezone': cfg.schedule_timezone,
+            'timezone': cfg.schedule_timezone or 'UTC',
             'parallelism': cfg.default_parallelism,
             'timeout': cfg.default_timeout,
+            'report_formats': cfg.default_report_formats,
             'bot_configured': bool(cfg.telegram_bot_token),
             'shared_chat': bool(cfg.telegram_shared_chat_id),
+            'sched_count': sched_count,
         }
 
     data = await sync_to_async(_query)()
     lines = [
-        '<b>Site Config</b>',
-        '━━━━━━━━━━━',
-        f'<b>Timezone:</b> {esc(data["timezone"])}',
-        f'<b>Default parallelism:</b> {data["parallelism"]}',
-        f'<b>Default timeout:</b> {data["timeout"]}s',
-        f'<b>Telegram bot:</b> {"✅ configured" if data["bot_configured"] else "❌ not configured"}',
-        f'<b>Shared chat:</b> {"✅ set" if data["shared_chat"] else "❌ not set"}',
+        '⚙️ <b>Site Configuration</b>',
+        '━━━━━━━━━━━━━━━━━━━',
+        '',
+        '<b>🔧 Scan Defaults</b>',
+        f'  <b>Parallelism:</b> {data["parallelism"]} threads',
+        f'  <b>Timeout:</b> {data["timeout"]}s per tool',
+        f'  <b>Report formats:</b> {esc(data["report_formats"])}',
+        '',
+        '<b>🌐 System</b>',
+        f'  <b>Timezone:</b> {esc(data["timezone"])}',
+        f'  <b>Active schedules:</b> {data["sched_count"]}',
+        '',
+        '<b>📱 Telegram</b>',
+        f'  <b>Bot token:</b> {"✅ configured" if data["bot_configured"] else "❌ not configured"}',
+        f'  <b>Shared chat:</b> {"✅ set" if data["shared_chat"] else "❌ not set"}',
     ]
 
     try:
@@ -557,7 +772,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=HTML,
         )
         if update.effective_chat.type in ('group', 'supergroup'):
-            await update.message.reply_text('Config sent via DM.')
+            await update.message.reply_text('<i>Config sent via DM.</i>', parse_mode=HTML)
     except Exception:
         await update.message.reply_text('Could not send DM. Please start a private chat with me first, then retry.')
 
@@ -568,16 +783,32 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cpu = psutil.cpu_percent(interval=0.5)
         mem = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
+        boot = psutil.boot_time()
+        from datetime import datetime
+        uptime_secs = int((datetime.now() - datetime.fromtimestamp(boot)).total_seconds())
         return {
-            'cpu': f'{cpu}%',
-            'ram': f'{mem.used / (1024**3):.1f}/{mem.total / (1024**3):.1f} GB',
-            'disk': f'{disk.used / (1024**3):.0f}/{disk.total / (1024**3):.0f} GB',
+            'cpu': cpu,
+            'ram_used': mem.used / (1024**3),
+            'ram_total': mem.total / (1024**3),
+            'ram_pct': mem.percent,
+            'disk_used': disk.used / (1024**3),
+            'disk_total': disk.total / (1024**3),
+            'disk_pct': disk.percent,
+            'uptime': uptime_secs,
         }
 
-    stats = await sync_to_async(_query)()
+    s = await sync_to_async(_query)()
+    cpu_bar = _progress_bar(int(s['cpu']), 100, 10)
+    ram_bar = _progress_bar(int(s['ram_pct']), 100, 10)
+    disk_bar = _progress_bar(int(s['disk_pct']), 100, 10)
+
     lines = [
-        '<b>System Health</b>',
-        '━━━━━━━━━━━━━',
-        f'<b>CPU:</b> {esc(stats["cpu"])} │ <b>RAM:</b> {esc(stats["ram"])} │ <b>Disk:</b> {esc(stats["disk"])}',
+        '💻 <b>System Health</b>',
+        '━━━━━━━━━━━━━━━',
+        '',
+        f'<b>CPU</b>  {cpu_bar} {s["cpu"]}%',
+        f'<b>RAM</b>  {ram_bar} {s["ram_used"]:.1f}/{s["ram_total"]:.1f} GB ({s["ram_pct"]}%)',
+        f'<b>Disk</b> {disk_bar} {s["disk_used"]:.0f}/{s["disk_total"]:.0f} GB ({s["disk_pct"]}%)',
+        f'<b>Uptime:</b> {format_duration(s["uptime"])}',
     ]
     await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
