@@ -50,7 +50,7 @@ WG.renderScheduled = function() {
       '<div class="empty-state"><div class="icon">&#8635;</div><h3>No scheduled scans</h3><p>Set up recurring vulnerability assessments.</p>' +
       '<button class="btn btn-primary" style="margin-top:16px;" onclick="WG._openScheduleEditor()">Create Schedule</button></div>'
     :
-      '<div class="panel"><table class="data-table"><thead><tr><th>Name</th><th>Target</th><th>Frequency</th><th>Time</th><th>Type</th><th>Policy</th><th>Status</th><th>Last Run</th><th>Next Run</th><th></th></tr></thead><tbody>' +
+      '<div class="panel"><table class="data-table"><thead><tr><th>Name</th><th>Target</th><th>Frequency</th><th>Time</th><th>Stop By</th><th>Type</th><th>Policy</th><th>Status</th><th>Last Run</th><th>Next Run</th><th></th></tr></thead><tbody>' +
       schedules.map(function(s) {
         var timeStr = s.time || '';
         if (typeof timeStr === 'string' && timeStr.length > 5) timeStr = timeStr.substring(0, 5);
@@ -59,6 +59,7 @@ WG.renderScheduled = function() {
           '<td><span class="host-tag">' + esc(s.target) + '</span></td>' +
           '<td><span class="tag">' + esc(freqLabels[s.frequency] || s.frequency) + '</span></td>' +
           '<td class="mono">' + esc(timeStr) + '</td>' +
+          '<td class="mono">' + (s.stop_time ? esc(s.stop_time.substring(0, 5)) : '<span style="color:var(--text-dim);">—</span>') + '</td>' +
           '<td><span class="tag">' + esc(s.scan_type) + '</span></td>' +
           '<td>' + (s.policy_name ? '<span class="tag">' + esc(s.policy_name) + '</span>' : '<span style="color:var(--text-dim);">None</span>') + '</td>' +
           '<td>' +
@@ -86,6 +87,7 @@ WG.renderScheduled = function() {
       '<div class="form-row">' +
         '<div class="form-group"><label class="form-label">Frequency</label><select class="form-select" id="schedFreq"><option value="daily">Daily</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 Weeks</option><option value="monthly">Monthly</option></select></div>' +
         '<div class="form-group"><label class="form-label">Run At</label><input class="form-input" id="schedTime" type="time" value="02:00"></div>' +
+        '<div class="form-group"><label class="form-label">Stop By <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label><input class="form-input" id="schedStopTime" type="time" value=""></div>' +
       '</div>' +
       '<div class="form-row">' +
         '<div class="form-group"><label class="form-label">Scan Type</label><select class="form-select" id="schedScanType"><option value="full">Full Scan</option><option value="quick">Quick Scan</option><option value="port">Port Scan</option><option value="web">Web App</option><option value="service">Service Enum</option></select></div>' +
@@ -111,6 +113,9 @@ WG._openScheduleEditor = function(id) {
     var timeStr = s.time || '02:00';
     if (typeof timeStr === 'string' && timeStr.length > 5) timeStr = timeStr.substring(0, 5);
     document.getElementById('schedTime').value = timeStr;
+    var stopStr = s.stop_time || '';
+    if (typeof stopStr === 'string' && stopStr.length > 5) stopStr = stopStr.substring(0, 5);
+    document.getElementById('schedStopTime').value = stopStr;
     document.getElementById('schedScanType').value = s.scan_type;
     var policyEl = document.getElementById('schedPolicy');
     if (policyEl) policyEl.value = s.policy || '';
@@ -121,6 +126,7 @@ WG._openScheduleEditor = function(id) {
     document.getElementById('schedTarget').value = '';
     document.getElementById('schedFreq').value = 'weekly';
     document.getElementById('schedTime').value = '02:00';
+    document.getElementById('schedStopTime').value = '';
     document.getElementById('schedScanType').value = 'full';
     var policyEl = document.getElementById('schedPolicy');
     if (policyEl) policyEl.value = '';
@@ -138,11 +144,13 @@ WG._saveSchedule = function() {
   var time = document.getElementById('schedTime').value;
   var policyId = document.getElementById('schedPolicy').value;
 
+  var stopTime = document.getElementById('schedStopTime').value;
   var data = {
     name: name,
     target: target,
     frequency: freq,
     time: time,
+    stop_time: stopTime || null,
     scan_type: document.getElementById('schedScanType').value,
     policy: policyId || null,
     enabled: true,

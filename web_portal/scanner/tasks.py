@@ -419,10 +419,12 @@ def check_scheduled_scans():
             created_by=sched.created_by,
         )
 
+        deadline = _compute_deadline(sched.stop_time) if sched.stop_time else None
         task = run_scan.delay(str(scan.id))
         scan.celery_task_id = task.id
         scan.status = 'running'
-        scan.save(update_fields=['celery_task_id', 'status'])
+        scan.deadline = deadline
+        scan.save(update_fields=['celery_task_id', 'status', 'deadline'])
 
         # Update schedule timestamps
         sched.last_run = now
@@ -470,3 +472,52 @@ def _calc_next_run(frequency, run_time):
             next_dt = next_dt.replace(year=year, month=month)
     # Store as UTC so Django's timezone-aware filters compare correctly.
     return next_dt.astimezone(dt_timezone.utc)
+
+
+def _compute_deadline(stop_time):
+    """Convert a local stop_time (TimeField) into a UTC-aware deadline datetime.
+
+    If stop_time is already past, the deadline rolls to the next day — handles
+    overnight windows like start=22:00 / stop=06:00.
+    """
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from scanner.models import SiteConfig
+
+    if not stop_time:
+        return None
+
+    tz_name = (SiteConfig.get().schedule_timezone or 'UTC')
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo('UTC')
+
+    now_local = timezone.now().astimezone(tz)
+    stop_dt = now_local.replace(hour=stop_time.hour, minute=stop_time.minute, second=0, microsecond=0)
+    if stop_dt <= now_local:
+        stop_dt += timedelta(days=1)
+    return stop_dt.astimezone(dt_timezone.utc)
+
+
+@shared_task
+def enforce_scan_deadlines():
+    """Cancel running scans that have passed their deadline. Runs every 60s via Beat."""
+    from scanner.models import Scan
+
+    now = timezone.now()
+    overdue = Scan.objects.filter(status='running', deadline__isnull=False, deadline__lte=now)
+    cancelled = 0
+    for scan in overdue:
+        if scan.celery_task_id:
+            from wireghost_web.celery import app as celery_app
+            celery_app.control.revoke(scan.celery_task_id, terminate=True)
+        scan.status = 'cancelled'
+        scan.error_message = f'Auto-cancelled: exceeded stop time ({scan.deadline.strftime("%H:%M %Z")})'
+        scan.completed_at = now
+        if scan.started_at:
+            scan.duration_seconds = int((now - scan.started_at).total_seconds())
+        scan.save(update_fields=['status', 'error_message', 'completed_at', 'duration_seconds'])
+        cancelled += 1
+        logger.info('Scan %s auto-cancelled (deadline %s)', scan.id, scan.deadline)
+    return {'cancelled': cancelled}

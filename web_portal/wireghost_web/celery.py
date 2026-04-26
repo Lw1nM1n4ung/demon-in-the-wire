@@ -18,6 +18,10 @@ app.conf.task_routes = {
 app.conf.beat_schedule = {
     'check-scheduled-scans': {
         'task': 'scanner.tasks.check_scheduled_scans',
-        'schedule': 60.0,  # every 60 seconds
+        'schedule': 60.0,
+    },
+    'enforce-scan-deadlines': {
+        'task': 'scanner.tasks.enforce_scan_deadlines',
+        'schedule': 60.0,
     },
 }

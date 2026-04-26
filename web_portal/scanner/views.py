@@ -708,11 +708,13 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
             scan.skip_screenshots = p.skip_screenshots
             scan.save()
 
-        from scanner.tasks import run_scan
+        from scanner.tasks import run_scan, _compute_deadline
+        deadline = _compute_deadline(schedule.stop_time) if schedule.stop_time else None
         task = run_scan.delay(str(scan.id))
         scan.celery_task_id = task.id
         scan.status = 'running'
-        scan.save(update_fields=['celery_task_id', 'status'])
+        scan.deadline = deadline
+        scan.save(update_fields=['celery_task_id', 'status', 'deadline'])
 
         from django.utils import timezone
         schedule.last_run = timezone.now()

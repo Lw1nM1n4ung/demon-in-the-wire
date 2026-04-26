@@ -183,6 +183,7 @@ class Scan(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     duration_seconds = models.IntegerField(default=0)
+    deadline = models.DateTimeField(null=True, blank=True)
 
     # Output
     output_dir = models.CharField(max_length=500, blank=True)
@@ -483,6 +484,7 @@ class ScheduledScan(models.Model):
     target = models.CharField(max_length=500)
     frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES)
     time = models.TimeField()
+    stop_time = models.TimeField(null=True, blank=True)
     scan_type = models.CharField(max_length=20, choices=Scan.SCAN_TYPE_CHOICES, default='full')
     policy = models.ForeignKey(ScanPolicy, on_delete=models.SET_NULL, null=True, blank=True)
     enabled = models.BooleanField(default=True)
