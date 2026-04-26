@@ -222,6 +222,14 @@ WG._settingsNotifications = function() {
     '<div style="display:flex;gap:8px;margin-top:12px;">' +
       '<button class="btn btn-primary btn-sm" onclick="WG._savePersonalTelegram()">Save DM settings</button>' +
       '<button class="btn btn-secondary btn-sm" onclick="WG._telegramTest(\'self\')">Send test to me</button>' +
+    '</div>' +
+    '<div style="border-top:1px solid var(--border-dim);margin-top:16px;padding-top:16px;">' +
+      '<div style="font-weight:600;color:var(--text-bright);margin-bottom:8px;">Bot Account Linking</div>' +
+      '<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:12px;">' +
+        'Generate a 6-digit code, then send <span class="mono">/link &lt;code&gt;</span> to the bot in your Telegram group to link your account.' +
+      '</div>' +
+      '<button class="btn btn-secondary btn-sm" id="tgLinkCodeBtn" onclick="WG._generateLinkCode()">Generate Link Code</button>' +
+      '<span id="tgLinkCodeResult" class="mono" style="margin-left:12px;color:var(--accent);font-size:0.9rem;"></span>' +
     '</div></div>';
 
   return '<div class="panel" style="max-width:820px;"><div class="panel-header"><div class="panel-title">Telegram Notifications</div></div>' +
@@ -294,6 +302,26 @@ WG._telegramTest = function(target) {
       WG.toast('Test message sent via Telegram.', 'success');
     } else {
       WG.toast((res && res.error) || 'Telegram test failed', 'error');
+    }
+  });
+};
+
+WG._generateLinkCode = function() {
+  var btn = document.getElementById('tgLinkCodeBtn');
+  var span = document.getElementById('tgLinkCodeResult');
+  if (btn) btn.disabled = true;
+  WG.api('/preferences/telegram-link/', { method: 'POST' }).then(function(res) {
+    if (res && res.code) {
+      if (span) span.textContent = res.code + '  (expires in 5 min)';
+      if (btn) btn.textContent = 'Code generated';
+      setTimeout(function() {
+        if (btn) { btn.textContent = 'Generate Link Code'; btn.disabled = false; }
+        if (span) span.textContent = '';
+      }, 300000);
+    } else {
+      if (span) span.textContent = '';
+      WG.toast((res && res.error) || 'Failed to generate code', 'error');
+      if (btn) { btn.textContent = 'Generate Link Code'; btn.disabled = false; }
     }
   });
 };
