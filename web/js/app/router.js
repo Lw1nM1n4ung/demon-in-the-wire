@@ -88,6 +88,7 @@ WG._matchPath = function(pathname) {
 };
 
 WG.navigate = function(page, params) {
+  if (WG.closeMobileNav) WG.closeMobileNav();
   var path = WG._routeToPath(page, params);
   if (location.pathname !== path) history.pushState({}, '', path);
   WG.render();
@@ -213,6 +214,7 @@ function _initEvents() {
 
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
+      if (WG.closeMobileNav) WG.closeMobileNav();
       document.querySelectorAll('.modal-overlay.active').forEach(function(m) { WG.closeModal(m.id); });
     }
     if (e.key === '/' && !e.target.matches('input,textarea,select')) {

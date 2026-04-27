@@ -106,12 +106,16 @@ WG._toggleThemeQuick = function() {
 };
 
 WG._updateThemeLabel = function(mode) {
-  var icons = { dark: '&#9790;', light: '&#9788;', cyberpunk: '&#9889;' };
+  var svgIcons = {
+    dark: '<svg class="udrop-icon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>',
+    light: '<svg class="udrop-icon" viewBox="0 0 24 24"><use href="#i-sun"/></svg>',
+    cyberpunk: '<svg class="udrop-icon" viewBox="0 0 24 24"><use href="#i-zap"/></svg>'
+  };
   var labels = { dark: 'Dark Mode', light: 'Light Mode', cyberpunk: 'Cyberpunk' };
   var icon = document.getElementById('themeIcon');
   var label = document.getElementById('themeLabel');
   var badge = document.getElementById('themeBadge');
-  if (icon) icon.innerHTML = icons[mode] || icons.dark;
+  if (icon) icon.innerHTML = svgIcons[mode] || svgIcons.dark;
   if (label) label.textContent = labels[mode] || labels.dark;
   if (badge) { badge.textContent = mode.toUpperCase(); badge.style.color = mode === 'cyberpunk' ? '#ff2d95' : ''; badge.style.background = mode === 'cyberpunk' ? 'rgba(255,45,149,0.15)' : ''; }
 };
@@ -119,6 +123,36 @@ WG._updateThemeLabel = function(mode) {
 WG._dropNav = function(page) {
   document.getElementById('userMenu').classList.remove('open');
   WG.navigate(page);
+};
+
+/* ── Mobile navigation drawer ── */
+WG.toggleMobileNav = function() {
+  var sidebar = document.querySelector('.sidebar');
+  if (sidebar.classList.contains('open')) WG.closeMobileNav();
+  else WG.openMobileNav();
+};
+
+WG.openMobileNav = function() {
+  var sidebar = document.querySelector('.sidebar');
+  var backdrop = document.getElementById('sidebarBackdrop');
+  var btn = document.getElementById('hamburger');
+  sidebar.classList.add('open');
+  backdrop.classList.add('visible');
+  btn.setAttribute('aria-expanded', 'true');
+  btn.setAttribute('aria-label', 'Close navigation');
+  document.body.style.overflow = 'hidden';
+};
+
+WG.closeMobileNav = function() {
+  var sidebar = document.querySelector('.sidebar');
+  var backdrop = document.getElementById('sidebarBackdrop');
+  var btn = document.getElementById('hamburger');
+  if (!sidebar || !sidebar.classList.contains('open')) return;
+  sidebar.classList.remove('open');
+  backdrop.classList.remove('visible');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.setAttribute('aria-label', 'Open navigation');
+  document.body.style.overflow = '';
 };
 
 /* Close dropdown on outside click */

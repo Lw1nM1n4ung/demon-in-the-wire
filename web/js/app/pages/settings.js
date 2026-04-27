@@ -102,17 +102,17 @@ WG._settingsTheme = function() {
       '<div><div class="form-label" style="margin-bottom:10px;">Mode</div>' +
       '<div style="display:flex;gap:10px;">' +
         '<div onclick="WG.setThemeMode(\'dark\');WG.switchSettingsTab(\'theme\')" style="cursor:pointer;flex:1;padding:16px;border-radius:var(--radius-lg);border:2px solid ' + (mode === 'dark' ? 'var(--accent)' : 'var(--border-soft)') + ';background:#0a0e17;text-align:center;transition:all 0.2s;">' +
-          '<div style="font-size:1.2rem;margin-bottom:4px;">&#9790;</div>' +
+          '<div style="margin-bottom:4px;"><svg style="width:20px;height:20px;fill:none;stroke:#e8ecf4;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;" viewBox="0 0 24 24"><use href="#i-moon"/></svg></div>' +
           '<div style="font-weight:700;color:#e8ecf4;font-size:0.85rem;">Dark</div>' +
           '<div style="font-size:0.68rem;color:#5a6478;margin-top:2px;">Tactical ops</div>' +
         '</div>' +
         '<div onclick="WG.setThemeMode(\'light\');WG.switchSettingsTab(\'theme\')" style="cursor:pointer;flex:1;padding:16px;border-radius:var(--radius-lg);border:2px solid ' + (mode === 'light' ? 'var(--accent)' : 'var(--border-soft)') + ';background:#f0f2f5;text-align:center;transition:all 0.2s;">' +
-          '<div style="font-size:1.2rem;margin-bottom:4px;">&#9788;</div>' +
+          '<div style="margin-bottom:4px;"><svg style="width:20px;height:20px;fill:none;stroke:#1a1d23;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;" viewBox="0 0 24 24"><use href="#i-sun"/></svg></div>' +
           '<div style="font-weight:700;color:#1a1d23;font-size:0.85rem;">Light</div>' +
           '<div style="font-size:0.68rem;color:#8892a4;margin-top:2px;">Clean daylight</div>' +
         '</div>' +
         '<div onclick="WG.setThemeMode(\'cyberpunk\');WG.switchSettingsTab(\'theme\')" style="cursor:pointer;flex:1;padding:16px;border-radius:var(--radius-lg);border:2px solid ' + (mode === 'cyberpunk' ? '#ff2d95' : 'var(--border-soft)') + ';background:#0a0012;text-align:center;transition:all 0.2s;">' +
-          '<div style="font-size:1.2rem;margin-bottom:4px;">&#9889;</div>' +
+          '<div style="margin-bottom:4px;"><svg style="width:20px;height:20px;fill:none;stroke:#ff2d95;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;" viewBox="0 0 24 24"><use href="#i-zap"/></svg></div>' +
           '<div style="font-weight:700;color:#ff2d95;font-size:0.85rem;text-shadow:0 0 8px rgba(255,45,149,0.5);">Cyberpunk</div>' +
           '<div style="font-size:0.68rem;color:#7b5ea0;margin-top:2px;">Neon overdrive</div>' +
         '</div>' +

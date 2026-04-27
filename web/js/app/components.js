@@ -42,7 +42,7 @@ WG.handleGlobalSearch = function(query) {
     html += '<div style="padding:8px 0 4px;font-family:var(--font-mono);font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);">Scans</div>';
     ms.forEach(function(s) {
       html += '<div class="activity-item" style="cursor:pointer;padding:8px 4px;border-radius:var(--radius-sm);" onclick="WG.closeModal(\'searchModal\');WG.navigate(\'scan\',{id:\'' + s.id + '\'})">' +
-        '<div class="activity-icon scan">&#8862;</div>' +
+        '<div class="activity-icon scan"><svg viewBox="0 0 24 24"><use href="#i-scan"/></svg></div>' +
         '<div class="activity-text"><strong>' + esc(s.name) + '</strong><p>' + esc(s.target) + '</p></div>' +
         '<span class="status-badge ' + s.status + '" style="font-size:0.6rem;"><span class="dot"></span> ' + s.status + '</span></div>';
     });
@@ -51,7 +51,7 @@ WG.handleGlobalSearch = function(query) {
     html += '<div style="padding:8px 0 4px;font-family:var(--font-mono);font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);">Hosts</div>';
     mh.forEach(function(h) {
       html += '<div class="activity-item" style="cursor:pointer;padding:8px 4px;border-radius:var(--radius-sm);" onclick="WG.closeModal(\'searchModal\');WG.navigate(\'host\',{id:\'' + h.id + '\'})">' +
-        '<div class="activity-icon host">&#9678;</div>' +
+        '<div class="activity-icon host"><svg viewBox="0 0 24 24"><use href="#i-server"/></svg></div>' +
         '<div class="activity-text"><strong>' + esc(h.ip) + '</strong><p>' + esc(h.hostname || 'No hostname') + '</p></div></div>';
     });
   }
@@ -59,7 +59,7 @@ WG.handleGlobalSearch = function(query) {
     html += '<div style="padding:8px 0 4px;font-family:var(--font-mono);font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);">Findings</div>';
     mf.forEach(function(f) {
       html += '<div class="activity-item" style="cursor:pointer;padding:8px 4px;border-radius:var(--radius-sm);" onclick="WG.closeModal(\'searchModal\');WG.navigate(\'finding\',{id:\'' + f.id + '\'})">' +
-        '<div class="activity-icon vuln">&#9888;</div>' +
+        '<div class="activity-icon vuln"><svg viewBox="0 0 24 24"><use href="#i-alert"/></svg></div>' +
         '<div class="activity-text"><strong>' + esc(f.title) + '</strong><p>' + esc(f.host_ip) + ':' + f.port + '</p></div>' +
         '<span class="sev-badge ' + f.severity + '" style="font-size:0.6rem;">' + f.severity + '</span></div>';
     });
