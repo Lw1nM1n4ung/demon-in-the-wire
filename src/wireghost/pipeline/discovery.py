@@ -149,7 +149,19 @@ async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
         )
 
     live_ips: set[str] = set()
-    semaphore = asyncio.Semaphore(config.parallelism)
+
+    # Cap discovery parallelism for large targets — scanning 256 /24 subnets
+    # with 10 concurrent nmap+fping processes overwhelms the scanner and network.
+    discovery_parallelism = config.parallelism
+    if total >= 256:
+        discovery_parallelism = min(discovery_parallelism, 2)
+        if discovery_parallelism < config.parallelism:
+            log.info(
+                "Large target (>= /16) — capping discovery parallelism to %d",
+                discovery_parallelism,
+            )
+
+    semaphore = asyncio.Semaphore(discovery_parallelism)
 
     # Scan all subnets concurrently (semaphore-limited)
     tasks = [
