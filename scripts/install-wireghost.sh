@@ -141,14 +141,18 @@ clone_repo() {
     if [ -d "${INSTALL_DIR}/.git" ]; then
         info "Existing installation found at ${INSTALL_DIR} — updating..."
         cd "$INSTALL_DIR"
-        git fetch origin "$BRANCH" 2>/dev/null
-        git checkout "$BRANCH" 2>/dev/null
-        git pull origin "$BRANCH" 2>/dev/null
+        git fetch origin "$BRANCH" || die "git fetch failed — check network connectivity to GitHub"
+        git checkout "$BRANCH" 2>/dev/null || true
+        git pull origin "$BRANCH" || die "git pull failed — check network connectivity to GitHub"
         ok "Repository updated"
     else
         info "Cloning Wire_Ghost to ${INSTALL_DIR}..."
         mkdir -p "$(dirname "$INSTALL_DIR")"
-        git clone -b "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR" 2>/dev/null
+        if [ -d "$INSTALL_DIR" ] && [ "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
+            die "${INSTALL_DIR} exists and is not empty. Remove it first or choose a different directory."
+        fi
+        git clone -b "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR" || \
+            die "git clone failed — check network connectivity to GitHub"
         ok "Repository cloned"
     fi
     cd "$INSTALL_DIR"
