@@ -22,7 +22,7 @@ INSTALL_DIR="/opt/wireghost"
 
 # ── Colours ──────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 
 info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
 ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*"; }
@@ -39,6 +39,18 @@ banner() {
 ART
     printf "${NC}\n"
     printf "  ${BOLD}Remote Installer${NC}\n\n"
+}
+
+# ── Progress bar ────────────────────────────────────────────────────
+_TOTAL=3; _STEP=0
+step() {
+    _STEP=$((_STEP + 1))
+    local pct=$((_STEP * 100 / _TOTAL))
+    local filled=$((pct * 30 / 100)) empty=$((30 - filled))
+    printf "\n  ${GREEN}%s${DIM}%s${NC}  ${BOLD}%d/%d${NC}  %s\n\n" \
+        "$(printf '%*s' "$filled" '' | tr ' ' '█')" \
+        "$(printf '%*s' "$empty" '' | tr ' ' '░')" \
+        "$_STEP" "$_TOTAL" "$1"
 }
 
 # ── Root check ───────────────────────────────────────────────────────
@@ -155,11 +167,15 @@ prompt_install_dir() {
 # ══════════════════════════════════════════════════════════════════════
 banner
 check_root
+
+step "Checking system requirements"
 check_prereqs
+
+step "Cloning Wire_Ghost repository"
 prompt_install_dir
 clone_repo
 
-printf "\n"
+step "Launching installer"
 info "Handing off to scripts/install.sh..."
 printf "═══════════════════════════════════════════════════════\n\n"
 

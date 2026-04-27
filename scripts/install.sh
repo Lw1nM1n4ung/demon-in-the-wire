@@ -30,6 +30,18 @@ ART
     printf "  ${BOLD}On-Premises Installer${NC}\n\n"
 }
 
+# ── Progress bar ────────────────────────────────────────────────────
+_TOTAL=7; _STEP=0
+step() {
+    _STEP=$((_STEP + 1))
+    local pct=$((_STEP * 100 / _TOTAL))
+    local filled=$((pct * 30 / 100)) empty=$((30 - filled))
+    printf "\n  ${GREEN}%s${DIM}%s${NC}  ${BOLD}%d/%d${NC}  %s\n\n" \
+        "$(printf '%*s' "$filled" '' | tr ' ' '█')" \
+        "$(printf '%*s' "$empty" '' | tr ' ' '░')" \
+        "$_STEP" "$_TOTAL" "$1"
+}
+
 # ── Prerequisite checks ─────────────────────────────────────────────
 check_prereqs() {
     info "Checking prerequisites..."
@@ -431,9 +443,11 @@ create_dirs() {
 
 # ── Build and start ──────────────────────────────────────────────────
 build_and_start() {
-    info "Building containers (this may take several minutes on first run)..."
+    step "Building containers"
+    info "This may take several minutes on first run..."
     docker compose build --pull 2>&1 | tail -5
 
+    step "Starting services"
     info "Starting Wire_Ghost stack..."
     docker compose up -d
 
@@ -526,12 +540,24 @@ print_summary() {
 # Main
 # ══════════════════════════════════════════════════════════════════════
 banner
+
+step "Checking prerequisites"
 check_prereqs
+
+step "Configuring environment"
 collect_all_config
+
+step "Generating TLS certificates"
 generate_certs
+
+step "Writing configuration"
 render_nginx
 write_env
 create_dirs
+
 build_and_start
+
+step "Verifying health"
 wait_for_health
+
 print_summary
