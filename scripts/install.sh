@@ -43,13 +43,29 @@ step() {
         "$_STEP" "$_TOTAL" "$1"
 }
 
+# ── WSL detection ───────────────────────────────────────────────────
+_IS_WSL=false
+detect_wsl() {
+    if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null || \
+       [ -n "${WSL_DISTRO_NAME:-}" ] || \
+       [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
+        _IS_WSL=true
+        info "WSL environment detected"
+    fi
+}
+
 # ── Prerequisite checks ─────────────────────────────────────────────
 check_prereqs() {
     info "Checking prerequisites..."
 
     [ "$(id -u)" -eq 0 ] || die "This installer must be run as root (sudo bash install.sh)"
 
-    command -v docker >/dev/null 2>&1 || die "Docker is not installed. Install Docker first: https://docs.docker.com/engine/install/"
+    if ! command -v docker >/dev/null 2>&1; then
+        if [ "$_IS_WSL" = true ]; then
+            die "Docker not found. On WSL, install Docker Desktop and enable WSL Integration: Settings → Resources → WSL Integration"
+        fi
+        die "Docker is not installed. Install Docker first: https://docs.docker.com/engine/install/"
+    fi
 
     DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "0")
     DOCKER_MAJOR=$(echo "$DOCKER_VERSION" | cut -d. -f1)
@@ -197,6 +213,10 @@ collect_all_config() {
 
     # Auto-detect host IP as fallback default
     _DETECTED_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [ "$_IS_WSL" = true ]; then
+        _DETECTED_IP="localhost"
+        info "WSL: defaulting to localhost (Windows auto-forwards ports to WSL2)"
+    fi
     _HOST_DEFAULT="${WIREGHOST_HOST:-}"
     if [ -z "$_HOST_DEFAULT" ] || [ "$_HOST_DEFAULT" = "localhost" ] || [ "$_HOST_DEFAULT" = "*" ]; then
         _HOST_DEFAULT="${_DETECTED_IP:-localhost}"
@@ -207,7 +227,7 @@ collect_all_config() {
 
     # ── Non-interactive mode: accept all defaults ────────────────────
     if [ ! -t 0 ]; then
-        if [ "$WIREGHOST_HOST" = "localhost" ]; then
+        if [ "$WIREGHOST_HOST" = "localhost" ] && [ "$_IS_WSL" != true ]; then
             die "Non-interactive mode requires WIREGHOST_HOST to be set in .env or environment"
         fi
         _compute_derived
@@ -525,6 +545,12 @@ print_summary() {
     printf "  Open the Setup URL in your browser to create the admin account.\n"
     printf "  (Accept the self-signed certificate warning if prompted.)\n"
     printf "\n"
+    if [ "$_IS_WSL" = true ]; then
+        printf "  ${YELLOW}${BOLD}WSL:${NC} Open the URL above in your Windows browser.\n"
+        printf "  Windows auto-forwards localhost ports to WSL2.\n"
+        printf "  For external access, set up Windows port forwarding.\n"
+        printf "\n"
+    fi
     printf "  ${BOLD}Management:${NC}\n"
     printf "    ./scripts/wg-ctl status          Show service health\n"
     printf "    ./scripts/wg-ctl backup          Create full backup\n"
@@ -543,6 +569,7 @@ print_summary() {
 banner
 
 step "Checking prerequisites"
+detect_wsl
 check_prereqs
 
 step "Configuring environment"

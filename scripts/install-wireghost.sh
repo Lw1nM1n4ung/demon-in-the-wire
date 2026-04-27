@@ -54,6 +54,17 @@ step() {
         "$_STEP" "$_TOTAL" "$1"
 }
 
+# ── WSL detection ───────────────────────────────────────────────────
+_IS_WSL=false
+detect_wsl() {
+    if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null || \
+       [ -n "${WSL_DISTRO_NAME:-}" ] || \
+       [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
+        _IS_WSL=true
+        info "WSL environment detected"
+    fi
+}
+
 # ── Root check ───────────────────────────────────────────────────────
 check_root() {
     [ "$(id -u)" -eq 0 ] || die "Run as root: sudo bash install-wireghost.sh"
@@ -99,6 +110,21 @@ check_prereqs() {
 
 # ── Auto-install Docker ──────────────────────────────────────────────
 install_docker() {
+    if [ "$_IS_WSL" = true ]; then
+        warn "On WSL, Docker Desktop with WSL integration is recommended:"
+        warn "  1. Install Docker Desktop for Windows"
+        warn "  2. Settings → Resources → WSL Integration → enable your distro"
+        if [ -t 0 ]; then
+            printf "  Install Docker CE inside WSL instead? [y/N] "
+            read -r _wsl_docker
+            if ! [[ "$_wsl_docker" =~ ^[Yy] ]]; then
+                die "Install Docker Desktop for Windows, then re-run this script"
+            fi
+        else
+            die "Docker not available — install Docker Desktop with WSL integration"
+        fi
+    fi
+
     if [ -f /etc/debian_version ]; then
         apt-get update -qq
         apt-get install -y -qq ca-certificates curl gnupg >/dev/null 2>&1
@@ -165,6 +191,10 @@ prompt_install_dir() {
         read -r CUSTOM_DIR
         [ -n "$CUSTOM_DIR" ] && INSTALL_DIR="$CUSTOM_DIR"
     fi
+    if [ "$_IS_WSL" = true ] && [[ "$INSTALL_DIR" == /mnt/* ]]; then
+        warn "Installing on a Windows mount is slow and may break file permissions"
+        warn "Recommended: use a WSL-native path (e.g., /opt/wireghost)"
+    fi
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -174,6 +204,7 @@ banner
 check_root
 
 step "Checking system requirements"
+detect_wsl
 check_prereqs
 
 step "Cloning Wire_Ghost repository"
