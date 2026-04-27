@@ -26,6 +26,12 @@ def main_menu_kb(role: str = 'viewer') -> InlineKeyboardMarkup:
             InlineKeyboardButton('🏥 Health', callback_data='hl'),
             InlineKeyboardButton('⚙️ Config', callback_data='cf'),
         ])
+        rows.append([
+            InlineKeyboardButton('👥 Users', callback_data='ul:0'),
+            InlineKeyboardButton('❓ Help', callback_data='hp'),
+        ])
+    else:
+        rows.append([InlineKeyboardButton('❓ Help', callback_data='hp')])
     return InlineKeyboardMarkup(rows)
 
 
@@ -89,11 +95,16 @@ def findings_list_kb(page: int, total_pages: int, severity: str = 'all',
     return InlineKeyboardMarkup(rows)
 
 
-def asset_list_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
-    rows = [
-        _pagination_row('al', page, total_pages),
-        [InlineKeyboardButton('⬅ Menu', callback_data='mn')],
-    ]
+def asset_list_kb(assets: list, page: int, total_pages: int) -> InlineKeyboardMarkup:
+    rows = []
+    from scanner.bot.formatting import short_id
+    for aid, ip, hostname, *_ in assets:
+        label = f'⚠️ {ip}'
+        if hostname:
+            label += f' ({hostname[:20]})'
+        rows.append([InlineKeyboardButton(label, callback_data=f'ad:{short_id(aid)}')])
+    rows.append(_pagination_row('al', page, total_pages))
+    rows.append([InlineKeyboardButton('⬅ Menu', callback_data='mn')])
     return InlineKeyboardMarkup(rows)
 
 

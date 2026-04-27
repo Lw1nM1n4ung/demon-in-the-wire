@@ -5,7 +5,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from scanner.bot.formatting import esc, severity_line, time_ago
 from scanner.bot.menus import main_menu_kb
-from scanner.models import Finding, Scan, ScheduledScan
+from scanner.models import Finding, Scan, ScheduledScan, User
 
 HTML = 'HTML'
 
@@ -74,4 +74,48 @@ async def _dashboard(query, user):
         [InlineKeyboardButton('⬅ Menu', callback_data='mn')],
     ])
 
+    await query.edit_message_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
+
+
+async def handle_help(query, user, rest, context):
+    from asgiref.sync import sync_to_async
+
+    lines = [
+        '🛡 <b>Wire_Ghost Bot</b>',
+        '━━━━━━━━━━━━━━━━━━━━━━━━━',
+        '',
+        '<b>📊 Information</b>',
+        '  📊 Dashboard — live stats overview',
+        '  🔍 Scans — browse &amp; manage scans',
+        '  🛡 Findings — filter by severity',
+        '  💻 Assets — top assets by risk',
+        '',
+        '<b>🔗 Account</b>',
+        '  <code>/link &lt;code&gt;</code> — Link Telegram account',
+        '  <code>/unlink</code> — Unlink account',
+    ]
+
+    if user:
+        has_write = await sync_to_async(user.has_permission)('scan:write')
+        if has_write:
+            lines.extend([
+                '',
+                '<b>⚡ Operations</b>',
+                '  ➕ New Scan — launch from menu',
+                '  📅 Schedules — manage recurring scans',
+                '  📄 Report — generate from scan detail',
+            ])
+
+    if user and user.role == 'owner':
+        lines.extend([
+            '',
+            '<b>👑 Administration</b>',
+            '  👥 Users — accounts &amp; link status',
+            '  🏥 Health — system resources',
+            '  ⚙️ Config — site configuration',
+        ])
+
+    lines.extend(['', '<i>Navigate everything from the menu buttons above.</i>'])
+
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton('⬅ Menu', callback_data='mn')]])
     await query.edit_message_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)

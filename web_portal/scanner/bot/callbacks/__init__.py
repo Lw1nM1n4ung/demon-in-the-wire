@@ -22,6 +22,8 @@ PERMS = {
     'fl': 'scan:read',
     'al': 'scan:read', 'ad': 'scan:read',
     'cl': 'scan:write', 'cd': 'scan:write', 'ct': 'scan:write', 'cr': 'scan:write',
+    'ul': 'user:manage',
+    'hp': None,
     'hl': 'site:config', 'cf': 'site:config',
     'noop': None,
 }
@@ -29,7 +31,7 @@ PERMS = {
 
 def _build_routes():
     from scanner.bot.callbacks import (
-        assets, findings, menu, photos, scans, schedules, system,
+        assets, findings, menu, photos, scans, schedules, system, users,
     )
     return {
         'mn': menu.handle,
@@ -48,6 +50,8 @@ def _build_routes():
         'cd': schedules.handle_detail,
         'ct': schedules.handle_toggle,
         'cr': schedules.handle_run_now,
+        'ul': users.handle_list,
+        'hp': menu.handle_help,
         'hl': system.handle_health,
         'cf': system.handle_config,
     }

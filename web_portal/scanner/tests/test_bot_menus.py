@@ -79,7 +79,10 @@ class TestCallbackDataSize(TestCase):
         self._assert_all_under_64(confirm_cancel_kb('a1b2c3d4'), 'confirm_cancel')
 
     def test_asset_list(self):
-        self._assert_all_under_64(asset_list_kb(0, 5), 'asset_list')
+        assets = [
+            ('a1b2c3d4-0000-0000-0000-000000000000', '10.0.0.1', 'web.local', 'http', 85, 3, 1, 1, None),
+        ]
+        self._assert_all_under_64(asset_list_kb(assets, 0, 5), 'asset_list')
 
     def test_asset_detail(self):
         self._assert_all_under_64(asset_detail_kb('a1b2c3d4'), 'asset_detail')
@@ -87,17 +90,17 @@ class TestCallbackDataSize(TestCase):
 
 class TestMainMenuRoles(TestCase):
 
-    def test_viewer_gets_2_rows(self):
+    def test_viewer_gets_3_rows(self):
         kb = main_menu_kb('viewer')
-        self.assertEqual(len(kb.inline_keyboard), 2)
-
-    def test_engineer_gets_3_rows(self):
-        kb = main_menu_kb('engineer')
         self.assertEqual(len(kb.inline_keyboard), 3)
 
-    def test_owner_gets_4_rows(self):
-        kb = main_menu_kb('owner')
+    def test_engineer_gets_4_rows(self):
+        kb = main_menu_kb('engineer')
         self.assertEqual(len(kb.inline_keyboard), 4)
+
+    def test_owner_gets_5_rows(self):
+        kb = main_menu_kb('owner')
+        self.assertEqual(len(kb.inline_keyboard), 5)
 
     def test_owner_has_health_button(self):
         kb = main_menu_kb('owner')
@@ -105,12 +108,24 @@ class TestMainMenuRoles(TestCase):
         self.assertIn('hl', all_data)
         self.assertIn('cf', all_data)
 
+    def test_owner_has_users_button(self):
+        kb = main_menu_kb('owner')
+        all_data = _all_callback_data(kb)
+        self.assertIn('ul:0', all_data)
+
+    def test_all_roles_have_help(self):
+        for role in ('viewer', 'engineer', 'owner'):
+            kb = main_menu_kb(role)
+            all_data = _all_callback_data(kb)
+            self.assertIn('hp', all_data, f'{role} missing help button')
+
     def test_viewer_no_admin_buttons(self):
         kb = main_menu_kb('viewer')
         all_data = _all_callback_data(kb)
         self.assertNotIn('hl', all_data)
         self.assertNotIn('cf', all_data)
         self.assertNotIn('cl:0', all_data)
+        self.assertNotIn('ul:0', all_data)
 
 
 class TestScanDetailKb(TestCase):
@@ -156,30 +171,38 @@ class TestScanDetailKb(TestCase):
 
 class TestPagination(TestCase):
 
+    SAMPLE_ASSETS = [
+        ('a1b2c3d4-0000-0000-0000-000000000000', '10.0.0.1', 'web.local', 'http', 85, 3, 1, 1, None),
+    ]
+
     def test_first_page_no_prev(self):
-        kb = asset_list_kb(0, 5)
+        kb = asset_list_kb(self.SAMPLE_ASSETS, 0, 5)
         all_data = _all_callback_data(kb)
-        prev_buttons = [d for d in all_data if d != 'noop' and d != 'mn' and ':' in d and not d.startswith('al')]
         for d in all_data:
             if d.startswith('al:'):
                 page_num = int(d.split(':')[1])
                 self.assertGreaterEqual(page_num, 0)
 
     def test_last_page_no_next(self):
-        kb = asset_list_kb(4, 5)
+        kb = asset_list_kb(self.SAMPLE_ASSETS, 4, 5)
         all_data = _all_callback_data(kb)
         self.assertNotIn('al:5', all_data)
 
     def test_middle_page_has_both(self):
-        kb = asset_list_kb(2, 5)
+        kb = asset_list_kb(self.SAMPLE_ASSETS, 2, 5)
         all_data = _all_callback_data(kb)
         self.assertIn('al:1', all_data)
         self.assertIn('al:3', all_data)
 
     def test_single_page_no_nav(self):
-        kb = asset_list_kb(0, 1)
+        kb = asset_list_kb(self.SAMPLE_ASSETS, 0, 1)
         all_data = _all_callback_data(kb)
         self.assertNotIn('al:1', all_data)
+
+    def test_asset_rows_are_clickable(self):
+        kb = asset_list_kb(self.SAMPLE_ASSETS, 0, 1)
+        all_data = _all_callback_data(kb)
+        self.assertTrue(any(d.startswith('ad:') for d in all_data))
 
 
 class TestPhotoListKb(TestCase):

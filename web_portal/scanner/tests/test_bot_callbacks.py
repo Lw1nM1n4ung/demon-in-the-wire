@@ -111,7 +111,7 @@ class TestPermsRoutesConsistency(TestCase):
             self.assertIn(entity, routes, f'PERMS entity {entity!r} missing from ROUTES dict')
 
     def test_perm_values_are_valid(self):
-        valid_perms = {None, 'scan:read', 'scan:write', 'site:config', 'user:manage'}
+        valid_perms = {None, 'scan:read', 'scan:write', 'site:config', 'user:manage', 'user:manage'}
         for entity, perm in PERMS.items():
             self.assertIn(perm, valid_perms, f'Invalid perm {perm!r} for entity {entity!r}')
 

@@ -45,7 +45,7 @@ async def handle_list(query, user, rest, context):
             f'   {bar} {risk}% │ {sev_str} │ {time_ago(last_seen)}'
         )
 
-    kb = asset_list_kb(page, total_pages)
+    kb = asset_list_kb(rows, page, total_pages)
     await query.edit_message_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
