@@ -88,7 +88,7 @@ check_prereqs() {
 
 # ── Generate a cryptographic random string ───────────────────────────
 gen_secret() {
-    openssl rand -base64 48 | tr -d '\n/+=' | head -c 64
+    openssl rand -base64 96 | tr -d '\n/+=' | head -c 64
 }
 
 # ── Prompt helper: show default, read input, keep default if empty ───
@@ -99,9 +99,9 @@ prompt_var() {
     printf "  %-22s ${DIM}[%s]${NC}: " "$label" "$current"
     read -r _input
     if [ -n "$_input" ]; then
-        eval "$varname=\"\$_input\""
+        printf -v "$varname" '%s' "$_input"
     else
-        eval "$varname=\"\$current\""
+        printf -v "$varname" '%s' "$current"
     fi
 }
 
@@ -113,9 +113,9 @@ prompt_secret() {
     printf "  %-22s ${DIM}[auto: %s]${NC}: " "$label" "$masked"
     read -r _input
     if [ -n "$_input" ]; then
-        eval "$varname=\"\$_input\""
+        printf -v "$varname" '%s' "$_input"
     else
-        eval "$varname=\"\$current\""
+        printf -v "$varname" '%s' "$current"
     fi
 }
 
@@ -391,14 +391,12 @@ write_env() {
     if [ "$UPGRADE_MODE" = true ]; then
         info "Updating .env with configured values..."
 
-        # Update every variable — sed for existing keys, append for missing
         _update_env_var() {
             local key="$1" val="$2"
             if grep -q "^${key}=" .env; then
-                sed -i "s|^${key}=.*|${key}=${val}|" .env
-            else
-                echo "${key}=${val}" >> .env
+                { grep -v "^${key}=" .env || true; } > .env.tmp && mv .env.tmp .env
             fi
+            printf '%s=%s\n' "$key" "$val" >> .env
         }
 
         _update_env_var WIREGHOST_HOST       "$WIREGHOST_HOST"

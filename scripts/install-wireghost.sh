@@ -189,7 +189,10 @@ prompt_install_dir() {
     if [ -t 0 ]; then
         printf "\n${BOLD}Install directory${NC} [${INSTALL_DIR}]: "
         read -r CUSTOM_DIR
-        [ -n "$CUSTOM_DIR" ] && INSTALL_DIR="$CUSTOM_DIR"
+        if [ -n "$CUSTOM_DIR" ]; then
+            [[ "$CUSTOM_DIR" =~ ^/ ]] || die "Install directory must be an absolute path (starts with /)"
+            INSTALL_DIR="$CUSTOM_DIR"
+        fi
     fi
     if [ "$_IS_WSL" = true ] && [[ "$INSTALL_DIR" == /mnt/* ]]; then
         warn "Installing on a Windows mount is slow and may break file permissions"
