@@ -56,6 +56,7 @@ services:
   # ══════════════════════════════════════
 
   api:
+    image: callmedemon/wireghost:web
     build:
       context: .
       dockerfile: web_portal/Dockerfile.web
@@ -101,6 +102,7 @@ services:
           cpus: "1.0"
 
   worker:
+    image: callmedemon/wireghost:worker
     build:
       context: .
       dockerfile: web_portal/Dockerfile
@@ -125,6 +127,7 @@ services:
           cpus: "2.0"
 
   beat:
+    image: callmedemon/wireghost:web
     build:
       context: .
       dockerfile: web_portal/Dockerfile.web
@@ -148,7 +151,10 @@ services:
           cpus: "0.5"
 
   bot:
-    build: { context: ., dockerfile: web_portal/Dockerfile.web }
+    image: callmedemon/wireghost:web
+    build:
+      context: .
+      dockerfile: web_portal/Dockerfile.web
     restart: unless-stopped
     user: "1000:1000"
     networks: [wireghost_net]
