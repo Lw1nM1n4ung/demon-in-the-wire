@@ -144,6 +144,7 @@ DATABASES = {
         'PASSWORD': os.environ.get('MYSQL_PASSWORD', 'wireghost_pass'),
         'HOST': os.environ.get('MYSQL_HOST', '127.0.0.1'),
         'PORT': os.environ.get('MYSQL_PORT', '3306'),
+        'CONN_MAX_AGE': 600,
     }
 }
 

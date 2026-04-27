@@ -1,3 +1,4 @@
+from django.db.models import Count
 from django.http import FileResponse, Http404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
@@ -181,7 +182,8 @@ class ScanViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def hosts(self, request, pk=None):
         scan = self.get_object()
-        serializer = HostListSerializer(scan.hosts.all(), many=True)
+        qs = scan.hosts.annotate(screenshot_count=Count('screenshots')).prefetch_related('screenshots')
+        serializer = HostListSerializer(qs, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
@@ -284,6 +286,12 @@ class HostViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             return HostListSerializer
         return HostSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action == 'list':
+            qs = qs.annotate(screenshot_count=Count('screenshots')).prefetch_related('screenshots')
+        return qs
 
 
 @api_view(['GET'])

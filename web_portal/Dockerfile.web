@@ -1,0 +1,26 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc default-libmysqlclient-dev pkg-config \
+    && pip install --no-cache-dir --upgrade pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY web_portal/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && apt-get update && apt-get purge -y gcc && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY web_portal/ .
+COPY src/ /app/src/
+
+RUN groupadd -g 1000 appuser && useradd -u 1000 -g 1000 -m -s /bin/sh appuser \
+    && mkdir -p /data/output /data/assets /app/logs \
+    && chown -R appuser:appuser /data /app/logs
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app:/app/src
+
+EXPOSE 8000
+USER appuser

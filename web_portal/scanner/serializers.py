@@ -67,7 +67,7 @@ class HostSerializer(serializers.ModelSerializer):
 
 
 class HostListSerializer(serializers.ModelSerializer):
-    screenshot_count = serializers.IntegerField(source='screenshots.count', read_only=True)
+    screenshot_count = serializers.IntegerField(read_only=True)
     thumbnail_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -75,7 +75,7 @@ class HostListSerializer(serializers.ModelSerializer):
         fields = ['id', 'ip', 'hostname', 'os', 'ports_count', 'findings_count', 'scan', 'screenshot_count', 'thumbnail_url']
 
     def get_thumbnail_url(self, obj):
-        first = obj.screenshots.first()
+        first = next(iter(obj.screenshots.all()), None)
         return f'/api/screenshots/{first.id}/image/' if first else None
 
 

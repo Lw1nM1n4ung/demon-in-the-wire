@@ -58,7 +58,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: web_portal/Dockerfile
+      dockerfile: web_portal/Dockerfile.web
     restart: unless-stopped
     user: "1000:1000"
     networks: [wireghost_net]
@@ -91,7 +91,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["sh", "-c", "python manage.py migrate --noinput && gunicorn wireghost_web.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --forwarded-allow-ips='*'"]
+    command: ["sh", "-c", "python manage.py migrate --noinput && gunicorn wireghost_web.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 60 --max-requests 1000 --max-requests-jitter 100 --forwarded-allow-ips='*'"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     deploy:
@@ -114,7 +114,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A wireghost_web worker -l info -c 2 -Q scans,reports --logfile=/app/logs/celery-worker.log
+    command: celery -A wireghost_web worker -l info -c 4 --prefetch-multiplier 1 -Q scans,reports --logfile=/app/logs/celery-worker.log
     cap_drop: [ALL]
     cap_add: [NET_RAW, NET_ADMIN, CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
@@ -127,7 +127,7 @@ services:
   beat:
     build:
       context: .
-      dockerfile: web_portal/Dockerfile
+      dockerfile: web_portal/Dockerfile.web
     restart: unless-stopped
     user: "1000:1000"
     networks: [wireghost_net]
@@ -138,7 +138,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A wireghost_web beat -l info --logfile=/app/logs/celery-beat.log
+    command: celery -A wireghost_web beat -l info --schedule=/app/logs/celerybeat-schedule --logfile=/app/logs/celery-beat.log
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     deploy:
@@ -148,7 +148,7 @@ services:
           cpus: "0.5"
 
   bot:
-    build: { context: ., dockerfile: web_portal/Dockerfile }
+    build: { context: ., dockerfile: web_portal/Dockerfile.web }
     restart: unless-stopped
     user: "1000:1000"
     networks: [wireghost_net]
