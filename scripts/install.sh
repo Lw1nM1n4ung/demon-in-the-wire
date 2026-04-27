@@ -35,7 +35,8 @@ _TOTAL=7; _STEP=0
 step() {
     _STEP=$((_STEP + 1))
     local pct=$((_STEP * 100 / _TOTAL))
-    local filled=$((pct * 30 / 100)) empty=$((30 - filled))
+    local filled=$((pct * 30 / 100))
+    local empty=$((30 - filled))
     printf "\n  ${GREEN}%s${DIM}%s${NC}  ${BOLD}%d/%d${NC}  %s\n\n" \
         "$(printf '%*s' "$filled" '' | tr ' ' '█')" \
         "$(printf '%*s' "$empty" '' | tr ' ' '░')" \
