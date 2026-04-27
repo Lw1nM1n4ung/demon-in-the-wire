@@ -301,7 +301,7 @@ def screenshot_image(request, screenshot_id):
         return Response({'error': 'Not authorized'}, status=403)
     try:
         ss = DBScreenshot.objects.get(id=screenshot_id)
-    except DBScreenshot.DoesNotExist:
+    except (DBScreenshot.DoesNotExist, ValueError):
         raise Http404
 
     from pathlib import Path
@@ -311,14 +311,13 @@ def screenshot_image(request, screenshot_id):
     output_root = Path(scan_dir)
     img_path = (output_root / ss.filename).resolve()
 
-    if not str(img_path).startswith(str(output_root.resolve())):
+    if not img_path.is_relative_to(output_root.resolve()):
         raise Http404
     if not img_path.exists():
         raise Http404
 
-    response = FileResponse(open(img_path, 'rb'), content_type='image/png')
-    response['Cache-Control'] = 'private, max-age=86400'
-    return response
+    return FileResponse(img_path.open('rb'), content_type='image/png',
+                        headers={'Cache-Control': 'private, max-age=86400'})
 
 
 @api_view(['GET'])
@@ -423,7 +422,7 @@ class FindingViewSet(viewsets.ReadOnlyModelViewSet):
 @api_view(['GET'])
 def dashboard_stats(request):
     """Attack Surface Management roll-up for the main dashboard."""
-    if not request.user.has_permission('dashboard:view'):
+    if not request.user.is_authenticated or not request.user.has_permission('dashboard:view'):
         return Response({'error': 'Not authorized'}, status=403)
 
     from datetime import timedelta
@@ -526,7 +525,7 @@ def download_report(request, report_id):
     """Download a report file. Requires staff or scan ownership."""
     try:
         report = Report.objects.get(id=report_id)
-    except Report.DoesNotExist:
+    except (Report.DoesNotExist, ValueError):
         raise Http404
 
     if not request.user.has_permission('report:download'):
@@ -536,8 +535,8 @@ def download_report(request, report_id):
     path = Path(report.file_path)
 
     # Verify path stays within allowed directory
-    allowed_dir = '/data/output'
-    if not str(path.resolve()).startswith(allowed_dir):
+    allowed_dir = Path('/data/output')
+    if not path.resolve().is_relative_to(allowed_dir):
         raise Http404
 
     if not path.exists():
@@ -551,7 +550,7 @@ def download_report(request, report_id):
     }
 
     return FileResponse(
-        open(path, 'rb'),
+        path.open('rb'),
         content_type=content_types.get(report.format, 'application/octet-stream'),
         as_attachment=True,
         filename=path.name,
@@ -636,7 +635,7 @@ def upload_logo(request):
     logo_path = os.path.join(logo_dir, safe_name)
 
     # Verify the resolved path stays within logo_dir
-    if not os.path.realpath(logo_path).startswith(os.path.realpath(logo_dir)):
+    if not Path(logo_path).resolve().is_relative_to(Path(logo_dir).resolve()):
         return Response({'error': 'Invalid file path'}, status=400)
 
     with open(logo_path, 'wb+') as f:

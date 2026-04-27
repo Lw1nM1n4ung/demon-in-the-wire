@@ -15,6 +15,7 @@ from scanner.models import SiteConfig, UserPreference, AuditLog
 import re
 import json
 import secrets
+from pathlib import Path
 
 class InputValidationError(Exception):
     """Raised when whitelist validation fails."""
@@ -175,7 +176,7 @@ def auth_user_create(request):
         username = _wl(request.data.get('username', '').strip(), 'username', 150)
         email = _wl(request.data.get('email', '').strip(), 'email', 254)
         name = _wl(request.data.get('name', '').strip(), 'name', 150)
-    except (InputValidationError, Exception) as e:
+    except InputValidationError as e:
         return Response({'error': str(e)}, status=400)
     password = request.data.get('password', '')
     role = request.data.get('role', 'viewer')
@@ -233,7 +234,7 @@ def auth_user_update(request, user_id):
             user.email = _wl(request.data['email'], 'email', 254)
         if 'username' in request.data:
             new_username = _wl(request.data['username'].strip(), 'username', 150)
-    except (InputValidationError, Exception) as e:
+    except InputValidationError as e:
         return Response({'error': str(e)}, status=400)
     if 'username' in request.data:
         if new_username != user.username and User.objects.filter(username=new_username).exists():
@@ -409,7 +410,7 @@ def setup_admin(request):
         username = _wl(request.data.get('username', '').strip(), 'username', 150)
         email = _wl(request.data.get('email', '').strip(), 'email', 254)
         name = _wl(request.data.get('name', '').strip(), 'name', 150)
-    except (InputValidationError, Exception) as e:
+    except InputValidationError as e:
         return Response({'error': str(e)}, status=400)
     password = request.data.get('password', '')
 
@@ -430,21 +431,24 @@ def setup_admin(request):
     except Exception as e:
         return Response({'error': '; '.join(e.messages)}, status=400)
 
-    parts = name.split(' ', 1) if name else [username, '']
-    user = User.objects.create_superuser(
-        username=username, password=password, email=email,
-        first_name=parts[0], last_name=parts[1] if len(parts) > 1 else '',
-    )
-    user.role = 'owner'
-    user.save()
+    if User.objects.filter(role='owner').exists():
+        return Response({'error': 'An owner account already exists'}, status=403)
 
-    # Atomically mark setup complete in the same transaction as admin creation
-    config = SiteConfig.get()
-    config.setup_complete = True
-    from django.utils import timezone
-    config.setup_completed_at = timezone.now()
-    config.setup_completed_by = username
-    config.save()
+    from django.db import transaction
+    with transaction.atomic():
+        parts = name.split(' ', 1) if name else [username, '']
+        user = User.objects.create_superuser(
+            username=username, password=password, email=email,
+            first_name=parts[0], last_name=parts[1] if len(parts) > 1 else '',
+        )
+        user.role = 'owner'
+        user.save()
+
+        config = SiteConfig.get()
+        config.setup_complete = True
+        config.setup_completed_at = timezone.now()
+        config.setup_completed_by = username
+        config.save()
 
     AuditLog.log(name or username, 'user.create', f'Setup wizard created admin: {username}', 'admin')
 
@@ -507,7 +511,7 @@ def setup_one_shot(request):
         username = _wl(data.get('username', '').strip(), 'username', 150)
         email = _wl(data.get('email', '').strip(), 'email', 254)
         name = _wl(data.get('name', '').strip(), 'name', 150)
-    except (InputValidationError, Exception) as e:
+    except InputValidationError as e:
         return Response({'error': str(e)}, status=400)
     password = data.get('password', '')
     if not username or not password:
@@ -559,7 +563,7 @@ def setup_one_shot(request):
         if not safe_name:
             return Response({'error': 'Invalid logo filename'}, status=400)
         logo_path_to_save = os.path.join(logo_dir, safe_name)
-        if not os.path.realpath(logo_path_to_save).startswith(os.path.realpath(logo_dir)):
+        if not Path(logo_path_to_save).resolve().is_relative_to(Path(logo_dir).resolve()):
             return Response({'error': 'Invalid logo path'}, status=400)
 
     # All validation passed — commit atomically. Owner creation + config flip
@@ -604,7 +608,8 @@ def setup_one_shot(request):
                 for chunk in logo_file.chunks():
                     f.write(chunk)
         except OSError:
-            pass
+            import logging
+            logging.getLogger('scanner').warning('Failed to write logo to %s', logo_path_to_save, exc_info=True)
 
     # Auto-login the new Owner so the browser lands on /dashboard with a
     # live session. Since the endpoint is CsrfExempt + AllowAny, we attach
@@ -635,17 +640,17 @@ def reset_setup(request):
     actor = request.user.get_full_name() or request.user.username
     ip = request.META.get('REMOTE_ADDR', '')
 
-    user_count = User.objects.count()
-    User.objects.all().delete()
+    from django.db import transaction
+    with transaction.atomic():
+        user_count = User.objects.count()
+        User.objects.all().delete()
 
-    config = SiteConfig.get()
-    config.setup_complete = False
-    config.setup_completed_at = None
-    config.setup_completed_by = ''
-    config.save()
+        config = SiteConfig.get()
+        config.setup_complete = False
+        config.setup_completed_at = None
+        config.setup_completed_by = ''
+        config.save()
 
-    # Caller's session row is gone with the user delete; drop any
-    # lingering perm cache so a fresh first-run Owner starts clean.
     try:
         from scanner.models import User as _U
         _U.invalidate_perm_cache()
@@ -1076,6 +1081,8 @@ def system_stats(request):
 @api_view(['POST'])
 def telegram_link_code(request):
     """Generate a 6-digit one-time code for Telegram account linking."""
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
     user_key = f'tg:linkgen:{request.user.id}'
     gen_count = cache.get(user_key) or 0
     if gen_count >= 3:

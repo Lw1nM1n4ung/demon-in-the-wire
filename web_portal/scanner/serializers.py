@@ -192,15 +192,15 @@ class ScanCreateSerializer(serializers.Serializer):
                 for suffix in ['.nip.io', '.xip.io', '.sslip.io', '.localtest.me', '.vcap.me', '.lvh.me']:
                     if lower.endswith(suffix):
                         raise serializers.ValidationError('DNS rebinding domain not allowed')
-                # Resolve hostname and check if it points to blocked IP
+                # Resolve hostname and check ALL addresses against full blocklist
                 import socket
                 try:
-                    resolved = socket.gethostbyname(value)
-                    resolved_ip = ipaddress.ip_address(resolved)
-                    if resolved_ip.is_loopback or resolved_ip.is_link_local or resolved_ip.is_private:
-                        raise serializers.ValidationError(f'Hostname resolves to blocked IP: {resolved}')
+                    results = socket.getaddrinfo(value, None, proto=socket.IPPROTO_TCP)
+                    for _, _, _, _, sockaddr in results:
+                        resolved_ip = ipaddress.ip_address(sockaddr[0])
+                        _check_ip(resolved_ip)
                 except socket.gaierror:
-                    pass  # unresolvable hostname — let nmap handle it
+                    pass  # unresolvable — nmap will handle; blocklist already checked above
 
         return value
 

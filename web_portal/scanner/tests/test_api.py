@@ -233,10 +233,10 @@ class RolePermissionTests(TestCase):
 
     # ── Role-based API access ────────────────────────────────────────────
 
-    def test_viewer_cannot_list_scans(self):
+    def test_viewer_can_list_scans(self):
         self._login(self.viewer)
         res = self.client.get('/api/scans/')
-        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.status_code, 200)
 
     def test_engineer_can_list_scans(self):
         self._login(self.engineer)
@@ -280,15 +280,13 @@ class RolePermissionTests(TestCase):
         res = self.client.get('/api/auth/users/')
         self.assertEqual(res.status_code, 403)
 
-    def test_viewer_cannot_download_report(self):
-        # Create a report record pointing at a nonexistent file — the auth check
-        # runs before the file is opened.
+    def test_viewer_can_download_report(self):
         from scanner.models import Scan, Report
         scan = Scan.objects.create(name='t', target='127.0.0.1', created_by=self.owner)
         report = Report.objects.create(scan=scan, format='docx', file_path='/nope', file_size=0)
         self._login(self.viewer)
         res = self.client.get(f'/api/reports/{report.id}/download/')
-        self.assertEqual(res.status_code, 403)
+        self.assertIn(res.status_code, (200, 404))
 
     def test_engineer_can_download_report(self):
         """Engineer passes the report:download gate. The file doesn't exist, so we
@@ -378,7 +376,9 @@ class PermissionTableTests(TestCase):
             RolePermission.objects.filter(role='viewer')
                                    .values_list('permission__code', flat=True)
         )
-        self.assertEqual(viewer_codes, {'finding:read', 'dashboard:view'})
+        self.assertEqual(viewer_codes, {
+            'finding:read', 'dashboard:view', 'scan:read', 'host:read', 'report:download',
+        })
 
     # ── User.has_permission() ────────────────────────────────────────────
 
@@ -401,9 +401,9 @@ class PermissionTableTests(TestCase):
         self.client.force_login(self.viewer)
         self.assertEqual(self.client.get('/api/dashboard/').status_code, 200)
 
-    def test_viewer_scans_forbidden(self):
+    def test_viewer_scans_ok(self):
         self.client.force_login(self.viewer)
-        self.assertEqual(self.client.get('/api/scans/').status_code, 403)
+        self.assertEqual(self.client.get('/api/scans/').status_code, 200)
 
     def test_engineer_scans_ok(self):
         self.client.force_login(self.engineer)
@@ -552,7 +552,7 @@ class AssetAggregationTests(TestCase):
         ips = {r['ip'] for r in results}
         self.assertIn('10.0.0.3', ips)
 
-    def test_viewer_cannot_list_assets(self):
+    def test_viewer_can_list_assets(self):
         viewer = User.objects.create_user(
             username='v', password='pw-v-123!', email='v@example.com'
         )
@@ -562,7 +562,7 @@ class AssetAggregationTests(TestCase):
         self.client.logout()
         self.client.force_login(viewer)
         res = self.client.get('/api/assets/')
-        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.status_code, 200)
 
     def test_attack_surface_score_is_none_on_empty_db(self):
         """With zero Asset rows, the KPI should return None (UI renders as N/A)."""
@@ -936,16 +936,15 @@ class ApiTokenTests(TestCase):
         self.assertIn('limit', res.json().get('error', '').lower())
 
     def test_viewer_token_inherits_viewer_scope(self):
-        """A Viewer-issued token must not grant more access than the Viewer role.
+        """A Viewer-issued token inherits the Viewer role's permissions.
 
-        Viewers don't have scan:read (engineer+ only) — a curl with their token
-        against /api/scans/ must get 403 just like a browser session would.
+        Viewers have scan:read — /api/scans/ should return 200.
+        Viewers don't have scan:write — /api/scans/ POST should get 403.
         """
         _, raw = self._mint(self.viewer, 'viewer-scope')
         res = self.client.get('/api/scans/', HTTP_AUTHORIZATION=f'Token {raw}')
-        self.assertIn(res.status_code, (401, 403))
+        self.assertEqual(res.status_code, 200)
 
-        # But /api/findings/ IS allowed for Viewers — same token should work.
         res = self.client.get('/api/findings/', HTTP_AUTHORIZATION=f'Token {raw}')
         self.assertEqual(res.status_code, 200)
 

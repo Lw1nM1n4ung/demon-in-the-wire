@@ -55,7 +55,7 @@ class TestPubSubNotificationPayload(TestCase):
         from scanner.notifications import notify
 
         mock_report_qs = MagicMock()
-        mock_report_qs.filter.return_value.values_list.return_value = ['/data/output/report.docx']
+        mock_report_qs.filter.return_value.exists.return_value = True
 
         mock_scan = MagicMock()
         mock_scan.id = '019dc3af-0000-0000-0000-000000000001'
@@ -70,7 +70,9 @@ class TestPubSubNotificationPayload(TestCase):
         assert mock_conn.publish.called
         data = json.loads(mock_conn.publish.call_args[0][1])
         assert data['event'] == 'report.ready'
-        assert data.get('document_path') == '/data/output/report.docx'
+        assert data.get('has_report') is True
+        assert data.get('scan_id') == '019dc3af-0000-0000-0000-000000000001'
+        assert 'document_path' not in data
 
     @patch('scanner.notifications.redis_lib')
     @patch('scanner.notifications.send_telegram')

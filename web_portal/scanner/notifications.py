@@ -156,6 +156,7 @@ def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
             try:
                 prefs = UserPreference.for_user(creator)
             except Exception:
+                log.warning('Failed to load notification prefs for user=%s', creator.username, exc_info=True)
                 prefs = None
             pref_field = _EVENT_PREF_FIELD.get(event_type)
             if (prefs
@@ -175,14 +176,14 @@ def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
                 pub_data = {
                     'event': event_type,
                     'text': text,
-                    'chat_id': '',
                 }
                 if scan and event_type == 'report.ready':
-                    reports = list(scan.reports.filter(format='docx').values_list('file_path', flat=True))
-                    if reports:
-                        pub_data['document_path'] = reports[0]
+                    has_docx = scan.reports.filter(format='docx').exists()
+                    if has_docx:
+                        pub_data['has_report'] = True
+                        pub_data['scan_id'] = str(scan.id)
                 r.publish('wireghost:bot:notify', json.dumps(pub_data))
         except Exception:
-            log.debug('Redis pub/sub publish failed (bot may not be running)', exc_info=True)
+            log.warning('Redis pub/sub publish failed', exc_info=True)
     except Exception:
         log.exception('notify() dispatch error event=%s', event_type)
