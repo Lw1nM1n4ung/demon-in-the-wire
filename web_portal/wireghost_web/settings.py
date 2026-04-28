@@ -220,6 +220,22 @@ if 'test' in sys.argv:
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://:wireghost_redis_secret@localhost:6379/0')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://:wireghost_redis_secret@localhost:6379/0')
 
+# Email — MFA OTP delivery
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'true').lower() == 'true'
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Wire_Ghost <noreply@wireghost.local>')
+
+# MFA
+MFA_OTP_TTL = 300
+MFA_OTP_LENGTH = 6
+MFA_MAX_ATTEMPTS = 5
+MFA_MAX_RESENDS = 3
+MFA_HOURLY_EMAIL_CAP = 10
+
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',

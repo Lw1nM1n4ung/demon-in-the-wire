@@ -11,10 +11,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from scanner.authentication import CsrfExemptAuth
 
-from scanner.models import SiteConfig, UserPreference, AuditLog
+from scanner.models import SiteConfig, UserPreference, AuditLog, UserMfaConfig, MfaBackupCode
 import re
 import json
 import secrets
+import hmac
 from pathlib import Path
 
 class InputValidationError(Exception):
@@ -111,6 +112,33 @@ def auth_login(request):
     # Success: drop the bucket so this user's retries don't count against them.
     cache.delete(cache_key)
 
+    # MFA gate — if enabled, don't call login() yet
+    try:
+        mfa_cfg = user.mfa_config
+    except UserMfaConfig.DoesNotExist:
+        mfa_cfg = None
+
+    if mfa_cfg and mfa_cfg.enabled:
+        from django.conf import settings as djsettings
+        prefs = UserPreference.for_user(user)
+        if not prefs.telegram_chat_id:
+            return Response({'error': 'MFA is enabled but no Telegram account linked. Contact admin.'}, status=403)
+
+        mfa_token = secrets.token_urlsafe(32)
+        otp = ''.join([str(secrets.randbelow(10)) for _ in range(djsettings.MFA_OTP_LENGTH)])
+        cache.set(f'mfa_pending:{mfa_token}', {
+            'user_id': str(user.id), 'otp': otp, 'attempts': 0, 'resends': 0,
+        }, djsettings.MFA_OTP_TTL)
+
+        rate_key = f'mfa_otp:{user.id}'
+        rate_count = cache.get(rate_key, 0)
+        if rate_count < djsettings.MFA_HOURLY_EMAIL_CAP:
+            cache.set(rate_key, rate_count + 1, 3600)
+            from scanner.tasks import send_mfa_otp
+            send_mfa_otp.delay(prefs.telegram_chat_id, otp, user.username)
+
+        return Response({'mfa_required': True, 'mfa_token': mfa_token, 'delivery': 'telegram'})
+
     login(request, user)
     AuditLog.log(user.get_full_name() or user.username, 'login', f'Logged in from {ip}', 'auth', ip)
     return Response(_serialize_user(user))
@@ -155,6 +183,211 @@ def auth_check(request):
     if request.user.is_authenticated:
         return HttpResponse(status=204)
     return HttpResponse(status=401)
+
+
+# ═══════════════ MFA Endpoints ═══════════════
+
+@api_view(['POST'])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
+def auth_mfa_verify(request):
+    """Verify OTP or backup code to complete MFA login."""
+    mfa_token = request.data.get('mfa_token', '')
+    raw_code = request.data.get('code', '')
+    if not isinstance(raw_code, str):
+        return Response({'error': 'Invalid code format'}, status=400)
+    code = raw_code.strip()
+    if not mfa_token or not code:
+        return Response({'error': 'Token and code required'}, status=400)
+
+    cache_key = f'mfa_pending:{mfa_token}'
+    pending = cache.get(cache_key)
+    if not pending:
+        return Response({'error': 'MFA session expired'}, status=401)
+
+    from django.conf import settings as djsettings
+    if pending['attempts'] >= djsettings.MFA_MAX_ATTEMPTS:
+        cache.delete(cache_key)
+        return Response({'error': 'Too many attempts'}, status=429)
+
+    user = User.objects.filter(id=pending['user_id']).first()
+    if not user or not user.is_active:
+        cache.delete(cache_key)
+        return Response({'error': 'Account unavailable'}, status=401)
+
+    if hmac.compare_digest(code, pending['otp']) or MfaBackupCode.verify_and_consume(user, code):
+        cache.delete(cache_key)
+        ip = request.META.get('REMOTE_ADDR', '')
+        login(request, user)
+        AuditLog.log(user.get_full_name() or user.username, 'login', f'MFA login from {ip}', 'auth', ip)
+        return Response(_serialize_user(user))
+
+    pending['attempts'] += 1
+    cache.set(cache_key, pending, djsettings.MFA_OTP_TTL)
+    remaining = djsettings.MFA_MAX_ATTEMPTS - pending['attempts']
+    return Response({'error': f'Invalid code ({remaining} attempts remaining)'}, status=401)
+
+
+@api_view(['POST'])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
+def auth_mfa_resend(request):
+    """Resend MFA OTP via Telegram. Max 3 resends per pending session."""
+    mfa_token = request.data.get('mfa_token', '')
+    cache_key = f'mfa_pending:{mfa_token}'
+    pending = cache.get(cache_key)
+    if not pending:
+        return Response({'error': 'MFA session expired'}, status=401)
+
+    from django.conf import settings as djsettings
+    if pending['resends'] >= djsettings.MFA_MAX_RESENDS:
+        return Response({'error': 'Maximum resends reached'}, status=429)
+
+    user = User.objects.filter(id=pending['user_id']).first()
+    if not user:
+        return Response({'error': 'User not found'}, status=400)
+
+    otp = ''.join([str(secrets.randbelow(10)) for _ in range(djsettings.MFA_OTP_LENGTH)])
+    pending['otp'] = otp
+    pending['resends'] += 1
+    pending['attempts'] = 0
+    cache.set(cache_key, pending, djsettings.MFA_OTP_TTL)
+
+    prefs = UserPreference.for_user(user)
+    rate_key = f'mfa_otp:{user.id}'
+    rate_count = cache.get(rate_key, 0)
+    if rate_count < djsettings.MFA_HOURLY_EMAIL_CAP and prefs.telegram_chat_id:
+        cache.set(rate_key, rate_count + 1, 3600)
+        from scanner.tasks import send_mfa_otp
+        send_mfa_otp.delay(prefs.telegram_chat_id, otp, user.username)
+
+    return Response({'status': 'ok', 'resends_remaining': djsettings.MFA_MAX_RESENDS - pending['resends']})
+
+
+@api_view(['POST'])
+def auth_reauth(request):
+    """Re-authenticate for sensitive operations. Sets a 5-min Redis flag."""
+    password = request.data.get('password', '')
+    if not password:
+        return Response({'error': 'Password required'}, status=400)
+    user = authenticate(request, username=request.user.username, password=password)
+    if user is None:
+        return Response({'error': 'Invalid password'}, status=401)
+    cache.set(f'reauth:{request.user.id}', True, 300)
+    return Response({'status': 'ok'})
+
+
+def _require_reauth(user):
+    """Check if user has recently re-authenticated."""
+    return cache.get(f'reauth:{user.id}') is True
+
+
+@api_view(['GET'])
+def mfa_status(request):
+    """Return MFA status for current user."""
+    try:
+        cfg = request.user.mfa_config
+        enabled = cfg.enabled
+    except UserMfaConfig.DoesNotExist:
+        enabled = False
+    remaining = MfaBackupCode.objects.filter(user=request.user, used_at__isnull=True).count() if enabled else 0
+    return Response({'enabled': enabled, 'backup_codes_remaining': remaining})
+
+
+@api_view(['POST'])
+def mfa_setup(request):
+    """Start MFA setup — sends OTP via Telegram. Requires reauth + linked Telegram."""
+    if not _require_reauth(request.user):
+        return Response({'error': 'Re-authentication required'}, status=403)
+    prefs = UserPreference.for_user(request.user)
+    if not prefs.telegram_chat_id:
+        return Response({'error': 'Link your Telegram account first (Settings → Notifications)'}, status=400)
+
+    from django.conf import settings as djsettings
+    setup_token = secrets.token_urlsafe(32)
+    otp = ''.join([str(secrets.randbelow(10)) for _ in range(djsettings.MFA_OTP_LENGTH)])
+    cache.set(f'mfa_setup:{setup_token}', {
+        'user_id': str(request.user.id), 'otp': otp, 'attempts': 0,
+    }, djsettings.MFA_OTP_TTL)
+
+    rate_key = f'mfa_otp:{request.user.id}'
+    rate_count = cache.get(rate_key, 0)
+    if rate_count < djsettings.MFA_HOURLY_EMAIL_CAP:
+        cache.set(rate_key, rate_count + 1, 3600)
+        from scanner.tasks import send_mfa_otp
+        send_mfa_otp.delay(prefs.telegram_chat_id, otp, request.user.username)
+
+    return Response({'setup_token': setup_token})
+
+
+@api_view(['POST'])
+def mfa_confirm(request):
+    """Confirm MFA setup with OTP. Enables MFA and returns backup codes."""
+    setup_token = request.data.get('setup_token', '')
+    raw_code = request.data.get('code', '')
+    if not isinstance(raw_code, str):
+        return Response({'error': 'Invalid code format'}, status=400)
+    code = raw_code.strip()
+    cache_key = f'mfa_setup:{setup_token}'
+    pending = cache.get(cache_key)
+    if not pending:
+        return Response({'error': 'Setup session expired'}, status=401)
+    if pending['user_id'] != str(request.user.id):
+        return Response({'error': 'Token mismatch'}, status=400)
+
+    from django.conf import settings as djsettings
+    attempts = pending.get('attempts', 0)
+    if attempts >= djsettings.MFA_MAX_ATTEMPTS:
+        cache.delete(cache_key)
+        return Response({'error': 'Too many attempts'}, status=429)
+
+    if not hmac.compare_digest(code, pending['otp']):
+        pending['attempts'] = attempts + 1
+        cache.set(cache_key, pending, djsettings.MFA_OTP_TTL)
+        remaining = djsettings.MFA_MAX_ATTEMPTS - pending['attempts']
+        return Response({'error': f'Invalid code ({remaining} attempts remaining)'}, status=401)
+
+    cache.delete(cache_key)
+    cfg, _ = UserMfaConfig.objects.get_or_create(user=request.user)
+    cfg.enabled = True
+    cfg.enabled_at = timezone.now()
+    cfg.save(update_fields=['enabled', 'enabled_at'])
+
+    from django.contrib.sessions.models import Session
+    from django.utils import timezone as tz
+    current_session_key = request.session.session_key
+    for s in Session.objects.filter(expire_date__gte=tz.now()):
+        data = s.get_decoded()
+        if str(data.get('_auth_user_id')) == str(request.user.id) and s.session_key != current_session_key:
+            s.delete()
+
+    codes = MfaBackupCode.generate_for_user(request.user)
+    ip = request.META.get('REMOTE_ADDR', '')
+    AuditLog.log(request.user.get_full_name() or request.user.username, 'mfa_enable', 'MFA enabled', 'auth', ip)
+    return Response({'enabled': True, 'backup_codes': codes})
+
+
+@api_view(['POST'])
+def mfa_disable(request):
+    """Disable MFA. Requires reauth."""
+    if not _require_reauth(request.user):
+        return Response({'error': 'Re-authentication required'}, status=403)
+    UserMfaConfig.objects.filter(user=request.user).update(enabled=False)
+    MfaBackupCode.objects.filter(user=request.user).delete()
+    ip = request.META.get('REMOTE_ADDR', '')
+    AuditLog.log(request.user.get_full_name() or request.user.username, 'mfa_disable', 'MFA disabled', 'auth', ip)
+    return Response({'enabled': False})
+
+
+@api_view(['POST'])
+def mfa_backup_codes(request):
+    """Regenerate backup codes. Requires reauth."""
+    if not _require_reauth(request.user):
+        return Response({'error': 'Re-authentication required'}, status=403)
+    codes = MfaBackupCode.generate_for_user(request.user)
+    ip = request.META.get('REMOTE_ADDR', '')
+    AuditLog.log(request.user.get_full_name() or request.user.username, 'mfa_regen_codes', 'Backup codes regenerated', 'auth', ip)
+    return Response({'backup_codes': codes})
 
 
 @api_view(['GET'])

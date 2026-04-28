@@ -521,3 +521,22 @@ def enforce_scan_deadlines():
         cancelled += 1
         logger.info('Scan %s auto-cancelled (deadline %s)', scan.id, scan.deadline)
     return {'cancelled': cancelled}
+
+
+@shared_task(bind=True, max_retries=2, soft_time_limit=30)
+def send_mfa_otp(self, chat_id, otp_code, username):
+    from scanner.models import SiteConfig
+    from scanner.notifications import send_telegram
+    cfg = SiteConfig.get()
+    if not cfg.telegram_bot_token:
+        logger.error('MFA OTP: no bot token configured')
+        return
+    text = (
+        f'<b>Wire_Ghost — Login Verification</b>\n\n'
+        f'Your code: <code>{otp_code}</code>\n\n'
+        f'Expires in 5 minutes.\n'
+        f'If you did not request this, ignore this message.'
+    )
+    result = send_telegram(chat_id, text, bot_token=cfg.telegram_bot_token)
+    if not result.get('ok'):
+        logger.warning('MFA OTP delivery failed for %s: %s', username, result.get('error'))

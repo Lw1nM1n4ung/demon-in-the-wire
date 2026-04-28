@@ -415,6 +415,51 @@ class UserPreference(models.Model):
         return obj
 
 
+class UserMfaConfig(models.Model):
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='mfa_config')
+    enabled = models.BooleanField(default=False)
+    enabled_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"MFA({'on' if self.enabled else 'off'}) {self.user.username}"
+
+
+class MfaBackupCode(models.Model):
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mfa_backup_codes')
+    code_hash = models.CharField(max_length=64)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def generate_for_user(cls, user):
+        import hashlib
+        import secrets as _s
+        cls.objects.filter(user=user).delete()
+        codes = []
+        for _ in range(8):
+            raw = _s.token_hex(4)
+            cls.objects.create(
+                user=user,
+                code_hash=hashlib.sha256(raw.encode()).hexdigest(),
+            )
+            codes.append(raw)
+        return codes
+
+    @classmethod
+    def verify_and_consume(cls, user, code):
+        import hashlib
+        from django.utils import timezone as tz
+        h = hashlib.sha256(code.strip().encode()).hexdigest()
+        bc = cls.objects.filter(user=user, code_hash=h, used_at__isnull=True).first()
+        if bc:
+            bc.used_at = tz.now()
+            bc.save(update_fields=['used_at'])
+            return True
+        return False
+
+
 class AuditLog(models.Model):
     """Audit trail for user actions."""
     ACTION_TYPES = [

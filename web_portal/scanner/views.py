@@ -188,14 +188,22 @@ class ScanViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def topology(self, request, pk=None):
-        """Return topology data for D3 force-directed graph visualization."""
+        """Return enriched topology data for D3 visualization."""
         import ipaddress
+        from django.core.cache import cache
+        from django.db.models import Q
+
         scan = self.get_object()
+
+        cache_key = f'topo:{scan.id}:{scan.updated_at.timestamp()}'
+        if scan.status != 'running':
+            cached = cache.get(cache_key)
+            if cached:
+                return Response(cached)
 
         hosts = scan.hosts.prefetch_related('ports', 'technologies').all()
         findings = scan.findings.all()
 
-        # Aggregate worst severity per host
         severity_rank = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
         host_severity = {}
         host_finding_counts = {}
@@ -207,12 +215,25 @@ class ScanViewSet(viewsets.ModelViewSet):
             cur = host_severity.get(hid, 'info')
             if severity_rank.get(sev, 5) < severity_rank.get(cur, 5):
                 host_severity[hid] = sev
-            counts = host_finding_counts.setdefault(hid, {'total': 0, 'critical': 0, 'high': 0, 'medium': 0})
+            counts = host_finding_counts.setdefault(
+                hid, {'total': 0, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+            )
             counts['total'] += 1
             if sev in counts:
                 counts[sev] += 1
 
-        # Service classification by port priority
+        # CVEs per host
+        cve_map = {}
+        cve_qs = scan.findings.filter(
+            ~Q(cve=''), host_id__isnull=False
+        ).values_list('host_id', 'cve')
+        for hid, cve_str in cve_qs:
+            for cve in cve_str.split(','):
+                cve = cve.strip()
+                if cve:
+                    cve_map.setdefault(hid, set()).add(cve)
+        cve_map = {k: sorted(v) for k, v in cve_map.items()}
+
         SERVICE_PORTS = {
             'web': {80, 443, 8080, 8443, 3000, 8000, 8888, 9443},
             'database': {3306, 5432, 1433, 27017, 6379, 5984, 9200, 9300},
@@ -230,7 +251,6 @@ class ScanViewSet(viewsets.ModelViewSet):
                     return svc
             return 'other'
 
-        # Build nodes and compute subnets
         subnet_counts = {}
         nodes = []
         for h in hosts:
@@ -264,18 +284,75 @@ class ScanViewSet(viewsets.ModelViewSet):
                 'critical_count': fc.get('critical', 0),
                 'high_count': fc.get('high', 0),
                 'medium_count': fc.get('medium', 0),
+                'low_count': fc.get('low', 0),
+                'risk_score': min(100,
+                    fc.get('critical', 0) * 10 + fc.get('high', 0) * 5 +
+                    fc.get('medium', 0) * 2 + fc.get('low', 0)),
+                'cves': cve_map.get(h.id, []),
                 'ports_count': h.ports_count,
             })
 
         subnets = [{'cidr': cidr, 'host_count': cnt} for cidr, cnt in sorted(subnet_counts.items())]
 
-        return Response({
+        # Inter-host edges (CVE-based + service-based, capped at 3 per host)
+        cve_to_hosts = {}
+        for hid, cves in cve_map.items():
+            for cve in cves:
+                cve_to_hosts.setdefault(cve, []).append(str(hid))
+
+        raw_edges = {}
+        for cve, hids in cve_to_hosts.items():
+            for i in range(len(hids)):
+                for j in range(i + 1, len(hids)):
+                    key = tuple(sorted([hids[i], hids[j]]))
+                    if key not in raw_edges:
+                        raw_edges[key] = {'type': 'cve', 'label': cve}
+
+        svc_to_hosts = {}
+        for n in nodes:
+            svc = n['primary_service']
+            if svc not in ('other', 'network'):
+                svc_to_hosts.setdefault(svc, []).append(str(n['id']))
+
+        for svc, hids in svc_to_hosts.items():
+            if len(hids) < 2:
+                continue
+            for i in range(len(hids)):
+                for j in range(i + 1, min(len(hids), i + 4)):
+                    key = tuple(sorted([hids[i], hids[j]]))
+                    if key not in raw_edges:
+                        raw_edges[key] = {'type': 'service', 'label': svc}
+
+        node_risk = {str(n['id']): n.get('risk_score', 0) for n in nodes}
+        edge_count = {}
+        edges = []
+        for (src, tgt), meta in sorted(
+            raw_edges.items(),
+            key=lambda x: -(node_risk.get(x[0][0], 0) + node_risk.get(x[0][1], 0))
+        ):
+            if edge_count.get(src, 0) >= 3 or edge_count.get(tgt, 0) >= 3:
+                continue
+            edge_count[src] = edge_count.get(src, 0) + 1
+            edge_count[tgt] = edge_count.get(tgt, 0) + 1
+            edges.append({
+                'source': src, 'target': tgt,
+                'type': meta['type'], 'label': meta['label'],
+            })
+
+        result = {
             'scan_id': scan.id,
             'scan_name': scan.name,
+            'scan_status': scan.status,
             'target': scan.target,
             'subnets': subnets,
             'nodes': nodes,
-        })
+            'edges': edges,
+        }
+
+        if scan.status != 'running':
+            cache.set(cache_key, result, 300)
+
+        return Response(result)
 
 
 class HostViewSet(viewsets.ReadOnlyModelViewSet):
@@ -606,6 +683,7 @@ def upload_logo(request):
         return Response({'error': 'No file uploaded'}, status=400)
 
     import os
+    from pathlib import Path
     from django.utils.text import get_valid_filename
 
     logo_file = request.FILES['logo']

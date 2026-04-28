@@ -10,6 +10,8 @@ from scanner.views import (
 from scanner.auth_views import (
     auth_login, auth_logout, auth_csrf, auth_me, auth_check, auth_users,
     auth_user_create, auth_user_update, auth_user_delete,
+    auth_mfa_verify, auth_mfa_resend, auth_reauth,
+    mfa_status, mfa_setup, mfa_confirm, mfa_disable, mfa_backup_codes,
     site_config, update_site_config, check_username, setup_admin, setup_one_shot, site_setup_complete, reset_setup, user_preferences,
     list_sessions, revoke_session, revoke_all_sessions,
     audit_log,
@@ -67,6 +69,15 @@ urlpatterns = [
     path('api/audit-log/', audit_log, name='audit-log'),
     # Support diagnostic bundle (Owner only)
     path('api/support-bundle/', support_bundle, name='support-bundle'),
+    # MFA
+    path('api/auth/mfa/verify/', auth_mfa_verify, name='auth-mfa-verify'),
+    path('api/auth/mfa/resend/', auth_mfa_resend, name='auth-mfa-resend'),
+    path('api/auth/mfa/status/', mfa_status, name='mfa-status'),
+    path('api/auth/mfa/setup/', mfa_setup, name='mfa-setup'),
+    path('api/auth/mfa/confirm/', mfa_confirm, name='mfa-confirm'),
+    path('api/auth/mfa/disable/', mfa_disable, name='mfa-disable'),
+    path('api/auth/mfa/backup-codes/', mfa_backup_codes, name='mfa-backup-codes'),
+    path('api/auth/reauth/', auth_reauth, name='auth-reauth'),
     # Personal API tokens (Authorization: Token <wg_...>)
     path('api/auth/tokens/', tokens_list_or_create, name='auth-tokens'),
     path('api/auth/tokens/<uuid:token_id>/revoke/', tokens_revoke, name='auth-token-revoke'),
