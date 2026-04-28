@@ -125,7 +125,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A wireghost_web worker -l info -c 4 --prefetch-multiplier 1 -Q scans,reports --logfile=/app/logs/celery-worker.log
+    command: celery -A wireghost_web worker -l info -c 4 --prefetch-multiplier 1 -Q celery,scans,reports --logfile=/app/logs/celery-worker.log
     cap_drop: [ALL]
     cap_add: [NET_RAW, NET_ADMIN, CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
