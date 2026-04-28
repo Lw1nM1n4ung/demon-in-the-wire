@@ -11,6 +11,7 @@ WG.renderSettings = function() {
       '<div class="tab" data-tab="notifications" onclick="WG.switchSettingsTab(\'notifications\')">Notifications</div>' +
       '<div class="tab" data-tab="tools" onclick="WG.switchSettingsTab(\'tools\')">Tools</div>' +
       '<div class="tab" data-tab="sessions" onclick="WG.switchSettingsTab(\'sessions\')">Sessions</div>' +
+      '<div class="tab" data-tab="security" onclick="WG.switchSettingsTab(\'security\')">Security</div>' +
       '<div class="tab" data-tab="audit" onclick="WG.switchSettingsTab(\'audit\')">Audit Log</div>' +
       '<div class="tab" data-tab="export" onclick="WG.switchSettingsTab(\'export\')">Export/Import</div>' +
       '<div class="tab" data-tab="api" onclick="WG.switchSettingsTab(\'api\')">API</div>' +
@@ -440,6 +441,156 @@ WG._logoutAll = function() {
   });
 };
 
+/* ── Security (MFA) ── */
+WG._settingsSecurity = function() {
+  var mfa = WG._cache['mfa_status'] || {};
+  var prefs = WG._cache['prefs'] || {};
+  var tgLinked = !!(prefs.telegram && prefs.telegram.chat_id);
+  Promise.all([
+    WG.api('/auth/mfa/status/'),
+    WG.api('/preferences/'),
+  ]).then(function(results) {
+    var data = results[0], p = results[1];
+    if (WG.state.currentPage !== 'settings') return;
+    if (data) WG._cache['mfa_status'] = data;
+    if (p) WG._cache['prefs'] = p;
+    var linked = !!(p && p.telegram && p.telegram.chat_id);
+    var el = document.getElementById('mfaStatusContent');
+    if (el) el.innerHTML = WG._mfaStatusPanel(data || mfa, linked);
+  });
+  return '<div class="panel" style="max-width:800px;">' +
+    '<div class="panel-header"><div class="panel-title">Multi-Factor Authentication</div></div>' +
+    '<div class="panel-body" id="mfaStatusContent">' + WG._mfaStatusPanel(mfa, tgLinked) + '</div></div>';
+};
+
+WG._mfaStatusPanel = function(mfa, tgLinked) {
+  if (mfa.enabled) {
+    return '' +
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">' +
+        '<span class="status-badge completed" style="font-size:0.75rem;"><span class="dot"></span> MFA Enabled</span>' +
+        '<span class="mono" style="font-size:0.78rem;color:var(--text-dim);">' + (mfa.backup_codes_remaining || 0) + ' backup codes remaining</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button class="btn btn-secondary btn-sm" onclick="WG._mfaRegenCodes()">Regenerate Backup Codes</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="WG._mfaDisable()">Disable MFA</button>' +
+      '</div>';
+  }
+  if (!tgLinked) {
+    return '' +
+      '<div style="margin-bottom:16px;">' +
+        '<p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:12px;">Add an extra layer of security. When enabled, you\'ll need to enter a verification code sent via Telegram each time you sign in.</p>' +
+        '<div style="padding:12px 14px;border-left:3px solid var(--medium);background:rgba(255,170,0,0.06);border-radius:8px;font-size:0.82rem;color:var(--text-bright);">' +
+          'Link your Telegram account first. Go to <a href="#" onclick="WG.switchSettingsTab(\'notifications\');return false;" style="color:var(--accent);font-weight:600;">Settings &rarr; Notifications</a> and set your chat ID.' +
+        '</div>' +
+      '</div>';
+  }
+  return '' +
+    '<div style="margin-bottom:16px;">' +
+      '<p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:12px;">Add an extra layer of security. When enabled, you\'ll need to enter a verification code sent via Telegram each time you sign in.</p>' +
+    '</div>' +
+    '<button class="btn btn-primary btn-sm" onclick="WG._mfaStartSetup()">Enable MFA</button>';
+};
+
+WG._mfaReauth = function(callback) {
+  /* Static template — no user input interpolated. */
+  var html = '' +
+    '<div style="display:flex;flex-direction:column;gap:16px;">' +
+      '<p style="color:var(--text-dim);font-size:0.85rem;">Enter your password to continue.</p>' +
+      '<div class="form-group">' +
+        '<label class="form-label">Password</label>' +
+        '<input class="form-input" id="reauthPass" type="password" placeholder="Current password" autocomplete="current-password">' +
+      '</div>' +
+      '<div id="reauthError" style="display:none;color:var(--critical);font-size:0.82rem;"></div>' +
+    '</div>';
+  WG.modal('Re-authenticate', html, [
+    { label: 'Cancel', cls: 'btn-secondary', action: function() { WG.closeModal(); } },
+    { label: 'Confirm', cls: 'btn-primary', action: function() {
+      var pw = document.getElementById('reauthPass').value;
+      if (!pw) { var e = document.getElementById('reauthError'); e.textContent = 'Password required'; e.style.display = 'block'; return; }
+      WG.api('/auth/reauth/', { method: 'POST', body: JSON.stringify({ password: pw }) }).then(function(res) {
+        if (res && res.status === 'ok') { WG.closeModal(); callback(); }
+        else { var e = document.getElementById('reauthError'); e.textContent = (res && res.error) || 'Invalid password'; e.style.display = 'block'; }
+      });
+    }},
+  ]);
+};
+
+WG._mfaStartSetup = function() {
+  WG._mfaReauth(function() {
+    WG.api('/auth/mfa/setup/', { method: 'POST' }).then(function(res) {
+      if (!res || res.error) { WG.toast(res ? res.error : 'Setup failed', 'error'); return; }
+      var setupToken = res.setup_token;
+      /* Static template — no user input interpolated. */
+      var html = '' +
+        '<div style="display:flex;flex-direction:column;gap:16px;">' +
+          '<p style="color:var(--text-dim);font-size:0.85rem;">A verification code has been sent to your Telegram. Enter it below to complete MFA setup.</p>' +
+          '<div class="form-group">' +
+            '<label class="form-label">Verification Code</label>' +
+            '<input class="form-input" id="mfaSetupCode" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" style="text-align:center;font-family:var(--font-mono);font-size:1.1rem;letter-spacing:0.2em;">' +
+          '</div>' +
+          '<div id="mfaSetupError" style="display:none;color:var(--critical);font-size:0.82rem;"></div>' +
+        '</div>';
+      WG.modal('Confirm MFA Setup', html, [
+        { label: 'Cancel', cls: 'btn-secondary', action: function() { WG.closeModal(); } },
+        { label: 'Verify & Enable', cls: 'btn-primary', action: function() {
+          var code = document.getElementById('mfaSetupCode').value.trim();
+          if (!code) { var e = document.getElementById('mfaSetupError'); e.textContent = 'Enter the code'; e.style.display = 'block'; return; }
+          WG.api('/auth/mfa/confirm/', { method: 'POST', body: JSON.stringify({ setup_token: setupToken, code: code }) }).then(function(r) {
+            if (r && r.enabled) {
+              WG.closeModal();
+              WG._cache['mfa_status'] = { enabled: true, backup_codes_remaining: 8 };
+              WG._showBackupCodes(r.backup_codes);
+              WG.switchSettingsTab('security');
+            } else {
+              var e = document.getElementById('mfaSetupError'); e.textContent = (r && r.error) || 'Invalid code'; e.style.display = 'block';
+            }
+          });
+        }},
+      ]);
+    });
+  });
+};
+
+WG._showBackupCodes = function(codes) {
+  if (!codes || !codes.length) return;
+  var esc = WG.escHtml;
+  var list = codes.map(function(c) { return '<code style="font-family:var(--font-mono);font-size:1rem;padding:4px 10px;background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-sm);">' + esc(c) + '</code>'; }).join('');
+  /* Backup codes are server-generated hex (token_hex(4)), escaped via escHtml. */
+  var html = '' +
+    '<div style="display:flex;flex-direction:column;gap:16px;">' +
+      '<p style="color:var(--critical);font-weight:600;font-size:0.85rem;">Save these backup codes now. They will not be shown again.</p>' +
+      '<p style="color:var(--text-dim);font-size:0.82rem;">Each code can be used once to sign in if you lose access to your Telegram.</p>' +
+      '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:16px;background:var(--bg-app);border-radius:var(--radius-md);">' + list + '</div>' +
+      '<button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(\'' + codes.join('\\n') + '\');WG.toast(\'Copied\',\'info\')">Copy All</button>' +
+    '</div>';
+  WG.modal('Backup Codes', html, [
+    { label: 'I\'ve saved these codes', cls: 'btn-primary', action: function() { WG.closeModal(); } },
+  ]);
+};
+
+WG._mfaDisable = function() {
+  WG._mfaReauth(function() {
+    WG.api('/auth/mfa/disable/', { method: 'POST' }).then(function(res) {
+      if (res && !res.error) {
+        WG._cache['mfa_status'] = { enabled: false, backup_codes_remaining: 0 };
+        WG.toast('MFA disabled', 'info');
+        WG.switchSettingsTab('security');
+      } else { WG.toast((res && res.error) || 'Failed to disable MFA', 'error'); }
+    });
+  });
+};
+
+WG._mfaRegenCodes = function() {
+  WG._mfaReauth(function() {
+    WG.api('/auth/mfa/backup-codes/', { method: 'POST' }).then(function(res) {
+      if (res && res.backup_codes) {
+        WG._cache['mfa_status'] = { enabled: true, backup_codes_remaining: res.backup_codes.length };
+        WG._showBackupCodes(res.backup_codes);
+      } else { WG.toast((res && res.error) || 'Failed to regenerate codes', 'error'); }
+    });
+  });
+};
+
 /* ── Audit Log (API-driven) ── */
 WG._settingsAudit = function() {
   var log = WG.getCached('audit_log', '/audit-log/');
@@ -835,7 +986,7 @@ WG.switchSettingsTab = function(tab) {
   var el = document.getElementById('settingsTabContent');
   var tabs = {
     general: WG._settingsGeneral, theme: WG._settingsTheme, notifications: WG._settingsNotifications,
-    tools: WG._settingsTools, sessions: WG._settingsSessions,
+    tools: WG._settingsTools, sessions: WG._settingsSessions, security: WG._settingsSecurity,
     audit: WG._settingsAudit, export: WG._settingsExport, api: WG._settingsApi,
     tokens: WG._settingsTokens,
     admin: WG._settingsAdmin, support: WG._settingsSupport, about: WG._settingsAbout,
