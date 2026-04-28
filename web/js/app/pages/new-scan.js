@@ -1,7 +1,7 @@
 /* Wire_Ghost — New Scan (full page) */
 
 WG.renderNewScan = function() {
-  var policies = [];
+  var policies = WG.getCached('policies', '/policies/');
   var esc = WG.escHtml;
 
   return '' +
@@ -183,7 +183,7 @@ WG._nsUpdateType = function(type) {
 };
 
 WG._nsApplyPolicy = function(id) {
-  var p = (typeof [] !== 'undefined') ? [].find(function(x) { return x.id === id; }) : null;
+  var p = (WG._cache['policies'] || []).find(function(x) { return x.id === id; }) || null;
   if (!p) return;
   document.getElementById('nsScanType').value = p.scan_type;
   document.getElementById('nsPortRange').value = p.port_range;
@@ -234,22 +234,27 @@ WG._nsLaunch = function() {
   if (scheduled) {
     var freq = document.getElementById('nsScheduleFreq').value;
     var time = document.getElementById('nsScheduleTime').value;
+    var created = 0;
     targets.forEach(function(t) {
-      [].push({
-        id: [].length + 1,
+      WG.api('/schedules/', { method: 'POST', body: JSON.stringify({
         name: name || 'Scheduled: ' + t,
         target: t,
         frequency: freq,
         time: time,
         scan_type: scanData.scan_type,
+        parallelism: scanData.parallelism,
+        timeout: scanData.timeout,
+        report_formats: scanData.report_formats,
         enabled: true,
-        last_run: null,
-        next_run: WG._calcNextRun(freq, time),
-        created_at: new Date().toISOString(),
+      }) }).then(function() {
+        created++;
+        if (created === targets.length) {
+          WG.invalidateCache('schedules');
+          WG.toast(targets.length + ' scheduled scan(s) created', 'success');
+          WG.navigate('scheduled');
+        }
       });
     });
-    WG.toast(targets.length + ' scheduled scan(s) created', 'success');
-    WG.navigate('scheduled');
     return;
   }
 

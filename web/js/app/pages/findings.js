@@ -23,13 +23,13 @@ WG.renderFindings = function() {
       var esc = WG.escHtml;
       var cvssColor = f.cvss >= 9 ? 'var(--critical)' : f.cvss >= 7 ? 'var(--high)' : f.cvss >= 4 ? 'var(--medium)' : 'var(--text-dim)';
       return '<tr onclick="WG.navigate(\'finding\',{id:\'' + f.id + '\'})" data-sev="' + esc(f.severity) + '" data-source="' + esc(f.source) + '" data-search="' + esc((f.title + ' ' + f.host_ip + ' ' + (f.cve || '')).toLowerCase()) + '">' +
-        '<td><span class="sev-badge ' + f.severity + '">' + f.severity + '</span></td>' +
+        '<td><span class="sev-badge ' + esc(f.severity) + '">' + esc(f.severity) + '</span></td>' +
         '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
         '<td><span class="host-tag">' + esc(f.host_ip) + '</span></td>' +
-        '<td class="mono">' + (f.port || '\u2014') + '</td>' +
+        '<td class="mono">' + esc(f.port || '\u2014') + '</td>' +
         '<td><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
         '<td class="mono" style="color:var(--accent);">' + esc(f.cve || '\u2014') + '</td>' +
-        '<td class="mono" style="color:' + cvssColor + ';">' + (f.cvss || '\u2014') + '</td></tr>';
+        '<td class="mono" style="color:' + cvssColor + ';">' + esc(f.cvss || '\u2014') + '</td></tr>';
     }).join('') +
     '</tbody></table></div>';
 };

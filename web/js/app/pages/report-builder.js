@@ -113,7 +113,7 @@ WG._reportFormats = function() {
 };
 
 WG._reportGenerate = function() {
-  var scans = [].filter(function(s) { return s.status === 'completed'; });
+  var scans = (WG._cache['scans'] || []).filter(function(s) { return s.status === 'completed'; });
   var esc = WG.escHtml;
   return '<div style="max-width:750px;">' +
     '<div class="panel"><div class="panel-header"><div class="panel-title">Generate Reports</div>' +

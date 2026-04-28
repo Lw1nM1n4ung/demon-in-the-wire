@@ -176,6 +176,7 @@ WG.render = function() {
   /* Destroy any lingering Chart.js instances from the previous page so the
    * canvas nodes are garbage-collected with the replaced DOM. */
   if (WG._destroyCharts) WG._destroyCharts();
+  if (WG._topoTeardown) WG._topoTeardown();
 
   main.style.animation = 'none';
   main.offsetHeight; /* force reflow */

@@ -31,15 +31,15 @@ WG.renderFindingDetail = function(id) {
 
     '<div class="page-header"><div class="page-header-left">' +
       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">' +
-        '<span class="sev-badge ' + f.severity + '" style="font-size:0.8rem;padding:4px 12px;">' + f.severity + '</span>' +
-        (f.cvss ? '<span class="mono" style="color:' + (f.cvss >= 9 ? 'var(--critical)' : f.cvss >= 7 ? 'var(--high)' : 'var(--medium)') + ';font-weight:700;">CVSS ' + f.cvss + '</span>' : '') +
+        '<span class="sev-badge ' + esc(f.severity) + '" style="font-size:0.8rem;padding:4px 12px;">' + esc(f.severity) + '</span>' +
+        (f.cvss ? '<span class="mono" style="color:' + (f.cvss >= 9 ? 'var(--critical)' : f.cvss >= 7 ? 'var(--high)' : 'var(--medium)') + ';font-weight:700;">CVSS ' + esc(f.cvss) + '</span>' : '') +
       '</div>' +
       '<h1 style="font-size:1.3rem;">' + esc(f.title) + '</h1>' +
     '</div></div>' +
 
     '<div class="info-grid" style="margin-bottom:24px;">' +
       '<div class="info-item"><div class="info-label">Host</div><div class="info-value"><a onclick="WG.navigate(\'host\',{id:\'' + f.host + '\'})" class="host-tag">' + esc(f.host_ip) + '</a></div></div>' +
-      '<div class="info-item"><div class="info-label">Port</div><div class="info-value mono">' + (f.port || '\u2014') + '/' + (f.protocol || 'tcp') + '</div></div>' +
+      '<div class="info-item"><div class="info-label">Port</div><div class="info-value mono">' + esc(f.port || '\u2014') + '/' + esc(f.protocol || 'tcp') + '</div></div>' +
       '<div class="info-item"><div class="info-label">Source</div><div class="info-value"><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</div></div>' +
       (f.cve ? '<div class="info-item"><div class="info-label">CVE</div><div class="info-value mono" style="color:var(--accent);">' + esc(f.cve) + '</div></div>' : '') +
       (f.cwe ? '<div class="info-item"><div class="info-label">CWE</div><div class="info-value mono">' + esc(f.cwe) + '</div></div>' : '') +

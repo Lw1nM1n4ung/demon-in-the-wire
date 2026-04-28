@@ -22,7 +22,7 @@ WG.renderScanDetail = function(id) {
   var esc = WG.escHtml;
   var scanHosts = WG.getCached('scan_hosts_' + id, '/scans/' + id + '/hosts/', 'hosts').filter(function(h) { return h.scan === id || true; });
   var scanFindings = WG.getCached('scan_findings_' + id, '/scans/' + id + '/findings/', 'findings').filter(function(f) { return f.scan === id || true; });
-  var scanReports = (scan.reports || [].filter(function(r) { return r.scan === id; }));
+  var scanReports = scan.reports || [];
   var progress = scan.status === 'running' ? 65 : scan.status === 'completed' ? 100 : 0;
 
   return '' +
@@ -82,10 +82,10 @@ WG._scanFindingsTab = function(findings) {
   return '<div class="panel"><table class="data-table"><thead><tr><th>Severity</th><th>Title</th><th>Host</th><th>Port</th><th>Source</th><th>CVE</th></tr></thead><tbody>' +
     findings.sort(function(a, b) { return WG.sevOrder(a.severity) - WG.sevOrder(b.severity); }).map(function(f) {
       return '<tr onclick="WG.navigate(\'finding\',{id:\'' + f.id + '\'})">' +
-        '<td><span class="sev-badge ' + f.severity + '">' + f.severity + '</span></td>' +
+        '<td><span class="sev-badge ' + esc(f.severity) + '">' + esc(f.severity) + '</span></td>' +
         '<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
         '<td><span class="host-tag">' + esc(f.host_ip) + '</span></td>' +
-        '<td class="mono">' + (f.port || '\u2014') + '</td>' +
+        '<td class="mono">' + esc(f.port || '\u2014') + '</td>' +
         '<td><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
         '<td class="mono" style="color:var(--accent);">' + esc(f.cve || '\u2014') + '</td></tr>';
     }).join('') +
@@ -110,7 +110,11 @@ WG._scanReportsTab = function(reports) {
 WG.switchScanTab = function(tab, scanId) {
   document.querySelectorAll('#scanTabs .tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
   var el = document.getElementById('scanTabContent');
-  if (tab === 'hosts') el.innerHTML = WG._scanHostsTab([].filter(function(h) { return h.scan === scanId; }));
-  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab([].filter(function(f) { return f.scan === scanId; }));
-  else if (tab === 'reports') el.innerHTML = WG._scanReportsTab([].filter(function(r) { return r.scan === scanId; }));
+  var hosts = WG._cache['scan_hosts_' + scanId] || [];
+  var findings = WG._cache['scan_findings_' + scanId] || [];
+  var scan = WG._cache['scan_' + scanId];
+  var reports = scan && scan.reports ? scan.reports : [];
+  if (tab === 'hosts') el.innerHTML = WG._scanHostsTab(hosts);
+  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab(findings);
+  else if (tab === 'reports') el.innerHTML = WG._scanReportsTab(reports);
 };

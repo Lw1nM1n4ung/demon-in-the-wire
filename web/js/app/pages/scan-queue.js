@@ -102,9 +102,6 @@ WG._cancelAllRunning = function() {
 };
 
 WG._removeFromQueue = function(id) {
-  var scans = [];
-  var idx = scans.findIndex(function(s) { return s.id === id; });
-  if (idx !== -1) { scans.splice(idx, 1); }
   WG.api('/scans/' + id + '/', { method: 'DELETE' });
   WG.invalidateCache('scans');
   WG.toast('Removed from queue', 'info');

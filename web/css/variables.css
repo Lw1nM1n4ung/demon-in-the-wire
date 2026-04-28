@@ -95,3 +95,28 @@ a:hover { text-decoration: underline; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ── Topology animations ── */
+@keyframes topo-pulse {
+  0%   { r: 12; opacity: 0.9; }
+  70%  { r: 22; opacity: 0; }
+  100% { r: 22; opacity: 0; }
+}
+@keyframes topo-matched-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50%      { stroke-opacity: 0.2; }
+}
+.topo-matched { animation: topo-matched-pulse 1.2s ease-in-out infinite; }
+.topo-dimmed  { opacity: 0.12 !important; transition: opacity 0.2s ease; }
+
+#topoDetail {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity var(--transition-med), transform var(--transition-slow);
+  pointer-events: none;
+}
+#topoDetail.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}

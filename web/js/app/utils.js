@@ -43,7 +43,8 @@ WG.fmtDate = function(dateStr) {
 };
 
 WG.sevOrder = function(s) {
-  return { critical: 0, high: 1, medium: 2, low: 3, info: 4 }[s] || 5;
+  var m = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  return s in m ? m[s] : 5;
 };
 
 WG.toast = function(msg, type) {

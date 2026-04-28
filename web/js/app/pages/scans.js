@@ -95,8 +95,8 @@ WG.renderScans = function() {
       return '<tr data-id="' + s.id + '" data-status="' + s.status + '" data-type="' + s.scan_type + '" data-search="' + esc((s.name + ' ' + s.target).toLowerCase()) + '">' +
         '<td onclick="event.stopPropagation();"><input type="checkbox" class="scan-check" data-id="' + s.id + '" style="cursor:pointer;"></td>' +
         '<td onclick="WG.navigate(\'scan\',{id:\'' + s.id + '\'})" style="cursor:pointer;"><div style="font-weight:600;color:var(--text-bright);">' + esc(s.name) + '</div><span class="host-tag" style="margin-top:2px;">' + esc(s.target) + '</span></td>' +
-        '<td><span class="tag">' + s.scan_type + '</span></td>' +
-        '<td><span class="status-badge ' + s.status + '"><span class="dot"></span> ' + s.status + '</span></td>' +
+        '<td><span class="tag">' + esc(s.scan_type) + '</span></td>' +
+        '<td><span class="status-badge ' + esc(s.status) + '"><span class="dot"></span> ' + esc(s.status) + '</span></td>' +
         '<td class="mono">' + s.hosts_count + '</td>' +
         '<td class="mono">' + s.findings_count + '</td>' +
         '<td>' + WG.sevBarHtml(s) + '</td>' +
@@ -163,23 +163,30 @@ WG._bulkAction = function(action) {
   if (!ids.length) { WG.toast('No scans selected', 'info'); return; }
 
   if (action === 'cancel') {
+    var cancelled = 0;
     ids.forEach(function(id) {
-      var scan = [].find(function(s) { return s.id === id && s.status === 'running'; });
-      if (scan) scan.status = 'cancelled';
+      var scan = (WG._cache['scans'] || []).find(function(s) { return s.id === id && s.status === 'running'; });
+      if (scan) {
+        cancelled++;
+        WG.api('/scans/' + id + '/cancel/', { method: 'POST' });
+      }
     });
-    WG.toast('Cancelled ' + ids.length + ' scan(s)', 'info');
+    WG.toast('Cancelled ' + cancelled + ' scan(s)', 'info');
+    WG.invalidateCache('scans');
     WG.render();
   }
   if (action === 'delete') {
-    var scans = [];
-    [] = scans.filter(function(s) { return ids.indexOf(s.id) === -1; });
+    ids.forEach(function(id) {
+      WG.api('/scans/' + id + '/', { method: 'DELETE' });
+    });
     WG.toast('Deleted ' + ids.length + ' scan(s)', 'info');
+    WG.invalidateCache('scans');
     WG.render();
   }
 };
 
 WG._rescan = function(id) {
-  var scan = [].find(function(s) { return s.id === id; });
+  var scan = (WG._cache['scans'] || []).find(function(s) { return s.id === id; });
   if (!scan) return;
   WG.openModal('scanModal');
   setTimeout(function() {
@@ -197,8 +204,8 @@ WG._compareScans = function() {
   if (!aId || !bId) { el.innerHTML = '<span style="color:var(--critical);font-size:0.82rem;">Select two scans</span>'; return; }
   if (aId === bId) { el.innerHTML = '<span style="color:var(--medium);font-size:0.82rem;">Select two different scans</span>'; return; }
 
-  var aFindings = [].filter(function(f) { return f.scan === aId; });
-  var bFindings = [].filter(function(f) { return f.scan === bId; });
+  var aFindings = (WG._cache['scan_findings_' + aId] || WG.getCached('scan_findings_' + aId, '/scans/' + aId + '/findings/', 'findings'));
+  var bFindings = (WG._cache['scan_findings_' + bId] || WG.getCached('scan_findings_' + bId, '/scans/' + bId + '/findings/', 'findings'));
 
   var aTitles = {};
   aFindings.forEach(function(f) { aTitles[f.title + ':' + f.host_ip] = f; });
@@ -217,10 +224,10 @@ WG._compareScans = function() {
     '</div>' +
     (newFindings.length ? '<div style="margin-bottom:10px;"><div style="font-weight:600;color:var(--critical);font-size:0.82rem;margin-bottom:6px;">New Findings</div>' +
       newFindings.map(function(f) {
-        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:0.78rem;border-bottom:1px solid var(--border-dim);"><span class="sev-badge ' + f.severity + '" style="font-size:0.6rem;">' + f.severity + '</span><span style="color:var(--text-primary);">' + WG.escHtml(f.title) + '</span><span class="mono" style="color:var(--text-dim);">' + f.host_ip + '</span></div>';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:0.78rem;border-bottom:1px solid var(--border-dim);"><span class="sev-badge ' + WG.escHtml(f.severity) + '" style="font-size:0.6rem;">' + WG.escHtml(f.severity) + '</span><span style="color:var(--text-primary);">' + WG.escHtml(f.title) + '</span><span class="mono" style="color:var(--text-dim);">' + WG.escHtml(f.host_ip) + '</span></div>';
       }).join('') + '</div>' : '') +
     (resolvedFindings.length ? '<div><div style="font-weight:600;color:var(--success);font-size:0.82rem;margin-bottom:6px;">Resolved</div>' +
       resolvedFindings.map(function(f) {
-        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:0.78rem;border-bottom:1px solid var(--border-dim);text-decoration:line-through;opacity:0.6;"><span class="sev-badge ' + f.severity + '" style="font-size:0.6rem;">' + f.severity + '</span><span>' + WG.escHtml(f.title) + '</span><span class="mono">' + f.host_ip + '</span></div>';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:0.78rem;border-bottom:1px solid var(--border-dim);text-decoration:line-through;opacity:0.6;"><span class="sev-badge ' + WG.escHtml(f.severity) + '" style="font-size:0.6rem;">' + WG.escHtml(f.severity) + '</span><span>' + WG.escHtml(f.title) + '</span><span class="mono">' + WG.escHtml(f.host_ip) + '</span></div>';
       }).join('') + '</div>' : '');
 };

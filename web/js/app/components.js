@@ -44,7 +44,7 @@ WG.handleGlobalSearch = function(query) {
       html += '<div class="activity-item" style="cursor:pointer;padding:8px 4px;border-radius:var(--radius-sm);" onclick="WG.closeModal(\'searchModal\');WG.navigate(\'scan\',{id:\'' + s.id + '\'})">' +
         '<div class="activity-icon scan"><svg viewBox="0 0 24 24"><use href="#i-scan"/></svg></div>' +
         '<div class="activity-text"><strong>' + esc(s.name) + '</strong><p>' + esc(s.target) + '</p></div>' +
-        '<span class="status-badge ' + s.status + '" style="font-size:0.6rem;"><span class="dot"></span> ' + s.status + '</span></div>';
+        '<span class="status-badge ' + esc(s.status) + '" style="font-size:0.6rem;"><span class="dot"></span> ' + esc(s.status) + '</span></div>';
     });
   }
   if (mh.length) {
@@ -60,8 +60,8 @@ WG.handleGlobalSearch = function(query) {
     mf.forEach(function(f) {
       html += '<div class="activity-item" style="cursor:pointer;padding:8px 4px;border-radius:var(--radius-sm);" onclick="WG.closeModal(\'searchModal\');WG.navigate(\'finding\',{id:\'' + f.id + '\'})">' +
         '<div class="activity-icon vuln"><svg viewBox="0 0 24 24"><use href="#i-alert"/></svg></div>' +
-        '<div class="activity-text"><strong>' + esc(f.title) + '</strong><p>' + esc(f.host_ip) + ':' + f.port + '</p></div>' +
-        '<span class="sev-badge ' + f.severity + '" style="font-size:0.6rem;">' + f.severity + '</span></div>';
+        '<div class="activity-text"><strong>' + esc(f.title) + '</strong><p>' + esc(f.host_ip) + ':' + esc(f.port) + '</p></div>' +
+        '<span class="sev-badge ' + esc(f.severity) + '" style="font-size:0.6rem;">' + esc(f.severity) + '</span></div>';
     });
   }
   if (!ms.length && !mh.length && !mf.length) {

@@ -24,8 +24,8 @@ WG.renderHostDetail = function(id) {
 
   var esc = WG.escHtml;
   var scan = WG.getCached('scans', '/scans/').find(function(s) { return s.id === host.scan; });
-  var ports = host.ports || [].filter(function(p) { return p.host === id; });
-  var techs = host.technologies || [].filter(function(t) { return t.host === id; });
+  var ports = host.ports || [];
+  var techs = host.technologies || [];
   var hFindings = WG.getCached('host_findings_' + id, '/findings/?scan=' + (host.scan || ''), 'findings').filter(function(f) { return f.host === id || f.host_ip === host.ip; });
 
   var sevCards = ['critical','high','medium','low','info'].map(function(sev) {
@@ -37,9 +37,9 @@ WG.renderHostDetail = function(id) {
     '<div class="breadcrumbs"><a onclick="WG.navigate(\'scans\')">Scans</a><span class="sep">/</span><a onclick="WG.navigate(\'scan\',{id:\'' + host.scan + '\'})">' + esc(scan ? scan.name : 'Scan') + '</a><span class="sep">/</span><span>' + esc(host.ip) + '</span></div>' +
     '<div class="page-header"><div class="page-header-left"><h1>' + esc(host.ip) + '</h1><p>' + esc(host.hostname || 'No hostname') + ' &mdash; ' + esc(host.os || 'Unknown OS') + '</p></div></div>' +
     '<div class="info-grid" style="margin-bottom:24px;">' +
-      '<div class="info-item"><div class="info-label">IP Address</div><div class="info-value mono">' + host.ip + '</div></div>' +
-      '<div class="info-item"><div class="info-label">Hostname</div><div class="info-value">' + (host.hostname || '\u2014') + '</div></div>' +
-      '<div class="info-item"><div class="info-label">OS</div><div class="info-value"><span class="tag">' + (host.os || '\u2014') + '</span></div></div>' +
+      '<div class="info-item"><div class="info-label">IP Address</div><div class="info-value mono">' + esc(host.ip) + '</div></div>' +
+      '<div class="info-item"><div class="info-label">Hostname</div><div class="info-value">' + esc(host.hostname || '\u2014') + '</div></div>' +
+      '<div class="info-item"><div class="info-label">OS</div><div class="info-value"><span class="tag">' + esc(host.os || '\u2014') + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Open Ports</div><div class="info-value mono">' + host.ports_count + '</div></div>' +
       '<div class="info-item"><div class="info-label">Findings</div><div class="info-value mono">' + host.findings_count + '</div></div>' +
       '<div class="info-item"><div class="info-label">Scan</div><div class="info-value"><a onclick="WG.navigate(\'scan\',{id:\'' + host.scan + '\'})">' + esc(scan ? scan.name : '') + '</a></div></div>' +
@@ -60,9 +60,9 @@ WG._hostPortsTab = function(ports) {
   return '<div class="panel"><table class="data-table"><thead><tr><th>Port</th><th>Protocol</th><th>State</th><th>Service</th><th>Product</th><th>Version</th></tr></thead><tbody>' +
     ports.map(function(p) {
       return '<tr>' +
-        '<td class="mono" style="font-weight:600;color:var(--text-bright);">' + p.number + '</td>' +
-        '<td class="mono">' + p.protocol + '</td>' +
-        '<td><span class="status-badge completed" style="font-size:0.65rem;padding:2px 7px;">' + p.state + '</span></td>' +
+        '<td class="mono" style="font-weight:600;color:var(--text-bright);">' + esc(p.number) + '</td>' +
+        '<td class="mono">' + esc(p.protocol) + '</td>' +
+        '<td><span class="status-badge completed" style="font-size:0.65rem;padding:2px 7px;">' + esc(p.state) + '</span></td>' +
         '<td>' + esc(p.service_name) + '</td>' +
         '<td>' + (esc(p.service_product) || '<span style="color:var(--text-dim)">\u2014</span>') + '</td>' +
         '<td class="mono">' + (esc(p.service_version) || '\u2014') + '</td></tr>';
@@ -107,7 +107,7 @@ WG.switchHostTab = function(tab, hostId) {
   var el = document.getElementById('hostTabContent');
   var host = WG._cache['host_' + hostId];
   if (tab === 'ports') el.innerHTML = WG._hostPortsTab(host ? host.ports || [] : []);
-  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab([].filter(function(f) { return f.host === hostId; }));
+  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab((WG._cache['host_findings_' + hostId] || []).filter(function(f) { return f.host === hostId || f.host_ip === (host && host.ip); }));
   else if (tab === 'tech') el.innerHTML = WG._hostTechTab(host ? host.technologies || [] : []);
   else if (tab === 'screenshots' && host) {
     el.innerHTML = WG._hostScreenshotsTab(host.screenshots);
