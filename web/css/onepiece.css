@@ -1,0 +1,296 @@
+/* ═══════════════════════════════════════════════════
+   WIRE_GHOST — ONE PIECE THEME
+   Deep ocean, straw hat gold, adventure spirit
+   ═══════════════════════════════════════════════════ */
+
+/* ── Wave texture overlay ── */
+.onepiece::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    175deg,
+    transparent,
+    transparent 40px,
+    rgba(245,197,24,0.012) 40px,
+    rgba(245,197,24,0.012) 42px
+  );
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* ── Panel golden border ── */
+.onepiece .panel {
+  border-color: rgba(245,197,24,0.06);
+}
+.onepiece .panel:hover {
+  border-color: rgba(245,197,24,0.18);
+  box-shadow: 0 0 12px rgba(245,197,24,0.04);
+}
+
+/* ── Stat card warm edges ── */
+.onepiece .stat-card {
+  border-color: rgba(245,197,24,0.05);
+}
+.onepiece .stat-card:hover {
+  border-color: rgba(245,197,24,0.22);
+  box-shadow: 0 0 16px rgba(245,197,24,0.06);
+}
+.onepiece .stat-card::before {
+  background: linear-gradient(90deg, var(--op-gold), var(--op-red)) !important;
+  opacity: 1 !important;
+  height: 2px;
+}
+
+/* ── Headings — warm gold glow ── */
+.onepiece .page-header-left h1 {
+  text-shadow: 0 0 8px rgba(245,197,24,0.12);
+  color: #fff5e0;
+}
+
+/* ── Topbar ── */
+.onepiece .topbar {
+  border-bottom-color: rgba(245,197,24,0.08);
+}
+
+/* ── Logo — straw hat gold/red ── */
+.onepiece .topbar-logo {
+  background: linear-gradient(135deg, var(--op-gold), var(--op-red));
+}
+
+/* ── Title ── */
+.onepiece .topbar-title span {
+  color: var(--op-gold);
+}
+
+/* ── Sidebar ── */
+.onepiece .sidebar {
+  border-right-color: rgba(245,197,24,0.05);
+}
+.onepiece .sidebar-item.active {
+  background: rgba(245,197,24,0.07);
+  color: var(--op-gold);
+}
+.onepiece .sidebar-item.active::before {
+  background: linear-gradient(180deg, var(--op-gold), var(--op-red));
+}
+.onepiece .sidebar-item:hover {
+  background: rgba(245,197,24,0.04);
+}
+.onepiece .sidebar-badge {
+  background: rgba(229,57,53,0.12);
+  color: var(--op-red);
+}
+
+/* ── Buttons — warm golden primary ── */
+.onepiece .btn-primary {
+  background: linear-gradient(135deg, var(--op-gold), #d4a017);
+  color: #0a0e17;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(245,197,24,0.2);
+}
+.onepiece .btn-primary:hover {
+  box-shadow: 0 4px 20px rgba(245,197,24,0.3);
+}
+
+/* ── Data table ── */
+.onepiece .data-table tbody tr:hover {
+  background: rgba(245,197,24,0.03);
+  box-shadow: inset 3px 0 0 var(--op-gold);
+}
+.onepiece .data-table th {
+  color: var(--op-gold);
+}
+
+/* ── Severity badges ── */
+.onepiece .sev-badge.critical { box-shadow: 0 0 5px rgba(229,57,53,0.2); }
+.onepiece .sev-badge.high { box-shadow: 0 0 5px rgba(255,143,0,0.2); }
+
+/* ── Status badges ── */
+.onepiece .status-badge.running { box-shadow: 0 0 6px rgba(245,197,24,0.2); }
+.onepiece .status-badge.completed { box-shadow: 0 0 6px rgba(102,187,106,0.2); }
+
+/* ── Host tag ── */
+.onepiece .host-tag::before {
+  background: var(--op-sea);
+}
+
+/* ── Tags ── */
+.onepiece .tag {
+  border-color: rgba(41,182,246,0.12);
+  color: var(--op-sea);
+}
+
+/* ── Inputs ── */
+.onepiece .form-input:focus,
+.onepiece .form-select:focus {
+  border-color: var(--op-gold);
+  box-shadow: 0 0 0 2px rgba(245,197,24,0.12);
+}
+
+/* ── Toggle ── */
+.onepiece .toggle-track.on {
+  background: var(--op-gold);
+  border-color: var(--op-gold);
+}
+
+/* ── Tabs ── */
+.onepiece .tab.active::after {
+  background: linear-gradient(90deg, var(--op-gold), var(--op-red));
+}
+.onepiece .tab.active {
+  color: var(--op-gold);
+}
+
+/* ── Progress bar ── */
+.onepiece .progress-fill {
+  background: linear-gradient(90deg, var(--op-gold), var(--op-red));
+}
+
+/* ── Severity bars ── */
+.onepiece .sev-bar .c { box-shadow: 0 0 4px rgba(229,57,53,0.3); }
+.onepiece .sev-bar .h { box-shadow: 0 0 4px rgba(255,143,0,0.3); }
+.onepiece .sev-bar .m { box-shadow: 0 0 4px rgba(245,197,24,0.3); }
+.onepiece .sev-bar .l { box-shadow: 0 0 4px rgba(41,182,246,0.3); }
+
+/* ── Code blocks ── */
+.onepiece .code-block {
+  border-color: rgba(245,197,24,0.06);
+  background: rgba(4,8,26,0.9);
+}
+
+/* ── Toasts ── */
+.onepiece .toast {
+  border-color: rgba(245,197,24,0.1);
+}
+
+/* ── Modal ── */
+.onepiece .modal {
+  border-color: rgba(245,197,24,0.08);
+}
+
+/* ── User dropdown ── */
+.onepiece .user-dropdown {
+  border-color: rgba(245,197,24,0.1);
+}
+.onepiece .user-dropdown::before {
+  border-color: rgba(245,197,24,0.1);
+}
+.onepiece .user-dropdown-avatar {
+  border-color: var(--op-gold);
+}
+.onepiece .user-dropdown-role {
+  background: rgba(245,197,24,0.1);
+  color: var(--op-gold);
+}
+
+/* ── Avatar ── */
+.onepiece .topbar-avatar {
+  border-color: rgba(245,197,24,0.2);
+}
+.onepiece .topbar-avatar:hover {
+  border-color: var(--op-gold);
+  box-shadow: 0 0 10px rgba(245,197,24,0.25);
+}
+
+/* ── Scrollbar ── */
+.onepiece ::-webkit-scrollbar-thumb {
+  background: rgba(245,197,24,0.12);
+}
+.onepiece ::-webkit-scrollbar-thumb:hover {
+  background: rgba(245,197,24,0.25);
+}
+
+/* ═══════════════ ANIMATION SYSTEM ═══════════════ */
+
+/* ── Gold sparkle on page title ── */
+@keyframes opGoldShimmer {
+  0%, 80%, 100% { text-shadow: 0 0 8px rgba(245,197,24,0.12); }
+  85% { text-shadow: 0 0 16px rgba(245,197,24,0.3), 0 0 30px rgba(245,197,24,0.1); }
+  90% { text-shadow: 0 0 8px rgba(245,197,24,0.12); }
+}
+
+.onepiece .page-header-left h1 {
+  animation: opGoldShimmer 8s ease infinite;
+}
+
+/* ── Topbar title warm pulse ── */
+@keyframes opTitlePulse {
+  0%, 90%, 100% { opacity: 1; }
+  95% { opacity: 0.85; text-shadow: 0 0 12px rgba(245,197,24,0.3); }
+}
+
+.onepiece .topbar-title {
+  animation: opTitlePulse 12s ease infinite;
+}
+
+/* ── Stat value bounce on hover ── */
+@keyframes opStatBounce {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.05); }
+  60% { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+
+.onepiece .stat-card:hover .stat-value {
+  animation: opStatBounce 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Sidebar active warm glow ── */
+@keyframes opSideGlow {
+  0%, 92%, 100% { box-shadow: none; }
+  96% { box-shadow: inset 0 0 12px rgba(245,197,24,0.04); }
+}
+
+.onepiece .sidebar-item.active {
+  animation: opSideGlow 6s ease infinite;
+}
+
+/* ── Table row slide-in on hover ── */
+.onepiece .data-table tbody tr:hover {
+  transition: all 0.2s ease;
+}
+
+/* ── Button golden wave on hover ── */
+@keyframes opBtnWave {
+  0%, 100% { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(245,197,24,0.3); }
+  50% { transform: translateY(-3px); box-shadow: 0 6px 24px rgba(245,197,24,0.35); }
+}
+
+.onepiece .btn-primary:hover {
+  animation: opBtnWave 0.6s ease;
+}
+
+/* ── Sidebar badge pulse ── */
+@keyframes opBadgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+.onepiece .sidebar-badge {
+  animation: opBadgePulse 2.5s ease infinite;
+}
+
+/* ── Modal entrance — slide up like a rising wave ── */
+@keyframes opModalRise {
+  0% { opacity: 0; transform: translateY(30px) scale(0.96); }
+  50% { opacity: 1; transform: translateY(-4px) scale(1.01); }
+  100% { transform: none; }
+}
+
+.onepiece .modal-overlay.active .modal {
+  animation: opModalRise 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+/* ── Login/setup card golden border ── */
+@keyframes opLoginGlow {
+  0%, 88%, 100% { box-shadow: var(--shadow-lg); }
+  92% { box-shadow: var(--shadow-lg), 0 0 20px rgba(245,197,24,0.08); }
+  96% { box-shadow: var(--shadow-lg), 0 0 10px rgba(245,197,24,0.04); }
+}
+
+.onepiece .login-card,
+.onepiece .setup-card {
+  border-color: rgba(245,197,24,0.08);
+  animation: opLoginGlow 10s ease infinite;
+}

@@ -55,6 +55,22 @@ WG.THEMES = {
     '--text-bright': '#f0f6ff',
     '--text-muted': '#3a4e60',
   },
+  onepiece: {
+    '--bg-void': '#04081a',
+    '--bg-primary': '#081028',
+    '--bg-panel': '#0c1530',
+    '--bg-card': '#0f1d36',
+    '--bg-hover': '#152848',
+    '--bg-input': '#0a1225',
+    '--bg-elevated': '#132240',
+    '--border-dim': 'rgba(245,197,24,0.05)',
+    '--border-soft': 'rgba(245,197,24,0.1)',
+    '--text-primary': '#e8ecf4',
+    '--text-secondary': '#8892a4',
+    '--text-dim': '#5a6478',
+    '--text-bright': '#fff5e0',
+    '--text-muted': '#3d4654',
+  },
 };
 
 /* Cyberpunk mode forces its own accent */
@@ -81,6 +97,30 @@ WG.CYBERPUNK_ACCENT = {
   '--info-dim': 'rgba(179,136,255,0.15)',
   '--success': '#00e676',
   '--success-dim': 'rgba(0,230,118,0.15)',
+};
+
+WG.ONEPIECE_ACCENT = {
+  '--accent': '#F5C518',
+  '--accent-solid': '#d4a017',
+  '--accent-dim': 'rgba(245,197,24,0.15)',
+  '--accent-glow': 'rgba(245,197,24,0.4)',
+  '--border-active': 'rgba(245,197,24,0.5)',
+  '--border-accent': 'rgba(245,197,24,0.3)',
+  '--op-gold': '#F5C518',
+  '--op-red': '#E53935',
+  '--op-sea': '#29B6F6',
+  '--critical': '#E53935',
+  '--critical-dim': 'rgba(229,57,53,0.15)',
+  '--high': '#FF8F00',
+  '--high-dim': 'rgba(255,143,0,0.15)',
+  '--medium': '#F5C518',
+  '--medium-dim': 'rgba(245,197,24,0.15)',
+  '--low': '#29B6F6',
+  '--low-dim': 'rgba(41,182,246,0.15)',
+  '--info': '#66BB6A',
+  '--info-dim': 'rgba(102,187,106,0.15)',
+  '--success': '#66BB6A',
+  '--success-dim': 'rgba(102,187,106,0.15)',
 };
 
 WG.ACCENT_COLORS = {
@@ -148,13 +188,15 @@ WG.applyTheme = function(prefs) {
   Object.keys(vars).forEach(function(k) { root.setProperty(k, vars[k]); });
   document.body.dataset.theme = mode;
 
-  // Cyberpunk forces its own accent + severity colors
+  document.body.classList.remove('cyberpunk', 'onepiece');
+
   if (mode === 'cyberpunk') {
     Object.keys(WG.CYBERPUNK_ACCENT).forEach(function(k) { root.setProperty(k, WG.CYBERPUNK_ACCENT[k]); });
     document.body.classList.add('cyberpunk');
+  } else if (mode === 'onepiece') {
+    Object.keys(WG.ONEPIECE_ACCENT).forEach(function(k) { root.setProperty(k, WG.ONEPIECE_ACCENT[k]); });
+    document.body.classList.add('onepiece');
   } else {
-    document.body.classList.remove('cyberpunk');
-    // Restore default severity colors
     root.setProperty('--critical', '#ff3b5c');
     root.setProperty('--critical-dim', 'rgba(255,59,92,0.12)');
     root.setProperty('--high', '#ff6b35');
@@ -168,7 +210,6 @@ WG.applyTheme = function(prefs) {
     root.setProperty('--success', '#34d399');
     root.setProperty('--success-dim', 'rgba(52,211,153,0.12)');
 
-    // Apply user accent
     var accent = prefs.accent || 'blue';
     var accentVars = WG.ACCENT_COLORS[accent] || WG.ACCENT_COLORS.blue;
     Object.keys(accentVars).forEach(function(k) { root.setProperty(k, accentVars[k]); });
