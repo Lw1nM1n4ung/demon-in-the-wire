@@ -72,6 +72,20 @@ VIEWER_USER = "test_viewer"
 VIEWER_PASS = "QAtest2026!"
 
 
+def flush_rate_limits():
+    """Clear DRF throttle and login lockout keys from Redis."""
+    import subprocess
+    subprocess.run(
+        ["docker", "compose", "exec", "-T", "api",
+         "python", "manage.py", "shell", "-c",
+         "c=__import__('django.core.cache',fromlist=['cache']).cache;"
+         "r=c._cache.get_client();"
+         "[r.delete(k) for k in r.keys('*throttle*')+r.keys('*login*')]"],
+        capture_output=True, text=True,
+        cwd="/home/demon/Tools/demon-in-the-wire",
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 5A — OWASP Fix Regressions (10 tests)
 # ═══════════════════════════════════════════════════════════════════
@@ -445,10 +459,12 @@ def main():
     print(f"  Target: {args.base}")
     print(f"{'═' * 60}")
 
+    flush_rate_limits()
     phase_5a_owasp(qa)
     phase_5b_headers(qa)
     phase_5c_access(qa)
     phase_5d_session(qa)
+    flush_rate_limits()
     phase_5e_input(qa)
     phase_5f_throttle(qa)  # last — exhausts rate limits
 

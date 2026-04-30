@@ -77,7 +77,7 @@ services:
       DJANGO_SETTINGS_MODULE: wireghost_web.settings
       DJANGO_DEBUG: "false"
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,${WIREGHOST_HOST:-localhost}"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,${WIREGHOST_HOST:-localhost}"
       WIREGHOST_HOST: ${WIREGHOST_HOST:-localhost}
       WIREGHOST_PORT: ${WIREGHOST_PORT:-443}
       WIREGHOST_PROTO: ${WIREGHOST_PROTO:-https}
