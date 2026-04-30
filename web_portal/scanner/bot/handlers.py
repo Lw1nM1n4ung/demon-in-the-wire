@@ -87,6 +87,47 @@ async def cmd_unlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f'{prefix} {esc(msg)}', parse_mode=HTML)
 
 
+async def cmd_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from scanner.bot.auth import (
+        check_rate_limit, generate_magic_token,
+        UNLOCK_RATE_PREFIX, UNLOCK_RATE_MAX, UNLOCK_RATE_TTL,
+    )
+    tg_user = update.effective_user
+    if not tg_user:
+        return
+    if not check_rate_limit(UNLOCK_RATE_PREFIX, str(tg_user.id), UNLOCK_RATE_MAX, UNLOCK_RATE_TTL):
+        await update.message.reply_text('Rate limit reached. Try again in a few minutes.')
+        return
+    user = await sync_to_async(resolve_user)(tg_user.id)
+    if user is None:
+        await update.message.reply_text(
+            'Your Telegram is not linked to any Wire_Ghost account.\n'
+            'Use <code>/link &lt;code&gt;</code> to connect first.',
+            parse_mode=HTML,
+        )
+        return
+
+    def _do_unlock():
+        from django.core.cache import cache as djcache
+        djcache.delete(f'login_user_attempts:{user.username.lower()}')
+        token = generate_magic_token(user)
+        AuditLog.log(user.username, 'auth.unlock',
+            f'Account unlocked via Telegram (tg_user={tg_user.id})', 'auth')
+        return token
+
+    token = await sync_to_async(_do_unlock)()
+    await update.message.reply_text(
+        '\U0001f513 <b>Account Unlocked</b>\n'
+        '━━━━━━━━━━━━━━━━━\n\n'
+        'Your login lockout has been cleared.\n\n'
+        '<b>Option 1:</b> Go back to the login page and sign in normally.\n\n'
+        '<b>Option 2:</b> Use this one-time login token (expires in 5 min):\n'
+        f'<code>/login?token={token}</code>\n\n'
+        '<i>Append this to your portal URL to auto-login.</i>',
+        parse_mode=HTML,
+    )
+
+
 async def cmd_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.user_data.pop('_pending_group_confirm', None)
     if not chat_id:
@@ -404,6 +445,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<b>🔗 Account</b>',
         '  <code>/link</code> <i>&lt;code&gt;</i> — Link Telegram account',
         '  <code>/unlink</code> — Unlink account',
+        '  <code>/unlock</code> — Unlock account &amp; get login link',
         '  <code>/help</code> — This message',
     ]
 

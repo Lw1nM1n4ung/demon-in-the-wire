@@ -36,6 +36,7 @@ from scanner.bot.handlers import (
     cmd_start,
     cmd_status,
     cmd_unlink,
+    cmd_unlock,
     cmd_users,
     cmd_yes,
 )
@@ -64,6 +65,7 @@ class Command(BaseCommand):
         # Pre-auth commands (/link must stay ungated for the linking flow)
         app.add_handler(CommandHandler('start', cmd_start))
         app.add_handler(CommandHandler('link', cmd_link))
+        app.add_handler(CommandHandler('unlock', cmd_unlock))
         app.add_handler(CommandHandler('yes', cmd_yes))
         app.add_handler(CommandHandler('no', cmd_no))
 

@@ -24,6 +24,10 @@ SCAN_RATE_PREFIX = 'tg:scanrate:'
 SCAN_RATE_MAX = 5
 SCAN_RATE_TTL = 3600
 
+UNLOCK_RATE_PREFIX = 'tg:unlock:'
+UNLOCK_RATE_MAX = 3
+UNLOCK_RATE_TTL = 900
+
 
 def resolve_user(tg_user_id: int) -> Optional[User]:
     try:
@@ -92,6 +96,16 @@ def unlink_account(tg_user_id: int) -> tuple[bool, str]:
 
     AuditLog.log(username, 'telegram.unlink', f'Telegram user {tg_user_id} unlinked', 'config')
     return True, f'Unlinked from {username}.'
+
+
+def generate_magic_token(user) -> str:
+    import secrets
+    token = secrets.token_urlsafe(48)
+    cache.set(f'unlock_token:{token}', json.dumps({
+        'user_id': str(user.id),
+        'username': user.username,
+    }), 300)
+    return token
 
 
 def check_rate_limit(prefix: str, key: str, max_count: int, ttl: int) -> bool:

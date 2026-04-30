@@ -89,7 +89,7 @@ WG._handleLogin = async function() {
       return;
     }
     err.textContent = res.status === 429
-      ? 'Too many attempts — try again in a minute.'
+      ? 'Account locked — send /unlock to your Wire_Ghost Telegram bot to recover.'
       : 'Invalid username or password';
   } catch (e) {
     err.textContent = 'Could not reach the server.';
@@ -99,6 +99,33 @@ WG._handleLogin = async function() {
   document.getElementById('loginPass').value = '';
   btn.disabled = false;
   btn.textContent = 'Sign In';
+};
+
+WG._handleTokenLogin = async function(token) {
+  var err = document.getElementById('loginError');
+  var btn = document.getElementById('loginBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
+  try {
+    var res = await fetch(WG.API_BASE + '/auth/token-login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token }),
+      credentials: 'include',
+    });
+    if (res.ok) {
+      var data = await res.json();
+      WG._setLoginCache(data);
+      WG._redirectAfterLogin();
+      return;
+    }
+    if (err) err.textContent = res.status === 429
+      ? 'Too many token attempts. Try again later.'
+      : 'Invalid or expired recovery token.';
+  } catch (e) {
+    if (err) err.textContent = 'Could not reach the server.';
+  }
+  if (err) err.style.display = 'block';
+  if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
 };
 
 WG._redirectAfterLogin = function() {
@@ -210,6 +237,11 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       WG._renderLoginForm(mount);
+      var tokenParam = new URLSearchParams(window.location.search).get('token');
+      if (tokenParam) {
+        history.replaceState({}, '', '/login');
+        WG._handleTokenLogin(tokenParam);
+      }
     })
     .catch(function() { WG._renderLoginForm(mount); });
 });

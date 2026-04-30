@@ -17,7 +17,7 @@ from scanner.auth_views import (
     audit_log,
     tokens_list_or_create, tokens_revoke,
     notifications_config, notifications_test, tools_health, system_stats,
-    telegram_link_code, telegram_link_status,
+    telegram_link_code, telegram_link_status, auth_token_login,
     update_check_view, update_apply_view, update_feeds_view,
 )
 
@@ -41,6 +41,7 @@ urlpatterns = [
     path('api/report-config/logo/', upload_logo, name='upload-logo'),
     # Auth
     path('api/auth/login/', auth_login, name='auth-login'),
+    path('api/auth/token-login/', auth_token_login, name='auth-token-login'),
     path('api/auth/logout/', auth_logout, name='auth-logout'),
     path('api/auth/csrf/', auth_csrf, name='auth-csrf'),
     path('api/auth/me/', auth_me, name='auth-me'),

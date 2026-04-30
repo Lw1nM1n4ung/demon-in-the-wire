@@ -53,6 +53,9 @@ _LOGIN_MAX = 10  # max attempts per window
 _LOGIN_USER_WINDOW = 900  # 15 minutes
 _LOGIN_USER_MAX = 5  # per username
 
+_TOKEN_LOGIN_WINDOW = 300
+_TOKEN_LOGIN_MAX = 20
+
 
 def _rate_check(key, limit, window):
     count = cache.get(key, 0)
@@ -164,6 +167,47 @@ def auth_login(request):
 
     login(request, user)
     AuditLog.log(user.get_full_name() or user.username, 'login', f'Logged in from {ip}', 'auth', ip)
+    return Response(_serialize_user(user))
+
+
+@api_view(['POST'])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
+def auth_token_login(request):
+    """One-time token login for account recovery via Telegram /unlock.
+
+    Bypasses IP-based login rate limits (the user is locked out there).
+    MFA is skipped — Telegram already proves second-factor possession.
+    """
+    ip = request.META.get('REMOTE_ADDR', '')
+    tk_key = f'token_login_attempts:{ip}'
+    tk_attempts = cache.get(tk_key, 0)
+    if tk_attempts >= _TOKEN_LOGIN_MAX:
+        return Response({'error': 'Too many failed token attempts.'}, status=429)
+
+    token = request.data.get('token', '')
+    if not isinstance(token, str) or not token:
+        return Response({'error': 'Token required'}, status=400)
+
+    raw = cache.get(f'unlock_token:{token}')
+    if raw is None:
+        cache.set(tk_key, tk_attempts + 1, _TOKEN_LOGIN_WINDOW)
+        return Response({'error': 'Invalid or expired token'}, status=401)
+
+    cache.delete(f'unlock_token:{token}')
+    data = json.loads(raw) if isinstance(raw, str) else raw
+
+    try:
+        user = User.objects.get(id=data['user_id'], is_active=True)
+    except User.DoesNotExist:
+        return Response({'error': 'Account not found'}, status=401)
+
+    cache.delete(f'login_attempts:{ip}')
+    cache.delete(f'login_user_attempts:{data.get("username", "").lower()}')
+
+    login(request, user)
+    AuditLog.log(user.get_full_name() or user.username,
+        'auth.token_login', f'Magic link login from {ip}', 'auth', ip)
     return Response(_serialize_user(user))
 
 
