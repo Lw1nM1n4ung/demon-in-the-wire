@@ -36,6 +36,7 @@ WG._topoSearchExec = function(query) {
     if (s.sel.label) s.sel.label.classed('topo-dimmed', false);
     if (s.sel.link) s.sel.link.classed('topo-dimmed', false);
     if (s.sel.hull) s.sel.hull.classed('topo-dimmed', false);
+    if (s.sel.icon) s.sel.icon.classed('topo-dimmed', false);
     return;
   }
 
@@ -44,11 +45,12 @@ WG._topoSearchExec = function(query) {
     if (entry.tokens.indexOf(q) !== -1) matched[entry.nodeId] = true;
   });
 
+  var dimFn = function(d) { return d.type === 'host' && !matched[d.id]; };
   s.sel.node
     .classed('topo-matched', function(d) { return !!matched[d.id]; })
-    .classed('topo-dimmed', function(d) {
-      return d.type === 'host' && !matched[d.id];
-    });
+    .classed('topo-dimmed', dimFn);
+
+  if (s.sel.icon) s.sel.icon.classed('topo-dimmed', dimFn);
 
   if (s.sel.label) {
     s.sel.label.classed('topo-dimmed', function(d) {

@@ -98,6 +98,15 @@ WG._topoSetLayout = function(mode) {
         if (d.targetY !== undefined) { d.y = d.targetY; d.fy = d.targetY; }
       });
   }
+  if (s.sel.icon) {
+    s.sel.icon.transition().duration(600).ease(d3.easeCubicOut)
+      .attr('transform', function(d) {
+        var x = d.targetX !== undefined ? d.targetX : d.x;
+        var y = d.targetY !== undefined ? d.targetY : d.y;
+        var sc = (d.r || 8) * 0.12;
+        return 'translate(' + (x || 0) + ',' + (y || 0) + ') scale(' + sc + ')';
+      });
+  }
   if (s.sel.label) {
     s.sel.label.transition().duration(600).ease(d3.easeCubicOut)
       .attr('x', function(d) { return d.targetX !== undefined ? d.targetX : d.x; })

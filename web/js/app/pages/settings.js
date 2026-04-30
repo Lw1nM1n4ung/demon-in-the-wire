@@ -383,7 +383,17 @@ WG._settingsTools = function() {
       '<tbody id="toolsHealthBody">' + tools.map(_toolsRow).join('') + '</tbody>' +
     '</table>' +
     (tools.length ? '' : '<div class="panel-empty" style="padding:14px 0;font-size:0.82rem;color:var(--text-dim);">Probing tools…</div>') +
-    '</div>';
+    '</div>' +
+    ((WG.currentUser && WG.currentUser() && WG.currentUser().role === 'owner')
+      ? '<div class="panel" style="max-width:760px;margin-top:16px;"><div class="panel-header"><div class="panel-title">Security Feeds</div></div>' +
+        '<div class="panel-body">' +
+          '<div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">Update nuclei templates, searchsploit database, and OpenVAS NASL feeds on the worker container.</div>' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<button class="btn btn-secondary btn-sm" id="btnUpdateFeeds" onclick="WG._updateFeeds()">Update Security Feeds</button>' +
+            '<span id="feedsUpdateStatus" style="font-size:0.78rem;color:var(--text-dim);"></span>' +
+          '</div>' +
+        '</div></div>'
+      : '');
 };
 
 function _toolsRow(t) {
@@ -405,6 +415,23 @@ WG._refreshToolsHealth = function() {
       WG._cache['tools_health'] = data;
       WG.toast('Tools re-probed', 'info');
       if (WG.state.currentPage === 'settings') WG.switchSettingsTab('tools');
+    }
+  });
+};
+
+WG._updateFeeds = function() {
+  var btn = document.getElementById('btnUpdateFeeds');
+  var status = document.getElementById('feedsUpdateStatus');
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = 'Queuing...';
+  WG.api('/update/feeds/', { method: 'POST' }).then(function(data) {
+    if (data && data.status === 'queued') {
+      if (status) status.textContent = 'Update queued (task: ' + WG.escHtml((data.task_id || '').substring(0, 8)) + '…)';
+      WG.toast('Feed update queued on worker', 'success');
+    } else {
+      if (btn) btn.disabled = false;
+      if (status) status.textContent = '';
+      WG.toast((data && data.error) || 'Failed to queue feed update', 'error');
     }
   });
 };
@@ -702,10 +729,80 @@ WG._settingsApi = function() {
 
 /* ── About ── */
 WG._settingsAbout = function() {
+  var esc = WG.escHtml;
+  var user = WG.currentUser && WG.currentUser();
+  var isOwner = user && user.role === 'owner';
+  var ud = WG._aboutUpdateData;
+
+  WG.api('/update-check/').then(function(data) {
+    WG._aboutUpdateData = data || {};
+    var el = document.getElementById('aboutUpdateStatus');
+    if (el) { el.textContent = ''; el.insertAdjacentHTML('beforeend', WG._aboutUpdateStatusHtml(data, isOwner)); }
+  });
+
   return '<div class="panel" style="max-width:700px;"><div class="panel-header"><div class="panel-title">About Wire_Ghost</div></div>' +
     '<div class="panel-body"><div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;"><div class="topbar-logo" style="width:48px;height:48px;font-size:18px;border-radius:12px;">WG</div><div><div style="font-weight:800;font-size:1.2rem;color:var(--text-bright);">Wire<span style="color:var(--accent);font-family:var(--font-mono);">_Ghost</span></div><div style="font-size:0.82rem;color:var(--text-dim);">Vulnerability Assessment Portal</div></div></div>' +
-    '<div class="info-grid" style="grid-template-columns:1fr 1fr;"><div class="info-item"><div class="info-label">Version</div><div class="info-value">2.0.0-rewrite</div></div><div class="info-item"><div class="info-label">Branch</div><div class="info-value mono">rewrite-v2</div></div><div class="info-item"><div class="info-label">License</div><div class="info-value">MIT</div></div><div class="info-item"><div class="info-label">Author</div><div class="info-value">callmedemon</div></div></div>' +
+    '<div class="info-grid" style="grid-template-columns:1fr 1fr;">' +
+      '<div class="info-item"><div class="info-label">Version</div><div class="info-value">' + esc(ud && ud.current ? ud.current : '2.0.0') + '</div></div>' +
+      '<div class="info-item"><div class="info-label">Branch</div><div class="info-value mono">rewrite-v2</div></div>' +
+      '<div class="info-item"><div class="info-label">License</div><div class="info-value">MIT</div></div>' +
+      '<div class="info-item"><div class="info-label">Author</div><div class="info-value">callmedemon</div></div>' +
+    '</div>' +
+    '<div id="aboutUpdateStatus" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);">' +
+      WG._aboutUpdateStatusHtml(ud, isOwner) +
+    '</div>' +
     '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);font-size:0.82rem;color:var(--text-dim);line-height:1.7;">Security scanning orchestration toolkit. Coordinates Nmap, Nuclei, Dirsearch, WPScan, and more into a parallel pipeline with automated DOCX/XLSX/HTML reporting.</div></div></div>';
+};
+
+WG._aboutUpdateStatusHtml = function(data, isOwner) {
+  var esc = WG.escHtml;
+  if (!data) return '<div style="font-size:0.82rem;color:var(--text-dim);">Checking for updates...</div>';
+  if (data.error) return '<div style="font-size:0.82rem;color:var(--text-dim);">Unable to check for updates: ' + esc(data.error) + '</div>' +
+    (isOwner ? '<div style="margin-top:10px;"><button class="btn btn-secondary btn-sm" onclick="WG._forceUpdateCheck()">Retry</button></div>' : '');
+
+  if (!data.update_available) {
+    return '<div style="font-size:0.82rem;color:var(--accent);"><strong>&#10003; Up to date</strong> — ' + esc(data.current || '') + ' is the latest version.' +
+      (data.checked_at ? ' <span style="color:var(--text-dim);">Last checked: ' + esc(data.checked_at.replace('T', ' ').substring(0, 19)) + ' UTC</span>' : '') +
+      '</div>' +
+      (isOwner ? '<div style="margin-top:10px;"><button class="btn btn-secondary btn-sm" onclick="WG._forceUpdateCheck()">Check Now</button></div>' : '');
+  }
+
+  var html = '<div style="font-size:0.82rem;border-left:3px solid var(--accent);padding:10px 14px;background:var(--accent-dim);border-radius:8px;">' +
+    '<strong>&#128230; Update available:</strong> ' + esc(data.latest) +
+    (data.published_at ? ' <span style="color:var(--text-dim);">(' + esc(data.published_at.split('T')[0]) + ')</span>' : '') +
+    (data.latest_url ? ' &mdash; <a href="' + esc(data.latest_url) + '" target="_blank" rel="noopener" style="color:var(--accent);">Release Notes</a>' : '') +
+    '</div>';
+
+  if (isOwner) {
+    html += '<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">' +
+      '<button class="btn btn-primary btn-sm" onclick="WG._requestUpdate()">Request Update</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="WG._forceUpdateCheck()">Re-check</button>' +
+    '</div>' +
+    '<div style="margin-top:10px;font-size:0.72rem;color:var(--text-dim);">After requesting, run on the host: <code class="mono">./scripts/wg-ctl update</code></div>';
+  }
+  return html;
+};
+
+WG._forceUpdateCheck = function() {
+  WG._aboutUpdateData = null;
+  WG.api('/update-check/', { method: 'POST' }).then(function(data) {
+    WG._aboutUpdateData = data || {};
+    if (WG.state.currentPage === 'settings') WG.switchSettingsTab('about');
+    if (data && !data.error) WG.toast('Update check complete', 'success');
+    else WG.toast((data && data.error) || 'Check failed', 'error');
+  });
+};
+
+WG._requestUpdate = function() {
+  if (!confirm('This will flag the system for update. You must then run ./scripts/wg-ctl update on the host. Continue?')) return;
+  WG.api('/update/apply/', { method: 'POST' }).then(function(data) {
+    if (data && data.status === 'flagged') {
+      WG.toast('Update flagged. Run: ./scripts/wg-ctl update', 'success');
+      if (WG.state.currentPage === 'settings') WG.switchSettingsTab('about');
+    } else {
+      WG.toast((data && data.error) || 'Failed to request update', 'error');
+    }
+  });
 };
 
 /* ── Administration (Owner/superuser only) ── */

@@ -50,11 +50,16 @@ WG.renderScheduled = function() {
       '<div class="empty-state"><div class="icon">&#8635;</div><h3>No scheduled scans</h3><p>Set up recurring vulnerability assessments.</p>' +
       '<button class="btn btn-primary" style="margin-top:16px;" onclick="WG._openScheduleEditor()">Create Schedule</button></div>'
     :
-      '<div class="panel"><table class="data-table"><thead><tr><th>Name</th><th>Target</th><th>Frequency</th><th>Time</th><th>Stop By</th><th>Type</th><th>Policy</th><th>Status</th><th>Last Run</th><th>Next Run</th><th></th></tr></thead><tbody>' +
+      '<div class="filters-bar">' +
+        '<input class="filter-input" placeholder="Search schedules..." id="schedSearch" oninput="WG.filterSchedules()">' +
+        '<select class="filter-select" id="schedFreqFilter" onchange="WG.filterSchedules()"><option value="">All Frequencies</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 Weeks</option><option value="monthly">Monthly</option></select>' +
+        '<select class="filter-select" id="schedStatusFilter" onchange="WG.filterSchedules()"><option value="">All Status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select>' +
+      '</div>' +
+      '<div class="panel"><table class="data-table" id="schedulesTable"><thead><tr><th>Name</th><th>Target</th><th>Frequency</th><th>Time</th><th>Stop By</th><th>Type</th><th>Policy</th><th>Status</th><th>Last Run</th><th>Next Run</th><th></th></tr></thead><tbody>' +
       schedules.map(function(s) {
         var timeStr = s.time || '';
         if (typeof timeStr === 'string' && timeStr.length > 5) timeStr = timeStr.substring(0, 5);
-        return '<tr>' +
+        return '<tr data-search="' + esc((s.name + ' ' + s.target + ' ' + s.scan_type + ' ' + (s.frequency || '')).toLowerCase()) + '" data-freq="' + esc(s.frequency || '') + '" data-enabled="' + (s.enabled ? 'enabled' : 'disabled') + '">' +
           '<td style="font-weight:600;color:var(--text-bright);">' + esc(s.name) + '</td>' +
           '<td><span class="host-tag">' + esc(s.target) + '</span></td>' +
           '<td><span class="tag">' + esc(freqLabels[s.frequency] || s.frequency) + '</span></td>' +
@@ -210,5 +215,17 @@ WG._deleteSchedule = function(id) {
     WG.invalidateCache('schedules');
     WG.toast('Schedule deleted', 'info');
     WG.render();
+  });
+};
+
+WG.filterSchedules = function() {
+  var search = (document.getElementById('schedSearch').value || '').toLowerCase();
+  var freq = document.getElementById('schedFreqFilter').value;
+  var status = document.getElementById('schedStatusFilter').value;
+  document.querySelectorAll('#schedulesTable tbody tr').forEach(function(tr) {
+    var ok = (!search || tr.dataset.search.includes(search)) &&
+             (!freq || tr.dataset.freq === freq) &&
+             (!status || tr.dataset.enabled === status);
+    tr.style.display = ok ? '' : 'none';
   });
 };

@@ -57,6 +57,7 @@ WG.renderNewScan = function() {
               WG._nsToolToggle('searchsploit', 'Searchsploit', 'Exploit DB search', true) +
               WG._nsToolToggle('wpscan', 'WPScan', 'WordPress scanner', false) +
               WG._nsToolToggle('service_enum', 'Service Enum', 'Default cred checks', true) +
+              WG._nsToolToggle('enum4linux', 'enum4linux', 'SMB/NetBIOS enumeration', true) +
               WG._nsToolToggle('openvas', 'OpenVAS', 'Full vulnerability assessment', false) +
             '</div>' +
           '</div>' +
@@ -168,11 +169,11 @@ WG._nsCheckPartition = function(val) {
 
 WG._nsUpdateType = function(type) {
   var presets = {
-    full: { ports: '1-65535', parallel: 10, tools: ['nmap','nuclei','dirsearch','searchsploit','service_enum'] },
+    full: { ports: '1-65535', parallel: 10, tools: ['nmap','nuclei','dirsearch','searchsploit','service_enum','enum4linux'] },
     quick: { ports: '1-10000', parallel: 20, tools: ['nmap','nuclei'] },
     port: { ports: '1-65535', parallel: 10, tools: ['nmap'] },
     web: { ports: '80,443,8080,8443,8000,3000', parallel: 10, tools: ['nmap','nuclei','dirsearch','wpscan'] },
-    service: { ports: '1-65535', parallel: 5, tools: ['nmap','searchsploit','service_enum'] },
+    service: { ports: '1-65535', parallel: 5, tools: ['nmap','searchsploit','service_enum','enum4linux'] },
   };
   var p = presets[type] || presets.full;
   document.getElementById('nsPortRange').value = p.ports;
@@ -224,6 +225,7 @@ WG._nsLaunch = function() {
     version_detect: document.getElementById('nsVersionDetect').classList.contains('on'),
     os_detect: document.getElementById('nsOsDetect').classList.contains('on'),
     service_enum: !!document.querySelector('#nsTools [data-tool="service_enum"].on'),
+    enum4linux: !!document.querySelector('#nsTools [data-tool="enum4linux"].on'),
     skip_nuclei: !document.querySelector('#nsTools [data-tool="nuclei"].on'),
     nuclei_templates: (document.getElementById('nsNucleiTemplates').value || '').trim(),
     nuclei_default_templates: document.getElementById('nsNucleiDefaults').classList.contains('on'),

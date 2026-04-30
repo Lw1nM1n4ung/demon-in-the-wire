@@ -85,6 +85,11 @@ WG._topoSetSizeMode = function(mode) {
   s.sel.node.transition().duration(400)
     .attr('r', function(d) { return d.r; });
 
+  if (s.sel.icon) {
+    s.sel.icon.transition().duration(400)
+      .attr('transform', WG._topoIconTransform);
+  }
+
   if (s.sel.halo) {
     s.sel.halo.selectAll('circle.topo-halo')
       .transition().duration(400)

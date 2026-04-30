@@ -87,6 +87,16 @@
     </div>
   </header>
 
+  <!-- ═══ UPDATE BANNER ═══ -->
+  <div class="update-banner" id="updateBanner" style="display:none;" role="alert">
+    <div class="update-banner-content">
+      <span>&#128230;</span>
+      <span id="updateBannerText">A new version is available.</span>
+      <a id="updateBannerLink" href="#" target="_blank" rel="noopener" class="update-banner-link">View Release</a>
+      <button class="update-banner-dismiss" id="updateBannerDismiss" aria-label="Dismiss" onclick="WG._dismissUpdateBanner()">&times;</button>
+    </div>
+  </div>
+
   <!-- ═══ SIDEBAR ═══ -->
   <nav class="sidebar">
     <div class="sidebar-section">
@@ -95,6 +105,7 @@
       <a class="sidebar-item" data-page="scans" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-scan"/></svg> Scans <span class="sidebar-badge" id="sidebarScansBadge" style="display:none;"></span></a>
       <a class="sidebar-item" data-page="findings"><svg class="icon" viewBox="0 0 24 24"><use href="#i-alert"/></svg> Findings <span class="sidebar-badge" id="sidebarFindingsBadge" style="display:none;"></span></a>
       <a class="sidebar-item" data-page="hosts" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg> Hosts</a>
+      <a class="sidebar-item" data-page="exploits" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-zap"/></svg> Exploits</a>
       <a class="sidebar-item" data-page="topology" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-network"/></svg> Topology</a>
       <a class="sidebar-item" data-page="system" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-activity"/></svg> System</a>
     </div>
@@ -239,6 +250,7 @@
 <script src="/js/app/pages/host-detail.js?v=28"></script>
 <script src="/js/app/pages/findings.js?v=28"></script>
 <script src="/js/app/pages/finding-detail.js?v=28"></script>
+<script src="/js/app/pages/exploits.js?v=28"></script>
 <script src="/js/app/pages/reports.js?v=28"></script>
 <script src="/js/app/pages/policies.js?v=28"></script>
 <script src="/js/app/pages/users.js?v=28"></script>

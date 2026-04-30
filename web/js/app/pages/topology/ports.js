@@ -106,10 +106,11 @@ WG._topoRebindGraph = function() {
       WG._topoHideTooltip();
     })
     .on('click', function(event, d) {
-      if (d.type === 'host') {
-        if (event.shiftKey) WG._topoShowDetail(d);
-        else WG._topoExpandHost(d);
-      }
+      if (d.type === 'host') WG._topoShowDetail(d);
+    })
+    .on('dblclick', function(event, d) {
+      event.stopPropagation();
+      if (d.type === 'host') WG._topoExpandHost(d);
     })
     .on('contextmenu', function(event, d) {
       if (d.type === 'host' && WG._topoContextMenu) WG._topoContextMenu(event, d);
@@ -117,10 +118,12 @@ WG._topoRebindGraph = function() {
 
   enter.call(d3.drag()
     .on('start', function(event, d) {
-      if (!event.active) s.simulation.alphaTarget(0.3).restart();
       d.fx = d.x; d.fy = d.y;
     })
-    .on('drag', function(event, d) { d.fx = event.x; d.fy = event.y; })
+    .on('drag', function(event, d) {
+      if (!event.active) s.simulation.alphaTarget(0.3).restart();
+      d.fx = event.x; d.fy = event.y;
+    })
     .on('end', function(event, d) {
       if (!event.active) s.simulation.alphaTarget(0);
       d.fx = null; d.fy = null;
@@ -144,6 +147,23 @@ WG._topoRebindGraph = function() {
     .attr('dy', function(d) { return d.r + 12; })
     .attr('pointer-events', 'none')
     .merge(s.sel.label);
+
+  var iconContainer = s.svg.select('.icons');
+  if (!iconContainer.empty()) {
+    var hostOnly = s.nodes.filter(function(d) { return d.type === 'host'; });
+    s.sel.icon = iconContainer.selectAll('path.topo-icon').data(hostOnly, function(d) { return d.id; });
+    s.sel.icon.exit().remove();
+    var iconEnter = s.sel.icon.enter().append('path')
+      .attr('class', 'topo-icon')
+      .attr('d', function(d) { return WG._topoServiceIcons[d.primary_service] || WG._topoServiceIcons.other; })
+      .attr('fill', 'none')
+      .attr('stroke', 'rgba(255,255,255,0.85)')
+      .attr('stroke-width', 1.2)
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
+      .attr('pointer-events', 'none');
+    s.sel.icon = iconEnter.merge(s.sel.icon);
+  }
 
   s.simulation.nodes(s.nodes);
   s.simulation.force('link').links(s.links);

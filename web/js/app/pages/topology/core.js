@@ -17,6 +17,22 @@ WG._topoServiceLabels = {
   dns: 'DNS', file: 'File/SMB', network: 'Network', other: 'Other'
 };
 
+WG._topoServiceIcons = {
+  web:      'M0-5a5 5 0 110 10 5 5 0 010-10M-5 0h10M0-5c-2 2-2 8 0 10M0-5c2 2 2 8 0 10',
+  database: 'M-4-3c0-1.5 8-1.5 8 0v6c0 1.5-8 1.5-8 0zM-4-3c0 1.5 8 1.5 8 0M-4 0c0 1.5 8 1.5 8 0',
+  ssh:      'M-5-3.5h10v7h-10zM-3-1l2 2-2 2M.5 1h2.5',
+  mail:     'M-5-2.5h10v5h-10zM-5-2.5l5 3.5 5-3.5',
+  dns:      'M0-5a5 5 0 110 10 5 5 0 010-10M-5 0h10M0-5v10M-4.3 2.5h8.6M-4.3-2.5h8.6',
+  file:     'M-3-5h3.5l2.5 2.5v7.5h-6zM.5-5v2.5h2.5',
+  network:  'M-1.5-1.5h3v3h-3zM0-1.5v-3.5M0 1.5v3.5M-1.5 0h-3.5M1.5 0h3.5',
+  other:    'M-3.5-5h7v10h-7zM-1.5-3h3M-1.5-.5h3M-1.5 2h1.5'
+};
+
+WG._topoIconTransform = function(d) {
+  var sc = (d.r || 8) * 0.12;
+  return 'translate(' + (d.x || 0) + ',' + (d.y || 0) + ') scale(' + sc + ')';
+};
+
 /* ═══════════════ STATE ═══════════════ */
 
 WG._topo._freshState = function() {
@@ -27,7 +43,7 @@ WG._topo._freshState = function() {
     filters: {}, edgesVisible: false,
     expandedHosts: [],
     searchIndex: [], pollHandle: null, fullscreen: false,
-    sel: { node: null, label: null, link: null, hull: null, halo: null, edge: null, minimap: null }
+    sel: { node: null, label: null, link: null, hull: null, halo: null, edge: null, minimap: null, icon: null }
   };
 };
 
@@ -66,6 +82,10 @@ WG.renderTopology = function(scanId) {
     placeholder.value = '';
     placeholder.textContent = 'Select a scan...';
     sel.appendChild(placeholder);
+    var demoOpt = document.createElement('option');
+    demoOpt.value = 'demo';
+    demoOpt.textContent = 'Demo Network (sample data)';
+    sel.appendChild(demoOpt);
     var allScans = data.filter(function(s) { return s.status === 'completed' || s.status === 'running'; });
     allScans.forEach(function(s) {
       var o = document.createElement('option');
@@ -77,10 +97,11 @@ WG.renderTopology = function(scanId) {
     if (scanId && sel.value === scanId) WG._topoLoadScan(scanId);
   });
 
-  var scanOpts = completedScans.map(function(s) {
-    var sel = (scanId && s.id === scanId) ? ' selected' : '';
-    return '<option value="' + s.id + '"' + sel + '>' + esc(s.name) + ' (' + esc(s.target) + ')</option>';
-  }).join('');
+  var scanOpts = '<option value="demo">Demo Network (sample data)</option>' +
+    completedScans.map(function(s) {
+      var sel = (scanId && s.id === scanId) ? ' selected' : '';
+      return '<option value="' + s.id + '"' + sel + '>' + esc(s.name) + ' (' + esc(s.target) + ')</option>';
+    }).join('');
 
   /* All values interpolated below come from WG.escHtml() or are
      static string literals — consistent with the rest of the SPA. */
@@ -163,7 +184,7 @@ WG.renderTopology = function(scanId) {
       '<div class="panel" style="padding:0;overflow:hidden;position:relative;min-height:500px;" id="topoGraphPanel">' +
         '<div id="topoContainer" style="width:100%;height:600px;background:var(--bg-main);"></div>' +
         '<div id="topoEmpty" style="display:flex;align-items:center;justify-content:center;height:100%;position:absolute;top:0;left:0;right:0;bottom:0;color:var(--text-dim);font-size:0.9rem;">' +
-          'Select a completed scan to visualize' +
+          'Select a scan to visualize — or try <a href="#" onclick="WG._topoLoadDemo();return false" style="color:var(--accent);text-decoration:underline;">Demo Network</a>' +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -184,9 +205,117 @@ WG.renderTopology = function(scanId) {
   return html;
 };
 
+/* ═══════════════ DEMO DATA ═══════════════ */
+
+WG._topoDemoData = function() {
+  return {
+    scan_id: 'demo', scan_name: 'Demo Network', scan_status: 'completed', target: '10.0.0.0/16',
+    subnets: [
+      { cidr: '10.0.1.0/24', host_count: 6 },
+      { cidr: '10.0.2.0/24', host_count: 5 },
+      { cidr: '10.0.10.0/24', host_count: 4 }
+    ],
+    nodes: [
+      { id: 'demo-1', ip: '10.0.1.1', hostname: 'gw-core.acme.local', os: 'Cisco IOS 15.6', subnet: '10.0.1.0/24',
+        ports: [{number:22,protocol:'tcp',service_name:'ssh',service_product:'Cisco SSH'},{number:443,protocol:'tcp',service_name:'https',service_product:'Cisco HTTPS'},{number:161,protocol:'udp',service_name:'snmp',service_product:'SNMPv2c'}],
+        technologies: ['Cisco IOS'], primary_service: 'network', worst_severity: 'high',
+        findings_count: 4, critical_count: 0, high_count: 2, medium_count: 2, low_count: 0,
+        risk_score: 68, cves: ['CVE-2023-20198','CVE-2023-20273'], ports_count: 3 },
+      { id: 'demo-2', ip: '10.0.1.10', hostname: 'web-prod-01.acme.local', os: 'Ubuntu 22.04', subnet: '10.0.1.0/24',
+        ports: [{number:80,protocol:'tcp',service_name:'http',service_product:'nginx 1.24'},{number:443,protocol:'tcp',service_name:'https',service_product:'nginx 1.24'},{number:22,protocol:'tcp',service_name:'ssh',service_product:'OpenSSH 9.3'}],
+        technologies: ['nginx','Node.js','React'], primary_service: 'web', worst_severity: 'critical',
+        findings_count: 12, critical_count: 3, high_count: 4, medium_count: 3, low_count: 2,
+        risk_score: 92, cves: ['CVE-2024-21762','CVE-2023-44487','CVE-2024-3094'], ports_count: 3 },
+      { id: 'demo-3', ip: '10.0.1.11', hostname: 'web-prod-02.acme.local', os: 'Ubuntu 22.04', subnet: '10.0.1.0/24',
+        ports: [{number:80,protocol:'tcp',service_name:'http',service_product:'Apache 2.4.58'},{number:443,protocol:'tcp',service_name:'https',service_product:'Apache 2.4.58'},{number:8443,protocol:'tcp',service_name:'https-alt',service_product:'Tomcat 9.0'}],
+        technologies: ['Apache','Tomcat','Java'], primary_service: 'web', worst_severity: 'high',
+        findings_count: 7, critical_count: 0, high_count: 3, medium_count: 2, low_count: 2,
+        risk_score: 74, cves: ['CVE-2023-46589','CVE-2024-24549'], ports_count: 3 },
+      { id: 'demo-4', ip: '10.0.1.20', hostname: 'mail.acme.local', os: 'Debian 12', subnet: '10.0.1.0/24',
+        ports: [{number:25,protocol:'tcp',service_name:'smtp',service_product:'Postfix'},{number:143,protocol:'tcp',service_name:'imap',service_product:'Dovecot'},{number:993,protocol:'tcp',service_name:'imaps',service_product:'Dovecot'},{number:587,protocol:'tcp',service_name:'submission',service_product:'Postfix'}],
+        technologies: ['Postfix','Dovecot','SpamAssassin'], primary_service: 'mail', worst_severity: 'medium',
+        findings_count: 3, critical_count: 0, high_count: 0, medium_count: 2, low_count: 1,
+        risk_score: 35, cves: [], ports_count: 4 },
+      { id: 'demo-5', ip: '10.0.1.30', hostname: 'dns-01.acme.local', os: 'Ubuntu 20.04', subnet: '10.0.1.0/24',
+        ports: [{number:53,protocol:'tcp',service_name:'domain',service_product:'BIND 9.18'},{number:53,protocol:'udp',service_name:'domain',service_product:'BIND 9.18'},{number:22,protocol:'tcp',service_name:'ssh',service_product:'OpenSSH 8.9'}],
+        technologies: ['BIND'], primary_service: 'dns', worst_severity: 'medium',
+        findings_count: 2, critical_count: 0, high_count: 0, medium_count: 1, low_count: 1,
+        risk_score: 22, cves: ['CVE-2023-3341'], ports_count: 3 },
+      { id: 'demo-6', ip: '10.0.1.40', hostname: 'vpn.acme.local', os: 'pfSense 2.7', subnet: '10.0.1.0/24',
+        ports: [{number:443,protocol:'tcp',service_name:'https',service_product:'pfSense'},{number:1194,protocol:'udp',service_name:'openvpn',service_product:'OpenVPN 2.6'}],
+        technologies: ['pfSense','OpenVPN'], primary_service: 'network', worst_severity: 'low',
+        findings_count: 1, critical_count: 0, high_count: 0, medium_count: 0, low_count: 1,
+        risk_score: 12, cves: [], ports_count: 2 },
+      { id: 'demo-7', ip: '10.0.2.10', hostname: 'db-master.acme.local', os: 'CentOS 8', subnet: '10.0.2.0/24',
+        ports: [{number:3306,protocol:'tcp',service_name:'mysql',service_product:'MySQL 8.0.36'},{number:22,protocol:'tcp',service_name:'ssh',service_product:'OpenSSH 8.0'}],
+        technologies: ['MySQL','Percona'], primary_service: 'database', worst_severity: 'critical',
+        findings_count: 8, critical_count: 2, high_count: 3, medium_count: 2, low_count: 1,
+        risk_score: 88, cves: ['CVE-2024-20960','CVE-2024-20961'], ports_count: 2 },
+      { id: 'demo-8', ip: '10.0.2.11', hostname: 'db-replica.acme.local', os: 'CentOS 8', subnet: '10.0.2.0/24',
+        ports: [{number:3306,protocol:'tcp',service_name:'mysql',service_product:'MySQL 8.0.36'},{number:22,protocol:'tcp',service_name:'ssh',service_product:'OpenSSH 8.0'}],
+        technologies: ['MySQL','Percona'], primary_service: 'database', worst_severity: 'high',
+        findings_count: 5, critical_count: 0, high_count: 2, medium_count: 2, low_count: 1,
+        risk_score: 62, cves: ['CVE-2024-20961'], ports_count: 2 },
+      { id: 'demo-9', ip: '10.0.2.20', hostname: 'redis-01.acme.local', os: 'Alpine Linux', subnet: '10.0.2.0/24',
+        ports: [{number:6379,protocol:'tcp',service_name:'redis',service_product:'Redis 7.2.4'}],
+        technologies: ['Redis'], primary_service: 'database', worst_severity: 'high',
+        findings_count: 3, critical_count: 0, high_count: 1, medium_count: 1, low_count: 1,
+        risk_score: 55, cves: ['CVE-2023-41056'], ports_count: 1 },
+      { id: 'demo-10', ip: '10.0.2.30', hostname: 'elastic-01.acme.local', os: 'Debian 11', subnet: '10.0.2.0/24',
+        ports: [{number:9200,protocol:'tcp',service_name:'http',service_product:'Elasticsearch 8.12'},{number:9300,protocol:'tcp',service_name:'elasticsearch',service_product:'Elasticsearch 8.12'}],
+        technologies: ['Elasticsearch','Kibana'], primary_service: 'database', worst_severity: 'medium',
+        findings_count: 2, critical_count: 0, high_count: 0, medium_count: 2, low_count: 0,
+        risk_score: 38, cves: [], ports_count: 2 },
+      { id: 'demo-11', ip: '10.0.2.40', hostname: 'mq-01.acme.local', os: 'Ubuntu 22.04', subnet: '10.0.2.0/24',
+        ports: [{number:5672,protocol:'tcp',service_name:'amqp',service_product:'RabbitMQ 3.12'},{number:15672,protocol:'tcp',service_name:'http',service_product:'RabbitMQ Management'}],
+        technologies: ['RabbitMQ','Erlang'], primary_service: 'other', worst_severity: 'low',
+        findings_count: 1, critical_count: 0, high_count: 0, medium_count: 0, low_count: 1,
+        risk_score: 15, cves: [], ports_count: 2 },
+      { id: 'demo-12', ip: '10.0.10.5', hostname: 'jump-01.acme.local', os: 'Ubuntu 22.04', subnet: '10.0.10.0/24',
+        ports: [{number:22,protocol:'tcp',service_name:'ssh',service_product:'OpenSSH 9.6'}],
+        technologies: ['OpenSSH'], primary_service: 'ssh', worst_severity: 'info',
+        findings_count: 0, critical_count: 0, high_count: 0, medium_count: 0, low_count: 0,
+        risk_score: 5, cves: [], ports_count: 1 },
+      { id: 'demo-13', ip: '10.0.10.10', hostname: 'jenkins.acme.local', os: 'Debian 12', subnet: '10.0.10.0/24',
+        ports: [{number:8080,protocol:'tcp',service_name:'http',service_product:'Jenkins 2.440'},{number:50000,protocol:'tcp',service_name:'jenkins-agent',service_product:'Jenkins'}],
+        technologies: ['Jenkins','Java','Groovy'], primary_service: 'web', worst_severity: 'critical',
+        findings_count: 9, critical_count: 2, high_count: 3, medium_count: 3, low_count: 1,
+        risk_score: 95, cves: ['CVE-2024-23897','CVE-2024-23898'], ports_count: 2 },
+      { id: 'demo-14', ip: '10.0.10.20', hostname: 'gitlab.acme.local', os: 'Ubuntu 22.04', subnet: '10.0.10.0/24',
+        ports: [{number:443,protocol:'tcp',service_name:'https',service_product:'GitLab CE 16.8'},{number:22,protocol:'tcp',service_name:'ssh',service_product:'GitLab SSH'},{number:5050,protocol:'tcp',service_name:'docker-registry',service_product:'GitLab Registry'}],
+        technologies: ['GitLab','Ruby','PostgreSQL','Docker'], primary_service: 'web', worst_severity: 'high',
+        findings_count: 6, critical_count: 0, high_count: 2, medium_count: 3, low_count: 1,
+        risk_score: 71, cves: ['CVE-2024-0402','CVE-2023-7028'], ports_count: 3 },
+      { id: 'demo-15', ip: '10.0.10.30', hostname: 'monitor.acme.local', os: 'Debian 12', subnet: '10.0.10.0/24',
+        ports: [{number:3000,protocol:'tcp',service_name:'http',service_product:'Grafana 10.3'},{number:9090,protocol:'tcp',service_name:'http',service_product:'Prometheus'}],
+        technologies: ['Grafana','Prometheus'], primary_service: 'web', worst_severity: 'medium',
+        findings_count: 2, critical_count: 0, high_count: 0, medium_count: 1, low_count: 1,
+        risk_score: 28, cves: [], ports_count: 2 }
+    ],
+    edges: [
+      { source: 'demo-2', target: 'demo-7', type: 'connection', label: 'MySQL 3306' },
+      { source: 'demo-3', target: 'demo-7', type: 'connection', label: 'MySQL 3306' },
+      { source: 'demo-2', target: 'demo-9', type: 'connection', label: 'Redis 6379' },
+      { source: 'demo-7', target: 'demo-8', type: 'replication', label: 'MySQL Replication' },
+      { source: 'demo-13', target: 'demo-14', type: 'connection', label: 'Git SSH' },
+      { source: 'demo-14', target: 'demo-2', type: 'connection', label: 'CD Deploy' },
+      { source: 'demo-15', target: 'demo-7', type: 'connection', label: 'Metrics 9200' },
+      { source: 'demo-15', target: 'demo-9', type: 'connection', label: 'Metrics 6379' },
+      { source: 'demo-1', target: 'demo-6', type: 'connection', label: 'VPN Tunnel' }
+    ]
+  };
+};
+
+WG._topoLoadDemo = function() {
+  var sel = document.getElementById('topoScanSelect');
+  if (sel) sel.value = 'demo';
+  WG._topoRenderGraph(WG._topoDemoData());
+};
+
 /* ═══════════════ DATA LOADING ═══════════════ */
 
 WG._topoLoadScan = function(scanId) {
+  if (scanId === 'demo') { WG._topoLoadDemo(); return; }
   if (!scanId) return;
   scanId = String(scanId);
   var empty = document.getElementById('topoEmpty');
@@ -297,13 +426,14 @@ WG._topoRenderGraph = function(data) {
       }
     });
 
-  svg.call(zoom);
+  svg.call(zoom).on('dblclick.zoom', null);
   s.zoom = zoom;
 
   var hullGroup = g.append('g').attr('class', 'hulls');
   var haloGroup = g.append('g').attr('class', 'halos');
   var linkGroup = g.append('g').attr('class', 'links');
   var nodeGroup = g.append('g').attr('class', 'nodes');
+  var iconGroup = g.append('g').attr('class', 'icons');
   var labelGroup = g.append('g').attr('class', 'labels');
 
   s.sel.hull = hullGroup;
@@ -338,16 +468,33 @@ WG._topoRenderGraph = function(data) {
       WG._topoHideTooltip();
     })
     .on('click', function(event, d) {
-      if (d.type === 'host') {
-        if (event.shiftKey) WG._topoShowDetail(d);
-        else WG._topoExpandHost(d);
-      } else if (d.type === 'cluster') {
-        WG._topoExpandCluster(d);
-      }
+      if (d.type === 'host') WG._topoShowDetail(d);
+      else if (d.type === 'cluster') WG._topoExpandCluster(d);
+    })
+    .on('dblclick', function(event, d) {
+      event.stopPropagation();
+      if (d.type === 'host') WG._topoExpandHost(d);
     })
     .on('contextmenu', function(event, d) {
       if (d.type === 'host') WG._topoContextMenu(event, d);
     });
+
+  var hostNodes = nodes.filter(function(d) { return d.type === 'host'; });
+  var iconSel = iconGroup.selectAll('path.topo-icon').data(hostNodes, function(d) { return d.id; })
+    .enter().append('path')
+    .attr('class', 'topo-icon')
+    .attr('d', function(d) { return WG._topoServiceIcons[d.primary_service] || WG._topoServiceIcons.other; })
+    .attr('fill', 'none')
+    .attr('stroke', 'rgba(255,255,255,0.85)')
+    .attr('stroke-width', 1.2)
+    .attr('stroke-linecap', 'round')
+    .attr('stroke-linejoin', 'round')
+    .attr('pointer-events', 'none')
+    .attr('opacity', 0);
+
+  iconSel.transition().duration(500).ease(d3.easeCubicOut)
+    .delay(function(d, i) { return Math.min(i * 30, 600); })
+    .attr('opacity', 1);
 
   var alphaDecay = nodes.length > 100 ? 0.03 : 0.02;
   var simulation = d3.forceSimulation(nodes)
@@ -359,10 +506,12 @@ WG._topoRenderGraph = function(data) {
 
   nodeSel.call(d3.drag()
     .on('start', function(event, d) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
       d.fx = d.x; d.fy = d.y;
     })
-    .on('drag', function(event, d) { d.fx = event.x; d.fy = event.y; })
+    .on('drag', function(event, d) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = event.x; d.fy = event.y;
+    })
     .on('end', function(event, d) {
       if (!event.active) simulation.alphaTarget(0);
       if (s.layoutMode === 'force') { d.fx = null; d.fy = null; }
@@ -383,21 +532,29 @@ WG._topoRenderGraph = function(data) {
     .attr('dy', function(d) { return d.r + 12; })
     .attr('pointer-events', 'none');
 
-  simulation.on('tick', function() {
-    linkSel.attr('x1', function(d) { return d.source.x; }).attr('y1', function(d) { return d.source.y; })
-           .attr('x2', function(d) { return d.target.x; }).attr('y2', function(d) { return d.target.y; });
-    nodeSel.attr('cx', function(d) { return d.x; }).attr('cy', function(d) { return d.y; });
-    labelSel.attr('x', function(d) { return d.x; }).attr('y', function(d) { return d.y; });
-    WG._topoDrawHulls(hullGroup, nodes);
-    WG._topoDrawHalos(haloGroup, nodes);
-    WG._topoUpdateEdgePositions();
-    WG._topoUpdateMinimapNodes();
-  }).on('end', function() { WG._topoZoomToFit(750); });
-
-  s.simulation = simulation;
   s.sel.node = nodeSel;
   s.sel.label = labelSel;
   s.sel.link = linkSel;
+  s.sel.icon = iconSel;
+
+  simulation.on('tick', function() {
+    s.sel.link.attr('x1', function(d) { return d.source.x; }).attr('y1', function(d) { return d.source.y; })
+             .attr('x2', function(d) { return d.target.x; }).attr('y2', function(d) { return d.target.y; });
+    s.sel.node.attr('cx', function(d) { return d.x; }).attr('cy', function(d) { return d.y; });
+    s.sel.label.attr('x', function(d) { return d.x; }).attr('y', function(d) { return d.y; });
+    if (s.sel.icon) s.sel.icon.attr('transform', WG._topoIconTransform);
+    WG._topoDrawHulls(hullGroup, s.nodes);
+    WG._topoDrawHalos(haloGroup, s.nodes);
+    WG._topoUpdateEdgePositions();
+    WG._topoUpdateMinimapNodes();
+  });
+
+  var initialFit = true;
+  simulation.on('end', function() {
+    if (initialFit) { initialFit = false; WG._topoZoomToFit(750); }
+  });
+
+  s.simulation = simulation;
 
   WG._topoUpdateLegend();
   WG._topoBuildSearchIndex(data);
@@ -525,14 +682,13 @@ WG._topoToggleFilter = function(svc, show) {
   s.filters[svc] = show;
   if (!s.sel.node) return;
 
-  s.sel.node.attr('display', function(d) {
+  var hideFn = function(d) {
     if (d.type === 'subnet') return null;
     return s.filters[d.primary_service] === false ? 'none' : null;
-  });
-  s.sel.label.attr('display', function(d) {
-    if (d.type === 'subnet') return null;
-    return s.filters[d.primary_service] === false ? 'none' : null;
-  });
+  };
+  s.sel.node.attr('display', hideFn);
+  s.sel.label.attr('display', hideFn);
+  if (s.sel.icon) s.sel.icon.attr('display', hideFn);
   s.sel.link.attr('display', function(d) {
     var src = typeof d.source === 'object' ? d.source : null;
     if (src && src.type === 'host' && s.filters[src.primary_service] === false) return 'none';
@@ -609,7 +765,7 @@ WG._topoShowTooltip = function(event, d) {
 
     var hint = document.createElement('div');
     hint.style.cssText = 'font-size:0.62rem;color:var(--text-dim);margin-top:3px;';
-    hint.textContent = 'Click: ports · Shift+click: details · Right-click: menu';
+    hint.textContent = 'Click: details · Double-click: ports · Right-click: menu';
     tip.appendChild(hint);
   }
   tip.style.opacity = '1';
@@ -735,14 +891,16 @@ WG._topoShowDetail = function(d) {
     detailFrag.appendChild(noPort);
   }
 
-  var btnWrap = document.createElement('div');
-  btnWrap.style.marginTop = '12px';
-  var btn = document.createElement('button');
-  btn.className = 'btn btn-secondary btn-sm';
-  btn.textContent = 'View Full Host Details';
-  btn.onclick = function() { WG.navigate('host', { id: d.dbId }); };
-  btnWrap.appendChild(btn);
-  detailFrag.appendChild(btnWrap);
+  if (d.dbId && !String(d.dbId).startsWith('demo-')) {
+    var btnWrap = document.createElement('div');
+    btnWrap.style.marginTop = '12px';
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-secondary btn-sm';
+    btn.textContent = 'View Full Host Details';
+    btn.onclick = function() { WG.navigate('host', { id: d.dbId }); };
+    btnWrap.appendChild(btn);
+    detailFrag.appendChild(btnWrap);
+  }
 
   body.textContent = '';
   body.appendChild(detailFrag);

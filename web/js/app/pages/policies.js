@@ -10,7 +10,7 @@ WG.renderPolicies = function() {
   // Background refresh from API
   WG.refreshAndRerender('policies', '/policies/', WG.renderPolicies, 'policies');
   var esc = WG.escHtml;
-  var toolNames = ['nmap','nuclei','dirsearch','searchsploit','wpscan','service_enum','openvas'];
+  var toolNames = ['nmap','nuclei','dirsearch','searchsploit','wpscan','service_enum','enum4linux','openvas'];
 
   return '' +
     '<div class="page-header"><div class="page-header-left"><h1>Scan Policies</h1><p>' + policies.length + ' policy templates</p></div>' +
@@ -23,11 +23,17 @@ WG.renderPolicies = function() {
       '<div class="stat-card"><div class="stat-label">Quick Scans</div><div class="stat-value">' + policies.filter(function(p) { return p.scan_type === 'quick'; }).length + '</div></div>' +
     '</div>' +
 
-    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">' +
+    (policies.length === 0 ? '' :
+    '<div class="filters-bar">' +
+      '<input class="filter-input" placeholder="Search policies..." id="policySearch" oninput="WG.filterPolicies()">' +
+      '<select class="filter-select" id="policyTypeFilter" onchange="WG.filterPolicies()"><option value="">All Types</option><option value="full">Full Scan</option><option value="quick">Quick Scan</option><option value="port">Port Scan</option><option value="web">Web App</option><option value="service">Service Enum</option></select>' +
+    '</div>') +
+
+    '<div id="policiesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">' +
     policies.map(function(p) {
       var tools = p.tools || {};
       var enabledTools = toolNames.filter(function(t) { return tools[t]; });
-      return '<div class="panel policy-card">' +
+      return '<div class="panel policy-card" data-search="' + esc((p.name + ' ' + (p.description || '') + ' ' + p.scan_type + ' ' + (p.port_range || '')).toLowerCase()) + '" data-type="' + esc(p.scan_type) + '">' +
         '<div class="panel-body">' +
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
             '<div style="flex:1;">' +
@@ -197,6 +203,16 @@ WG._deletePolicy = function(id) {
     WG.invalidateCache('policies');
     WG.toast('Policy deleted', 'info');
     WG.render();
+  });
+};
+
+WG.filterPolicies = function() {
+  var search = (document.getElementById('policySearch').value || '').toLowerCase();
+  var type = document.getElementById('policyTypeFilter').value;
+  document.querySelectorAll('#policiesGrid .policy-card').forEach(function(card) {
+    var ok = (!search || card.dataset.search.includes(search)) &&
+             (!type || card.dataset.type === type);
+    card.style.display = ok ? '' : 'none';
   });
 };
 

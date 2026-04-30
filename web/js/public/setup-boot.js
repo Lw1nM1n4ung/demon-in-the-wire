@@ -240,7 +240,8 @@ WG._validateAdmin = function() {
 
   if (!name || !user || !email || !pass) { err.textContent = 'All fields are required'; err.style.display = 'block'; return; }
   if (pass !== pass2) { err.textContent = 'Passwords do not match'; err.style.display = 'block'; return; }
-  if (pass.length < 4) { err.textContent = 'Password must be at least 4 characters'; err.style.display = 'block'; return; }
+  if (pass.length < 8) { err.textContent = 'Password must be at least 8 characters'; err.style.display = 'block'; return; }
+  if (/^\d+$/.test(pass)) { err.textContent = 'Password cannot be entirely numeric'; err.style.display = 'block'; return; }
   if (WG._usernameAvailable === false) { err.textContent = 'Username is already taken'; err.style.display = 'block'; return; }
 
   err.style.display = 'none';
@@ -377,8 +378,11 @@ WG._setupComplete = function() {
         '<div class="setup-summary-row"><span class="setup-summary-label">Tools</span><span class="mono">7/8 available</span></div>' +
       '</div>' +
     '</div>' +
-    '<div class="setup-footer" style="justify-content:center;">' +
-      '<button class="btn btn-primary" style="padding:12px 32px;font-size:0.9rem;" onclick="WG._finishSetup()">Launch Wire_Ghost</button>' +
+    '<div id="setupFinishError" style="display:none;color:var(--critical);font-size:0.82rem;text-align:center;padding:10px 14px;background:rgba(255,59,92,0.08);border-radius:var(--radius-md);margin-top:16px;"></div>' +
+    '</div>' +
+    '<div class="setup-footer">' +
+      '<button class="btn btn-ghost" onclick="WG._setupPrev()">Back</button>' +
+      '<button class="btn btn-primary" id="setupLaunchBtn" style="padding:12px 32px;font-size:0.9rem;" onclick="WG._finishSetup()">Launch Wire_Ghost</button>' +
     '</div>';
 };
 
@@ -398,19 +402,19 @@ WG._setupPrev = function() {
 };
 
 WG._finishSetup = async function() {
-  /* Single-request wizard submission. Replaces the previous 5-request dance
-   * (setup-admin, login, report-config PUT, report-config/logo POST,
-   * site-config/setup-complete POST). The backend wraps everything in one
-   * transaction.atomic() + attaches the session cookie via django.contrib
-   * .auth.login, so on 201 we're already signed in. */
   var admin = WG._setupAdminPending || {};
   var branding = {};
   try { branding = JSON.parse(localStorage.getItem('wg_setup_branding') || '{}'); } catch (e) {}
 
+  var errEl = document.getElementById('setupFinishError');
+  var btn = document.getElementById('setupLaunchBtn');
+
   if (!admin.username || !admin.password) {
-    WG.toast && WG.toast('Setup admin missing — go back to Step 3', 'error');
     WG._setupStep = 2; WG.render(); return;
   }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Setting up...'; }
+  if (errEl) errEl.style.display = 'none';
 
   var fd = new FormData();
   fd.append('username', admin.username);
@@ -440,14 +444,14 @@ WG._finishSetup = async function() {
     errMsg = 'Could not reach the API';
   }
 
-  /* Scrub password from memory regardless of outcome. */
-  WG._setupAdminPending = null;
-  WG._setupLogoBlob = null;
-
   if (!ok) {
-    WG.toast && WG.toast('Setup failed: ' + errMsg, 'error');
+    if (errEl) { errEl.textContent = errMsg || 'Setup failed'; errEl.style.display = 'block'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Launch Wire_Ghost'; }
     return;
   }
+
+  WG._setupAdminPending = null;
+  WG._setupLogoBlob = null;
 
   localStorage.setItem('wg_setup_complete', '1');
   localStorage.removeItem('wg_setup_branding');  /* server now owns it */

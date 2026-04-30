@@ -40,6 +40,7 @@ WG._ROUTES = [
   { page: 'scan',           path: '/scans/:id' },
   { page: 'findings',       path: '/findings' },
   { page: 'finding',        path: '/findings/:id' },
+  { page: 'exploits',       path: '/exploits' },
   { page: 'hosts',          path: '/hosts' },
   { page: 'host',           path: '/hosts/:id' },
   { page: 'topology',       path: '/topology' },
@@ -115,6 +116,17 @@ WG.render = function() {
 
   WG.state.currentPage = route.page;
 
+  /* Update banner — check once per session, cache for 6h. */
+  if (!WG._updateCheckDone) {
+    WG._updateCheckDone = true;
+    WG.api('/update-check/').then(function(data) {
+      if (data && data.update_available) {
+        WG._updateInfo = data;
+        WG._showUpdateBanner(data);
+      }
+    });
+  }
+
   /* Topbar: user avatar + name + email + role. */
   var user = WG.currentUser();
   if (user) {
@@ -155,6 +167,7 @@ WG.render = function() {
     scans:            WG.renderScans,
     scan:             function() { return WG.renderScanDetail(route.id); },
     findings:         WG.renderFindings,
+    exploits:         WG.renderExploits,
     hosts:            WG.renderHosts,
     topology:         function() { return WG.renderTopology(route.id); },
     host:             function() { return WG.renderHostDetail(route.id); },
@@ -227,6 +240,30 @@ function _initEvents() {
   /* Back/forward button → re-render. */
   window.addEventListener('popstate', WG.render);
 }
+
+/* ── Update banner helpers ── */
+WG._showUpdateBanner = function(data) {
+  var banner = document.getElementById('updateBanner');
+  if (!banner) return;
+  var dismissed = null;
+  try { dismissed = localStorage.getItem('wg_update_dismissed'); } catch(e) {}
+  if (dismissed === data.latest) return;
+
+  var text = document.getElementById('updateBannerText');
+  var link = document.getElementById('updateBannerLink');
+  if (text) text.textContent = 'Wire_Ghost ' + WG.escHtml(data.latest) + ' is available (current: ' + WG.escHtml(data.current) + ')';
+  if (link && data.latest_url) { link.href = data.latest_url; link.style.display = ''; }
+  else if (link) { link.style.display = 'none'; }
+  banner.style.display = '';
+};
+
+WG._dismissUpdateBanner = function() {
+  var banner = document.getElementById('updateBanner');
+  if (banner) banner.style.display = 'none';
+  if (WG._updateInfo && WG._updateInfo.latest) {
+    try { localStorage.setItem('wg_update_dismissed', WG._updateInfo.latest); } catch(e) {}
+  }
+};
 
 /* ── Boot ── */
 (function() {
