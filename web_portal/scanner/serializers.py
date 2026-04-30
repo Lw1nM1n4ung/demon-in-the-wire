@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Screenshot
+from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Screenshot, ExploitMatch
 
 
 class AssetListSerializer(serializers.ModelSerializer):
@@ -35,7 +35,24 @@ class TechnologySerializer(serializers.ModelSerializer):
 class FindingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Finding
-        fields = '__all__'
+        fields = [
+            'id', 'scan', 'host', 'source', 'severity', 'title',
+            'description', 'host_ip', 'port', 'protocol', 'endpoint',
+            'full_url', 'template_id', 'cve', 'cwe', 'cvss',
+            'references', 'created_at',
+        ]
+
+
+class FindingDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Finding
+        fields = [
+            'id', 'scan', 'host', 'source', 'severity', 'title',
+            'description', 'host_ip', 'port', 'protocol', 'endpoint',
+            'full_url', 'template_id', 'cve', 'cwe', 'cvss',
+            'request', 'response', 'curl_command', 'raw_output',
+            'references', 'created_at',
+        ]
 
 
 class FindingListSerializer(serializers.ModelSerializer):
@@ -119,6 +136,7 @@ class ScanCreateSerializer(serializers.Serializer):
     # When True, hosts that don't answer ICMP are still port-scanned. Useful
     # against firewalled targets; massively expands scope on big CIDRs.
     scan_unresponsive = serializers.BooleanField(required=False, default=False)
+    enum4linux = serializers.BooleanField(required=False, default=True)
 
     def validate_target(self, value):
         """Block SSRF targets: localhost, link-local, cloud metadata, non-routable."""
@@ -225,3 +243,16 @@ class ScheduledScanSerializer(serializers.ModelSerializer):
         model = ScheduledScan
         fields = '__all__'
         read_only_fields = ['created_by', 'created_at', 'updated_at', 'last_run']
+
+
+class ExploitMatchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExploitMatch
+        fields = [
+            'id', 'scan', 'host', 'port', 'finding',
+            'module_fullname', 'module_name', 'module_type',
+            'module_rank', 'module_rank_name', 'disclosure_date',
+            'description', 'references', 'platform',
+            'confidence', 'match_reason',
+            'host_ip', 'port_number', 'created_at',
+        ]

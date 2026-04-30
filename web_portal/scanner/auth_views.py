@@ -50,6 +50,16 @@ def _wl(value, field_type, max_len=255):
 
 _LOGIN_WINDOW = 300  # 5 minutes
 _LOGIN_MAX = 10  # max attempts per window
+_LOGIN_USER_WINDOW = 900  # 15 minutes
+_LOGIN_USER_MAX = 5  # per username
+
+
+def _rate_check(key, limit, window):
+    count = cache.get(key, 0)
+    if count >= limit:
+        return False
+    cache.set(key, count + 1, window)
+    return True
 
 
 def _serialize_user(u):
@@ -80,12 +90,11 @@ def auth_login(request):
     cache_key = f'login_attempts:{ip}'
     attempts = cache.get(cache_key, 0)
     if attempts >= _LOGIN_MAX:
-        retry_after = _LOGIN_WINDOW
         resp = Response(
             {'error': 'Too many failed login attempts. Try again later.'},
             status=429,
         )
-        resp['Retry-After'] = str(retry_after)
+        resp['Retry-After'] = str(_LOGIN_WINDOW)
         return resp
 
     username = request.data.get('username', '')
@@ -99,18 +108,32 @@ def auth_login(request):
     if not username or not password:
         return Response({'error': 'Username and password required'}, status=400)
 
+    # Per-username rate limit — protects individual accounts from distributed brute force
+    user_cache_key = f'login_user_attempts:{username.lower()}'
+    user_attempts = cache.get(user_cache_key, 0)
+    if user_attempts >= _LOGIN_USER_MAX:
+        resp = Response(
+            {'error': 'Account temporarily locked. Try again later.'},
+            status=429,
+        )
+        resp['Retry-After'] = str(_LOGIN_USER_WINDOW)
+        return resp
+
     user = authenticate(request, username=username, password=password)
     if user is None:
         # Count the failure — only failures burn tokens.
         cache.set(cache_key, attempts + 1, _LOGIN_WINDOW)
+        cache.set(user_cache_key, user_attempts + 1, _LOGIN_USER_WINDOW)
         return Response({'error': 'Invalid credentials'}, status=401)
 
     if not user.is_active:
         cache.set(cache_key, attempts + 1, _LOGIN_WINDOW)
+        cache.set(user_cache_key, user_attempts + 1, _LOGIN_USER_WINDOW)
         return Response({'error': 'Account disabled'}, status=403)
 
-    # Success: drop the bucket so this user's retries don't count against them.
+    # Success: drop both buckets so retries don't count against legitimate users.
     cache.delete(cache_key)
+    cache.delete(user_cache_key)
 
     # MFA gate — if enabled, don't call login() yet
     try:
@@ -634,6 +657,18 @@ def check_username(request):
     return Response({'available': not exists, 'reason': 'Username taken' if exists else 'Available'})
 
 
+_SETUP_WINDOW = 86400  # 24 hours
+
+def _setup_window_expired():
+    """Auto-lock setup if the server has been running >24h without completing setup."""
+    key = 'wg:setup:first_seen'
+    first_seen = cache.get(key)
+    if first_seen is None:
+        cache.set(key, timezone.now().timestamp(), _SETUP_WINDOW + 3600)
+        return False
+    return (timezone.now().timestamp() - first_seen) > _SETUP_WINDOW
+
+
 @api_view(['POST'])
 @authentication_classes([CsrfExemptAuth])
 @permission_classes([AllowAny])
@@ -654,6 +689,9 @@ def setup_admin(request):
     config = SiteConfig.get()
     if config.setup_complete:
         return Response({'error': 'Setup already completed. Use admin panel to create users.'}, status=403)
+
+    if _setup_window_expired():
+        return Response({'error': 'Setup window expired (24h). Run ./scripts/wg-ctl reset-setup to re-enable.'}, status=403)
 
     if User.objects.filter(username=username).exists():
         return Response({'error': 'Username already exists'}, status=400)
@@ -731,6 +769,9 @@ def setup_one_shot(request):
     config = SiteConfig.get()
     if config.setup_complete:
         return Response({'error': 'Setup already completed. Use admin panel to create users.'}, status=409)
+
+    if _setup_window_expired():
+        return Response({'error': 'Setup window expired (24h). Run ./scripts/wg-ctl reset-setup to re-enable.'}, status=403)
 
     # Defensive: if a prior setup flipped `setup_complete=False` via direct DB
     # edit (not via reset-setup), there could still be an Owner in place. The
@@ -999,6 +1040,8 @@ def list_sessions(request):
 @api_view(['POST'])
 def revoke_session(request):
     """Revoke a specific session."""
+    if not _rate_check(f'rl:revoke:{request.user.id}', 10, 60):
+        return Response({'error': 'Rate limit exceeded'}, status=429)
     from django.contrib.sessions.models import Session
     session_key = request.data.get('session_key', '')
     if session_key == request.session.session_key:
@@ -1037,6 +1080,8 @@ def revoke_all_sessions(request):
 @api_view(['GET'])
 def audit_log(request):
     """List audit log entries. Requires audit:view permission."""
+    if not _rate_check(f'rl:audit:{request.user.id}', 30, 60):
+        return Response({'error': 'Rate limit exceeded'}, status=429)
     if not request.user.has_permission('audit:view'):
         return Response({'error': 'Not authorized'}, status=403)
 
@@ -1070,9 +1115,11 @@ def _serialize_token(t, *, include_raw=None):
         'created_at': t.created_at.isoformat(),
         'last_used_at': t.last_used_at.isoformat() if t.last_used_at else None,
         'revoked_at': t.revoked_at.isoformat() if t.revoked_at else None,
+        'expires_at': t.expires_at.isoformat() if t.expires_at else None,
+        'is_active': t.is_active,
     }
     if include_raw is not None:
-        data['token'] = include_raw  # only present on creation response
+        data['token'] = include_raw
     return data
 
 
@@ -1108,7 +1155,16 @@ def tokens_list_or_create(request):
             status=400,
         )
 
-    tok, raw = ApiToken.mint(request.user, name)
+    expires_in_days = request.data.get('expires_in_days')
+    if expires_in_days is not None:
+        try:
+            expires_in_days = int(expires_in_days)
+            if expires_in_days < 1 or expires_in_days > 365:
+                return Response({'error': 'expires_in_days must be 1-365'}, status=400)
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid expires_in_days'}, status=400)
+
+    tok, raw = ApiToken.mint(request.user, name, expires_in_days=expires_in_days)
     actor = request.user.get_full_name() or request.user.username
     ip = request.META.get('REMOTE_ADDR', '')
     AuditLog.log(actor, 'token.create', f'{tok.prefix} ({name})', 'admin', ip)
@@ -1333,3 +1389,73 @@ def telegram_link_code(request):
     cache.set(user_key, gen_count + 1, 300)
 
     return Response({'code': code, 'expires_in': 300})
+
+
+# ═══════════════ Update check ═══════════════
+
+@api_view(['GET', 'POST'])
+def update_check_view(request):
+    """GET: cached update status. POST: force re-check (owner, rate-limited)."""
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+
+    from scanner.update_check import check_latest_release, read_update_status
+
+    if request.method == 'GET':
+        result = check_latest_release()
+        status_info = read_update_status()
+        if status_info:
+            result['update_status'] = status_info
+        return Response(result)
+
+    if not request.user.has_permission('site:config'):
+        return Response({'error': 'Not authorized'}, status=403)
+
+    rate_key = f'update_check_force:{request.user.id}'
+    count = cache.get(rate_key, 0)
+    if count >= 3:
+        return Response({'error': 'Rate limited. Try again later.'}, status=429)
+    cache.set(rate_key, count + 1, 3600)
+
+    result = check_latest_release(force=True)
+    status_info = read_update_status()
+    if status_info:
+        result['update_status'] = status_info
+    return Response(result)
+
+
+@api_view(['POST'])
+def update_apply_view(request):
+    """Write update flag file for host-side wg-ctl. Owner only."""
+    if not request.user.has_permission('site:config'):
+        return Response({'error': 'Not authorized'}, status=403)
+
+    from scanner.update_check import check_latest_release, write_update_flag
+
+    result = check_latest_release()
+    if not result.get('update_available'):
+        return Response({'error': 'No update available'}, status=400)
+
+    actor = request.user.get_full_name() or request.user.username
+    flag = write_update_flag(requested_by=actor)
+
+    ip = request.META.get('REMOTE_ADDR', '')
+    AuditLog.log(actor, 'update.requested', f'Update to {result["latest"]} requested', 'system', ip)
+
+    return Response(flag)
+
+
+@api_view(['POST'])
+def update_feeds_view(request):
+    """Queue security feed update on the worker. Owner only."""
+    if not request.user.has_permission('site:config'):
+        return Response({'error': 'Not authorized'}, status=403)
+
+    from scanner.tasks import update_security_feeds
+    task = update_security_feeds.delay()
+
+    actor = request.user.get_full_name() or request.user.username
+    ip = request.META.get('REMOTE_ADDR', '')
+    AuditLog.log(actor, 'feeds.update_requested', 'Security feed update triggered', 'system', ip)
+
+    return Response({'status': 'queued', 'task_id': task.id})

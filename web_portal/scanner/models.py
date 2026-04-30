@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 from uuid_utils import uuid7
 
 
@@ -168,6 +169,7 @@ class Scan(models.Model):
     # If True, ICMP-silent hosts get port-scanned too (nmap -Pn path). Default
     # False because it can blow up scope on big CIDRs.
     scan_unresponsive = models.BooleanField(default=False)
+    enum4linux = models.BooleanField(default=True)
 
     # Results
     hosts_count = models.IntegerField(default=0)
@@ -460,6 +462,39 @@ class MfaBackupCode(models.Model):
         return False
 
 
+class ExploitMatch(models.Model):
+    CONFIDENCE_CHOICES = [
+        ('high', 'High'),
+        ('medium', 'Medium'),
+        ('low', 'Low'),
+    ]
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    scan = models.ForeignKey(Scan, on_delete=models.CASCADE, related_name='exploit_matches')
+    host = models.ForeignKey(Host, on_delete=models.CASCADE, related_name='exploit_matches')
+    port = models.ForeignKey(Port, on_delete=models.SET_NULL, null=True, blank=True, related_name='exploit_matches')
+    finding = models.ForeignKey(Finding, on_delete=models.SET_NULL, null=True, blank=True, related_name='exploit_matches')
+    module_fullname = models.CharField(max_length=500)
+    module_name = models.CharField(max_length=500)
+    module_type = models.CharField(max_length=20)
+    module_rank = models.IntegerField(default=0)
+    module_rank_name = models.CharField(max_length=20, blank=True)
+    disclosure_date = models.CharField(max_length=30, blank=True)
+    description = models.TextField(blank=True)
+    references = models.JSONField(default=list)
+    platform = models.CharField(max_length=100, blank=True)
+    confidence = models.CharField(max_length=10, choices=CONFIDENCE_CHOICES)
+    match_reason = models.CharField(max_length=500)
+    host_ip = models.GenericIPAddressField(null=True, blank=True)
+    port_number = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['confidence', '-module_rank']
+
+    def __str__(self):
+        return f"{self.confidence.upper()} {self.module_fullname}"
+
+
 class AuditLog(models.Model):
     """Audit trail for user actions."""
     ACTION_TYPES = [
@@ -619,6 +654,7 @@ class ApiToken(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -629,10 +665,14 @@ class ApiToken(models.Model):
 
     @property
     def is_active(self):
-        return self.revoked_at is None
+        if self.revoked_at is not None:
+            return False
+        if self.expires_at and self.expires_at <= timezone.now():
+            return False
+        return True
 
     @classmethod
-    def mint(cls, user, name):
+    def mint(cls, user, name, expires_in_days=None):
         """Create a new token for ``user``. Returns ``(token_row, raw_plaintext)``.
 
         The caller must return ``raw_plaintext`` to the end user exactly once
@@ -640,15 +680,17 @@ class ApiToken(models.Model):
         """
         import secrets
         import hashlib
-        # urlsafe_b64 of 32 bytes → 43 chars; strip separators for a clean
-        # alphanumeric body, prefix with 'wg_' marker so secret scanners can
-        # detect leaks.
+        from datetime import timedelta
         body = secrets.token_urlsafe(32).replace('-', '').replace('_', '')[:40]
         raw = f'wg_{body}'
-        prefix = raw[:11]  # 'wg_' + first 8 chars of body
+        prefix = raw[:11]
         key_hash = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+        expires_at = None
+        if expires_in_days is not None:
+            expires_at = timezone.now() + timedelta(days=int(expires_in_days))
         obj = cls.objects.create(
-            user=user, name=(name or '')[:80], prefix=prefix, key_hash=key_hash,
+            user=user, name=(name or '')[:80], prefix=prefix,
+            key_hash=key_hash, expires_at=expires_at,
         )
         return obj, raw
 

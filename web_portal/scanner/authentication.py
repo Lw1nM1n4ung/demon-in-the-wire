@@ -45,7 +45,8 @@ class TokenHeaderAuth(authentication.BaseAuthentication):
             )
         except ApiToken.DoesNotExist:
             raise exceptions.AuthenticationFailed('Invalid or revoked token.')
-        # Fire-and-forget last_used bump so auth stays fast on hot paths.
+        if tok.expires_at and tok.expires_at <= timezone.now():
+            raise exceptions.AuthenticationFailed('Token has expired.')
         ApiToken.objects.filter(pk=tok.pk).update(last_used_at=timezone.now())
         return (tok.user, tok)
 

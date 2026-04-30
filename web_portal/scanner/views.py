@@ -4,7 +4,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology, Screenshot as DBScreenshot
+from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology, Screenshot as DBScreenshot, ExploitMatch
 
 
 def HasPerm(code):
@@ -60,11 +60,12 @@ class IsCreatorOrOwnerForWrite(IsAuthenticated):
 from .serializers import (
     ScanSerializer, ScanListSerializer, ScanCreateSerializer,
     HostSerializer, HostListSerializer,
-    FindingSerializer, FindingListSerializer,
+    FindingSerializer, FindingDetailSerializer, FindingListSerializer,
     ReportSerializer, ReportConfigSerializer,
     ScanPolicySerializer, ScheduledScanSerializer,
     AssetSerializer, AssetListSerializer,
     ScreenshotSerializer,
+    ExploitMatchSerializer,
 )
 
 
@@ -83,10 +84,22 @@ class ScanViewSet(viewsets.ModelViewSet):
             return ScanCreateSerializer
         return ScanSerializer
 
+    MAX_CONCURRENT_SCANS = 5
+
     def create(self, request):
         serializer = ScanCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+
+        running = Scan.objects.filter(
+            created_by=request.user,
+            status__in=('pending', 'running'),
+        ).count()
+        if running >= self.MAX_CONCURRENT_SCANS:
+            return Response(
+                {'error': f'Maximum {self.MAX_CONCURRENT_SCANS} concurrent scans allowed.'},
+                status=429,
+            )
 
         import re
         raw_name = data.get('name') or f"Scan {data['target']}"
@@ -120,6 +133,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             skip_screenshots=data.get('skip_screenshots', False),
             skip_openvas=data['skip_openvas'],
             scan_unresponsive=data.get('scan_unresponsive', False),
+            enum4linux=data.get('enum4linux', True),
             status='pending',
             created_by=request.user,
         )
@@ -201,7 +215,11 @@ class ScanViewSet(viewsets.ModelViewSet):
             if cached:
                 return Response(cached)
 
-        hosts = scan.hosts.prefetch_related('ports', 'technologies').all()
+        MAX_TOPO_NODES = 500
+        hosts_qs = scan.hosts.prefetch_related('ports', 'technologies').all()
+        total_hosts = hosts_qs.count()
+        truncated = total_hosts > MAX_TOPO_NODES
+        hosts = hosts_qs[:MAX_TOPO_NODES]
         findings = scan.findings.all()
 
         severity_rank = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
@@ -347,6 +365,8 @@ class ScanViewSet(viewsets.ModelViewSet):
             'subnets': subnets,
             'nodes': nodes,
             'edges': edges,
+            'truncated': truncated,
+            'total_hosts': total_hosts,
         }
 
         if scan.status != 'running':
@@ -476,6 +496,8 @@ class FindingViewSet(viewsets.ReadOnlyModelViewSet):
     def get_serializer_class(self):
         if self.action == 'list':
             return FindingListSerializer
+        if self.action == 'retrieve':
+            return FindingDetailSerializer
         return FindingSerializer
 
     def get_queryset(self):
@@ -833,3 +855,22 @@ def support_bundle(request):
     resp['Content-Length'] = str(len(blob))
     resp['X-Content-Type-Options'] = 'nosniff'
     return resp
+
+
+class ExploitMatchViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ExploitMatch.objects.all()
+    serializer_class = ExploitMatchSerializer
+    permission_classes = [HasPerm('scan:read')]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        scan_id = self.request.query_params.get('scan')
+        if scan_id:
+            qs = qs.filter(scan_id=scan_id)
+        host_id = self.request.query_params.get('host')
+        if host_id:
+            qs = qs.filter(host_id=host_id)
+        confidence = self.request.query_params.get('confidence')
+        if confidence:
+            qs = qs.filter(confidence=confidence)
+        return qs

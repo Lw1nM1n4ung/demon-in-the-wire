@@ -817,7 +817,7 @@ class AuthCheckTests(TestCase):
         self.client.force_login(self.user)
         # Warm any per-request caches.
         self.client.get('/api/auth/check/')
-        with self.assertNumQueries(2):  # session row + user row — see docstring
+        with self.assertNumQueries(5):  # session + user + idle-timeout session save (savepoint/update/release)
             res = self.client.get('/api/auth/check/')
         self.assertEqual(res.status_code, 204)
 
@@ -1244,9 +1244,9 @@ class LoginRateLimitTests(TestCase):
         self.assertEqual(self._login('pw-goodpass-123!').status_code, 200)
 
     def test_failed_logins_trip_rate_limit(self):
-        from scanner.auth_views import _LOGIN_MAX
-        # _LOGIN_MAX failures are allowed; the next one is blocked.
-        for i in range(_LOGIN_MAX):
+        from scanner.auth_views import _LOGIN_USER_MAX
+        # Per-username limit is tighter than per-IP; hits first.
+        for i in range(_LOGIN_USER_MAX):
             res = self._login('wrong')
             self.assertEqual(res.status_code, 401, f'failure {i+1} unexpectedly blocked')
         res = self._login('wrong')
@@ -1255,13 +1255,13 @@ class LoginRateLimitTests(TestCase):
 
     def test_success_clears_prior_failures(self):
         """A correct login after some failures must reset the bucket."""
-        from scanner.auth_views import _LOGIN_MAX
-        for _ in range(_LOGIN_MAX - 1):  # leave one slot
+        from scanner.auth_views import _LOGIN_USER_MAX
+        for _ in range(_LOGIN_USER_MAX - 1):  # leave one slot
             self._login('wrong')
         self.assertEqual(self._login('pw-goodpass-123!').status_code, 200)
-        # After success, failures start fresh — _LOGIN_MAX wrongs are
+        # After success, failures start fresh — _LOGIN_USER_MAX wrongs are
         # required again to trigger 429.
-        for i in range(_LOGIN_MAX):
+        for i in range(_LOGIN_USER_MAX):
             self.assertEqual(self._login('wrong').status_code, 401,
                              f'failure {i+1} unexpectedly blocked after reset')
         self.assertEqual(self._login('wrong').status_code, 429)
