@@ -676,7 +676,7 @@ class ApiToken(models.Model):
         """Create a new token for ``user``. Returns ``(token_row, raw_plaintext)``.
 
         The caller must return ``raw_plaintext`` to the end user exactly once
-        and then forget it — it's never stored.
+        and then forget it — it's never stored.  Defaults to 90-day expiry.
         """
         import secrets
         import hashlib
@@ -685,9 +685,9 @@ class ApiToken(models.Model):
         raw = f'wg_{body}'
         prefix = raw[:11]
         key_hash = hashlib.sha256(raw.encode('utf-8')).hexdigest()
-        expires_at = None
-        if expires_in_days is not None:
-            expires_at = timezone.now() + timedelta(days=int(expires_in_days))
+        if expires_in_days is None:
+            expires_in_days = 90
+        expires_at = timezone.now() + timedelta(days=int(expires_in_days))
         obj = cls.objects.create(
             user=user, name=(name or '')[:80], prefix=prefix,
             key_hash=key_hash, expires_at=expires_at,

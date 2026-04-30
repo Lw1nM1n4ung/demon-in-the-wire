@@ -728,9 +728,11 @@ def setup_admin(request):
 
 @api_view(['POST'])
 def site_setup_complete(request):
-    """Mark setup as complete. Requires authentication after initial setup."""
+    """Mark setup as complete. Owner-only."""
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=403)
+    if request.user.role != 'owner':
+        return Response({'error': 'Not authorized'}, status=403)
     config = SiteConfig.get()
     config.setup_complete = True
     from django.utils import timezone
@@ -1140,7 +1142,10 @@ def tokens_list_or_create(request):
         qs = ApiToken.objects.filter(user=request.user).order_by('-created_at')
         return Response([_serialize_token(t) for t in qs])
 
-    # POST
+    # POST — engineers and owners only
+    if request.user.role == 'viewer':
+        return Response({'error': 'Viewers cannot create API tokens'}, status=403)
+
     name = str(request.data.get('name', '')).strip()
     if not name:
         return Response({'error': 'name is required'}, status=400)
