@@ -17,7 +17,7 @@ from scanner.auth_views import (
     audit_log,
     tokens_list_or_create, tokens_revoke,
     notifications_config, notifications_test, tools_health, system_stats,
-    telegram_link_code,
+    telegram_link_code, telegram_link_status,
     update_check_view, update_apply_view, update_feeds_view,
 )
 
@@ -63,6 +63,7 @@ urlpatterns = [
     path('api/site-config/reset-setup/', reset_setup, name='site-reset-setup'),
     path('api/preferences/', user_preferences, name='user-preferences'),
     path('api/preferences/telegram-link/', telegram_link_code, name='telegram-link-code'),
+    path('api/auth/telegram-link-status/', telegram_link_status, name='telegram-link-status'),
     # Sessions
     path('api/sessions/', list_sessions, name='list-sessions'),
     path('api/sessions/revoke/', revoke_session, name='revoke-session'),

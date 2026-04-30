@@ -858,6 +858,11 @@ def setup_one_shot(request):
         config.setup_complete = True
         config.setup_completed_at = timezone.now()
         config.setup_completed_by = username
+
+        bot_token = (data.get('telegram_bot_token') or '').strip()[:128]
+        if bot_token:
+            config.telegram_bot_token = bot_token
+
         config.save()
 
         # Branding (inside txn so a regex failure would have rolled back
@@ -1394,6 +1399,18 @@ def telegram_link_code(request):
     cache.set(user_key, gen_count + 1, 300)
 
     return Response({'code': code, 'expires_in': 300})
+
+
+@api_view(['GET'])
+def telegram_link_status(request):
+    """Check whether the current user has a linked Telegram account."""
+    if not request.user.is_authenticated:
+        return Response({'linked': False}, status=401)
+    prefs = UserPreference.for_user(request.user)
+    return Response({
+        'linked': bool(prefs.telegram_user_id),
+        'telegram_user_id': prefs.telegram_user_id,
+    })
 
 
 # ═══════════════ Update check ═══════════════

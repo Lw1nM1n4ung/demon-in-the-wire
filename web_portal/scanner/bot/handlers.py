@@ -27,6 +27,24 @@ HTML = 'HTML'
 
 # ── Pre-auth commands (no decorator) ─────────────────────
 
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point — only linked users see the menu."""
+    tg_user = update.effective_user
+    if not tg_user:
+        return
+    user = await sync_to_async(resolve_user)(tg_user.id)
+    if user is None:
+        await update.message.reply_text(
+            '\U0001f512 <b>Authorized Users Only</b>\n\n'
+            'This bot is restricted to linked Wire_Ghost accounts.\n'
+            'Use <code>/link &lt;code&gt;</code> to connect.',
+            parse_mode=HTML,
+        )
+        return
+    context.user_data['wg_user'] = user
+    await cmd_menu(update, context)
+
+
 async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(

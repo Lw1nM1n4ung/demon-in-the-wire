@@ -45,7 +45,7 @@ WG.login = WG.login || async function(username, password) {
   } catch (e) { return false; }
 };
 
-WG.SETUP_STEPS = ['welcome', 'database', 'admin', 'branding', 'tools', 'complete'];
+WG.SETUP_STEPS = ['welcome', 'database', 'admin', 'branding', 'tools', 'telegram', 'complete'];
 WG._setupStep = 0;
 
 WG.isSetupComplete = function() {
@@ -112,6 +112,7 @@ WG._setupContent = function(step) {
     admin: WG._setupAdmin,
     branding: WG._setupBranding,
     tools: WG._setupTools,
+    telegram: WG._setupTelegram,
     complete: WG._setupComplete,
   };
   return (fn[step] || WG._setupWelcome)();
@@ -129,6 +130,7 @@ WG._setupWelcome = function() {
         WG._setupCheckItem('Admin account', 'Create your first user') +
         WG._setupCheckItem('Report branding', 'Company name & logo') +
         WG._setupCheckItem('Tool verification', 'Check installed scanners') +
+        WG._setupCheckItem('Connect Telegram', 'Bot linking for MFA & notifications') +
       '</div>' +
     '</div>' +
     '<div class="setup-footer">' +
@@ -227,10 +229,9 @@ WG._checkUsername = function(val) {
 };
 
 WG._validateAdmin = function() {
-  /* Admin step now ONLY captures + validates the fields — the actual
-   * server submission happens in _finishSetup as a single multipart POST
-   * to /api/auth/setup/ that does Owner + branding + logo + setup-complete
-   * in one atomic request. See commit notes. */
+  /* Admin step ONLY captures + validates — server submission happens in
+   * _submitSetup (triggered at end of tools step) before the Telegram
+   * linking step. */
   var name = (document.getElementById('setupAdminName').value || '').trim();
   var user = (document.getElementById('setupAdminUser').value || '').trim();
   var email = (document.getElementById('setupAdminEmail').value || '').trim();
@@ -289,10 +290,7 @@ WG._setupBranding = function() {
 };
 
 /* Logo file-picker handler. Stashes the File object on WG so
- * _finishSetup can push it to /api/report-config/logo/ once the new
- * Owner's session is live (upload requires report:logo:upload, which
- * the owner has but anonymous callers don't — we can't POST during the
- * wizard itself). */
+ * _submitSetup can include it in the multipart POST. */
 WG._onSetupLogoPick = function(input) {
   var file = input.files && input.files[0];
   var label = document.getElementById('setupLogoName');
@@ -315,8 +313,7 @@ WG._saveBranding = function() {
     company_name: company, report_title: title, prepared_by: prepared, brand_color: color,
   }));
 
-  // Branding + logo are both pushed to the API in _finishSetup, once the
-  // Owner's session is established (both endpoints require auth).
+  // Branding + logo are pushed to the API in _submitSetup (tools step).
   WG._setupNext();
 };
 
@@ -353,18 +350,212 @@ WG._setupTools = function() {
     '<div style="margin-top:12px;padding:10px 14px;background:var(--accent-dim);border-radius:var(--radius-md);font-size:0.78rem;color:var(--accent);">' +
       '&#9432; Required tools marked with <span style="color:var(--critical);">*</span>. Optional tools extend scan capabilities.' +
     '</div>' +
+    '<div id="setupToolsError" style="display:none;color:var(--critical);font-size:0.82rem;padding:10px 14px;background:rgba(255,59,92,0.08);border-radius:var(--radius-md);margin-top:12px;"></div>' +
     '<div class="setup-footer">' +
       '<button class="btn btn-ghost" onclick="WG._setupPrev()">Back</button>' +
+      '<button class="btn btn-primary" id="setupToolsContinue" onclick="WG._submitSetup()">Continue</button>' +
+    '</div>';
+};
+
+/* ── Step 5->6 transition: submit admin + branding before Telegram step ── */
+WG._setupSubmitted = false;
+
+WG._submitSetup = async function() {
+  if (WG._setupSubmitted) { WG._setupNext(); return; }
+
+  var admin = WG._setupAdminPending || {};
+  var branding = {};
+  try { branding = JSON.parse(localStorage.getItem('wg_setup_branding') || '{}'); } catch (e) {}
+
+  var errEl = document.getElementById('setupToolsError');
+  var btn = document.getElementById('setupToolsContinue');
+
+  if (!admin.username || !admin.password) {
+    WG._setupStep = 2; WG.render(); return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating account...'; }
+  if (errEl) errEl.style.display = 'none';
+
+  var fd = new FormData();
+  fd.append('username', admin.username);
+  fd.append('password', admin.password);
+  fd.append('email', admin.email || '');
+  fd.append('name', admin.name || '');
+  if (branding.company_name) fd.append('company_name', branding.company_name);
+  if (branding.report_title) fd.append('report_title', branding.report_title);
+  if (branding.prepared_by)  fd.append('prepared_by', branding.prepared_by);
+  if (branding.brand_color)  fd.append('brand_color', branding.brand_color);
+  if (WG._setupLogoBlob)     fd.append('logo', WG._setupLogoBlob);
+
+  try {
+    var res = await fetch(WG.API_BASE + '/auth/setup/', {
+      method: 'POST', body: fd, credentials: 'include',
+    });
+    if (res.ok) {
+      WG._setupSubmitted = true;
+      WG._setupAdminPending = null;
+      WG._setupLogoBlob = null;
+      localStorage.setItem('wg_setup_complete', '1');
+      localStorage.removeItem('wg_setup_branding');
+      WG._setupNext();
+    } else {
+      var errMsg = '';
+      try { errMsg = (await res.json()).error || ''; } catch (e) { errMsg = 'HTTP ' + res.status; }
+      if (errEl) { errEl.textContent = errMsg || 'Setup failed'; errEl.style.display = 'block'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Continue'; }
+    }
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Could not reach the API'; errEl.style.display = 'block'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Continue'; }
+  }
+};
+
+/* ── Step 6: Connect Telegram ── */
+WG._tgPhase = 'token';
+WG._tgLinkCode = null;
+WG._tgPollTimer = null;
+
+WG._setupTelegram = function() {
+  if (WG._tgPhase === 'done') {
+    return WG._tgDoneHtml();
+  }
+  return '' +
+    '<h2 class="setup-title">Connect Telegram Bot</h2>' +
+    '<p class="setup-desc">Required for MFA and scan notifications</p>' +
+    '<div style="display:flex;flex-direction:column;gap:16px;margin-top:16px;">' +
+      '<div style="padding:12px 14px;background:var(--accent-dim);border-radius:var(--radius-md);font-size:0.78rem;color:var(--accent);line-height:1.6;">' +
+        '1. Open Telegram and search for <b>@BotFather</b><br>' +
+        '2. Send <code>/newbot</code> and follow the prompts<br>' +
+        '3. Copy the <b>HTTP API token</b> and paste it below' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="form-label">Bot Token</label>' +
+        '<input class="form-input mono" id="setupBotToken" placeholder="123456789:ABCdefGhIjKlmNoPQRsTuVwXyZ" style="font-size:0.78rem;">' +
+      '</div>' +
+      '<div id="setupTgStatus"></div>' +
+      '<div id="setupTgLinkSection" style="display:none;">' +
+        '<div style="text-align:center;padding:16px 0;">' +
+          '<div style="font-size:0.85rem;color:var(--text-bright);font-weight:600;margin-bottom:8px;">Send this code to your bot in Telegram:</div>' +
+          '<div class="mono" id="setupTgCode" style="font-size:2rem;font-weight:800;color:var(--accent);letter-spacing:6px;padding:12px 0;">------</div>' +
+          '<div style="font-size:0.75rem;color:var(--text-dim);margin-top:6px;">Message your bot: /link &lt;code&gt;</div>' +
+          '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px;">' +
+            '<div class="spinner" style="width:14px;height:14px;"></div>' +
+            '<span class="mono" style="font-size:0.72rem;color:var(--text-dim);" id="setupTgPollMsg">Waiting for link...</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div id="setupTgError" style="display:none;color:var(--critical);font-size:0.82rem;padding:10px 14px;background:rgba(255,59,92,0.08);border-radius:var(--radius-md);margin-top:8px;"></div>' +
+    '<div class="setup-footer">' +
+      '<button class="btn btn-ghost" disabled style="opacity:0.4;">Back</button>' +
+      '<button class="btn btn-primary" id="setupTgBtn" onclick="WG._tgSaveToken()">Save Token</button>' +
+    '</div>';
+};
+
+WG._tgDoneHtml = function() {
+  return '' +
+    '<div style="text-align:center;padding:30px 0;">' +
+      '<div style="font-size:3rem;margin-bottom:12px;color:var(--success);">&#10003;</div>' +
+      '<h2 style="font-size:1.15rem;font-weight:700;color:var(--success);margin-bottom:8px;">Telegram Connected</h2>' +
+      '<p style="color:var(--text-dim);font-size:0.82rem;">Bot linked successfully. MFA and notifications are ready.</p>' +
+    '</div>' +
+    '<div class="setup-footer">' +
+      '<div></div>' +
       '<button class="btn btn-primary" onclick="WG._setupNext()">Continue</button>' +
     '</div>';
 };
 
-/* ── Step 6: Complete ── */
+WG._tgSaveToken = async function() {
+  var tokenEl = document.getElementById('setupBotToken');
+  var statusEl = document.getElementById('setupTgStatus');
+  var errEl = document.getElementById('setupTgError');
+  var btn = document.getElementById('setupTgBtn');
+  var token = (tokenEl ? tokenEl.value : '').trim();
+
+  if (!token) {
+    if (errEl) { errEl.textContent = 'Bot token is required'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (errEl) errEl.style.display = 'none';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  try {
+    var res = await fetch(WG.API_BASE + '/notifications/config/', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bot_token: token }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      var msg = '';
+      try { msg = (await res.json()).error || ''; } catch (e) {}
+      throw new Error(msg || 'HTTP ' + res.status);
+    }
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message || 'Failed to save token'; errEl.style.display = 'block'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Token'; }
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = 'Token saved — waiting for bot to start (~30s)...';
+  if (tokenEl) tokenEl.disabled = true;
+  if (btn) { btn.textContent = 'Waiting for bot...'; }
+
+  setTimeout(function() { WG._tgGenerateCode(btn, errEl); }, 5000);
+};
+
+WG._tgGenerateCode = async function(btn, errEl) {
+  try {
+    var res = await fetch(WG.API_BASE + '/preferences/telegram-link/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      var msg = '';
+      try { msg = (await res.json()).error || ''; } catch (e) {}
+      throw new Error(msg || 'HTTP ' + res.status);
+    }
+    var data = await res.json();
+    WG._tgLinkCode = data.code;
+
+    var codeEl = document.getElementById('setupTgCode');
+    if (codeEl) codeEl.textContent = data.code;
+
+    var linkSection = document.getElementById('setupTgLinkSection');
+    if (linkSection) linkSection.style.display = 'block';
+
+    if (btn) { btn.style.display = 'none'; }
+
+    WG._tgStartPolling();
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message || 'Failed to generate code'; errEl.style.display = 'block'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Generate Code'; btn.onclick = function() { WG._tgGenerateCode(btn, errEl); }; }
+  }
+};
+
+WG._tgStartPolling = function() {
+  if (WG._tgPollTimer) clearInterval(WG._tgPollTimer);
+  WG._tgPollTimer = setInterval(async function() {
+    try {
+      var res = await fetch(WG.API_BASE + '/auth/telegram-link-status/', { credentials: 'include' });
+      if (!res.ok) return;
+      var data = await res.json();
+      if (data.linked) {
+        clearInterval(WG._tgPollTimer);
+        WG._tgPollTimer = null;
+        WG._tgPhase = 'done';
+        WG.render();
+      }
+    } catch (e) {}
+  }, 3000);
+};
+
+/* ── Step 7: Complete ── */
 WG._setupComplete = function() {
   var admin = {};
   try { admin = JSON.parse(localStorage.getItem('wg_setup_admin') || '{}'); } catch (e) {}
-  var branding = {};
-  try { branding = JSON.parse(localStorage.getItem('wg_setup_branding') || '{}'); } catch (e) {}
 
   return '' +
     '<div style="text-align:center;padding:20px 0;">' +
@@ -373,16 +564,14 @@ WG._setupComplete = function() {
       '<p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:24px;">Wire_Ghost is ready to use</p>' +
       '<div style="text-align:left;background:var(--bg-card);border-radius:var(--radius-lg);padding:16px 20px;display:flex;flex-direction:column;gap:10px;">' +
         '<div class="setup-summary-row"><span class="setup-summary-label">Admin</span><span class="mono">' + WG.escHtml(admin.username || 'admin') + '</span></div>' +
-        (branding.company_name ? '<div class="setup-summary-row"><span class="setup-summary-label">Company</span><span>' + WG.escHtml(branding.company_name) + '</span></div>' : '') +
-        '<div class="setup-summary-row"><span class="setup-summary-label">Database</span><span class="mono">' + 'MySQL Connected' + '</span></div>' +
+        '<div class="setup-summary-row"><span class="setup-summary-label">Database</span><span class="mono">MySQL Connected</span></div>' +
+        '<div class="setup-summary-row"><span class="setup-summary-label">Telegram</span><span class="mono" style="color:var(--success);">Linked</span></div>' +
         '<div class="setup-summary-row"><span class="setup-summary-label">Tools</span><span class="mono">7/8 available</span></div>' +
       '</div>' +
     '</div>' +
-    '<div id="setupFinishError" style="display:none;color:var(--critical);font-size:0.82rem;text-align:center;padding:10px 14px;background:rgba(255,59,92,0.08);border-radius:var(--radius-md);margin-top:16px;"></div>' +
-    '</div>' +
     '<div class="setup-footer">' +
-      '<button class="btn btn-ghost" onclick="WG._setupPrev()">Back</button>' +
-      '<button class="btn btn-primary" id="setupLaunchBtn" style="padding:12px 32px;font-size:0.9rem;" onclick="WG._finishSetup()">Launch Wire_Ghost</button>' +
+      '<div></div>' +
+      '<button class="btn btn-primary" style="padding:12px 32px;font-size:0.9rem;" onclick="WG.navigate(\'dashboard\')">Launch Wire_Ghost</button>' +
     '</div>';
 };
 
@@ -399,63 +588,6 @@ WG._setupPrev = function() {
     WG._setupStep--;
     WG.render();
   }
-};
-
-WG._finishSetup = async function() {
-  var admin = WG._setupAdminPending || {};
-  var branding = {};
-  try { branding = JSON.parse(localStorage.getItem('wg_setup_branding') || '{}'); } catch (e) {}
-
-  var errEl = document.getElementById('setupFinishError');
-  var btn = document.getElementById('setupLaunchBtn');
-
-  if (!admin.username || !admin.password) {
-    WG._setupStep = 2; WG.render(); return;
-  }
-
-  if (btn) { btn.disabled = true; btn.textContent = 'Setting up...'; }
-  if (errEl) errEl.style.display = 'none';
-
-  var fd = new FormData();
-  fd.append('username', admin.username);
-  fd.append('password', admin.password);
-  fd.append('email', admin.email || '');
-  fd.append('name', admin.name || '');
-  if (branding.company_name) fd.append('company_name', branding.company_name);
-  if (branding.report_title) fd.append('report_title', branding.report_title);
-  if (branding.prepared_by)  fd.append('prepared_by', branding.prepared_by);
-  if (branding.brand_color)  fd.append('brand_color', branding.brand_color);
-  if (WG._setupLogoBlob)     fd.append('logo', WG._setupLogoBlob);
-
-  var ok = false;
-  var errMsg = '';
-  try {
-    var res = await fetch(WG.API_BASE + '/auth/setup/', {
-      method: 'POST',
-      body: fd,
-      credentials: 'include',
-    });
-    if (res.ok) {
-      ok = true;
-    } else {
-      try { errMsg = (await res.json()).error || ''; } catch (e) { errMsg = 'HTTP ' + res.status; }
-    }
-  } catch (e) {
-    errMsg = 'Could not reach the API';
-  }
-
-  if (!ok) {
-    if (errEl) { errEl.textContent = errMsg || 'Setup failed'; errEl.style.display = 'block'; }
-    if (btn) { btn.disabled = false; btn.textContent = 'Launch Wire_Ghost'; }
-    return;
-  }
-
-  WG._setupAdminPending = null;
-  WG._setupLogoBlob = null;
-
-  localStorage.setItem('wg_setup_complete', '1');
-  localStorage.removeItem('wg_setup_branding');  /* server now owns it */
-  WG.navigate('dashboard');
 };
 
 WG._skipSetup = function() {

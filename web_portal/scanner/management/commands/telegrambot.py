@@ -33,6 +33,7 @@ from scanner.bot.handlers import (
     cmd_scan,
     cmd_scans,
     cmd_schedule,
+    cmd_start,
     cmd_status,
     cmd_unlink,
     cmd_users,
@@ -60,13 +61,15 @@ class Command(BaseCommand):
 
         app = Application.builder().token(token).build()
 
-        # Pre-auth commands (no permission gate)
-        app.add_handler(CommandHandler('start', cmd_menu))
-        app.add_handler(CommandHandler('menu', cmd_menu))
+        # Pre-auth commands (/link must stay ungated for the linking flow)
+        app.add_handler(CommandHandler('start', cmd_start))
         app.add_handler(CommandHandler('link', cmd_link))
-        app.add_handler(CommandHandler('unlink', cmd_unlink))
         app.add_handler(CommandHandler('yes', cmd_yes))
         app.add_handler(CommandHandler('no', cmd_no))
+
+        # Requires linked account
+        app.add_handler(CommandHandler('menu', require_permission('scan:read')(cmd_menu)))
+        app.add_handler(CommandHandler('unlink', require_permission('scan:read')(cmd_unlink)))
 
         # Viewer commands (scan:read)
         app.add_handler(CommandHandler('status', require_permission('scan:read')(cmd_status)))
