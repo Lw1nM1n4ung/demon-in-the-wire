@@ -24,6 +24,7 @@ class QA:
         self.failed = 0
         self.total = 0
         self.failures = []
+        self.sessions = {}
 
     def check(self, name, condition, detail=""):
         self.total += 1
@@ -47,6 +48,12 @@ class QA:
             csrf2 = cr.json().get("csrf", cr.json().get("csrfToken", ""))
             s.headers.update({"X-CSRFToken": csrf2})
         return s, r.status_code
+
+    def get_csrf(self, session):
+        r = session.get(f"{self.base}/api/auth/csrf/", verify=False)
+        csrf = r.json().get("csrf", r.json().get("csrfToken", ""))
+        session.headers.update({"X-CSRFToken": csrf})
+        return csrf
 
     def report(self):
         return {
@@ -73,6 +80,7 @@ def phase_5a_owasp(qa):
     print("\n── 5A: OWASP Fix Regressions ──")
 
     owner, _ = qa.login(OWNER_USER, OWNER_PASS)
+    qa.sessions["owner"] = owner
     engineer, _ = qa.login(ENGINEER_USER, ENGINEER_PASS)
     viewer, _ = qa.login(VIEWER_USER, VIEWER_PASS)
 
@@ -374,7 +382,10 @@ def phase_5e_input(qa):
         qa.check("5E.4 Oversized body rejected", True, "connection reset (expected)")
 
     # 5E.5 Weak password rejected during user creation
-    owner, _ = qa.login(OWNER_USER, OWNER_PASS)
+    owner = qa.sessions.get("owner")
+    if not owner:
+        owner, _ = qa.login(OWNER_USER, OWNER_PASS)
+    qa.get_csrf(owner)
     r = owner.post(f"{qa.base}/api/auth/users/create/",
                    json={"username": "weakuser", "password": "123", "email": "w@t.com",
                          "role": "viewer"}, verify=False)
