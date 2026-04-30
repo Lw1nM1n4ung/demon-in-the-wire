@@ -78,6 +78,13 @@ def check_latest_release(*, force: bool = False) -> dict:
         except ImportError:
             result['update_available'] = tag != current
 
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            result['latest'] = current
+            result['update_available'] = False
+        else:
+            result['error'] = str(e)
+            log.info('GitHub release check failed: %s', e)
     except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
         result['error'] = str(e)
         log.info('GitHub release check failed: %s', e)
