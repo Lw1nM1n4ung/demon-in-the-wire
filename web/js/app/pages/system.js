@@ -71,7 +71,8 @@ WG.renderSystem = function() {
         '<p>Container resource usage — live, updates every ' + (WG._sysTickMs / 1000) + 's</p>' +
       '</div>' +
       '<div class="page-header-actions">' +
-        '<div class="mono" style="font-size:0.72rem;color:var(--text-dim);">' +
+        '<div class="mono" style="font-size:0.82rem;color:var(--text-bright);letter-spacing:0.5px;" id="sysClock">—</div>' +
+        '<div class="mono" style="font-size:0.72rem;color:var(--text-dim);margin-top:2px;">' +
           'Uptime: <span id="sysUptime">—</span> · CPUs: <span id="sysCpuCount">—</span>' +
         '</div>' +
       '</div>' +
@@ -198,6 +199,11 @@ WG._sysTick = function() {
     set('sysdiskDetail', WG._sysFmtBytes(disk.used) + ' / ' + WG._sysFmtBytes(disk.total));
     set('sysUptime',     WG._sysFmtUptime(data.uptime));
     set('sysCpuCount',   (cpu.count || '—'));
+    if (data.ts) {
+      var dt = new Date(data.ts);
+      set('sysClock', dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true}) +
+        '  ' + dt.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'}));
+    }
 
     /* Net rate — bytes/sec = (current - prev) / elapsed seconds. */
     var up = 0, down = 0;
