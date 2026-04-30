@@ -67,6 +67,20 @@ OWNER_USER = "admin"
 OWNER_PASS = "QAtest2026!"
 ENGINEER_USER = "test_engineer"
 ENGINEER_PASS = "QAtest2026!"
+
+
+def flush_rate_limits():
+    """Clear DRF throttle and login lockout keys from Redis."""
+    import subprocess
+    subprocess.run(
+        ["docker", "compose", "exec", "-T", "api",
+         "python", "manage.py", "shell", "-c",
+         "c=__import__('django.core.cache',fromlist=['cache']).cache;"
+         "r=c._cache.get_client();"
+         "[r.delete(k) for k in r.keys('*throttle*')+r.keys('*login*')]"],
+        capture_output=True, text=True,
+        cwd="/home/demon/Tools/demon-in-the-wire",
+    )
 VIEWER_USER = "test_viewer"
 VIEWER_PASS = "QAtest2026!"
 
@@ -360,8 +374,10 @@ def phase_3f_pagination(qa):
 def phase_3g_mfa(qa):
     """MFA flow — Telegram OTP based (not TOTP). Tests what can be verified without Telegram."""
     print("\n── 3G: MFA Flow ──")
-    own, _ = qa.login(OWNER_USER, OWNER_PASS)
-    qa.sessions["owner"] = own
+    own = qa.sessions.get("owner")
+    if not own:
+        own, _ = qa.login(OWNER_USER, OWNER_PASS)
+        qa.sessions["owner"] = own
 
     r = own.get(f"{qa.base}/api/auth/mfa/status/", verify=False)
     qa.check("3G.1 MFA status endpoint", r.status_code == 200, f"status={r.status_code}")
@@ -416,13 +432,17 @@ def main():
 
     qa = QA(args.base)
 
+    flush_rate_limits()
     phase_3a_setup(qa)
     phase_3b_users(qa)
     phase_3c_auth(qa)
+    flush_rate_limits()
     phase_3d_rbac(qa)
     phase_3e_scan(qa)
+    flush_rate_limits()
     phase_3g_mfa(qa)
     phase_3h_config(qa)
+    flush_rate_limits()
     phase_3f_pagination(qa)  # last — throttle tests exhaust rate limits
 
     report = qa.report()

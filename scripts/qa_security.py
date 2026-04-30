@@ -84,6 +84,16 @@ def phase_5a_owasp(qa):
     engineer, _ = qa.login(ENGINEER_USER, ENGINEER_PASS)
     viewer, _ = qa.login(VIEWER_USER, VIEWER_PASS)
 
+    # Clean up ALL owner tokens from prior runs to stay under the 20-token limit
+    r = owner.get(f"{qa.base}/api/auth/tokens/", verify=False)
+    if r.status_code == 200:
+        data = r.json()
+        tokens = data if isinstance(data, list) else data.get("results", [])
+        for tok in tokens:
+            tid = tok.get("id") or tok.get("token_id")
+            if tid:
+                owner.delete(f"{qa.base}/api/auth/tokens/{tid}/", verify=False)
+
     # 5A.1 Cross-user token revocation — owner creates token, viewer cannot delete it
     r = owner.post(f"{qa.base}/api/auth/tokens/",
                    json={"name": "sec_test_token"}, verify=False)
