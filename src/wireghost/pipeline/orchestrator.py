@@ -14,6 +14,7 @@ from wireghost.pipeline.cms_scan import scan_cms
 from wireghost.pipeline.discovery import discover_hosts
 from wireghost.pipeline.portscan import scan_host
 from wireghost.pipeline.service_enum import enumerate_services
+from wireghost.pipeline.smb_enum import enumerate_smb
 from wireghost.pipeline.vulnscan import scan_host_vulns
 from wireghost.pipeline.webdetect import probe_host
 from wireghost.pipeline.webscreenshot import screenshot_host
@@ -90,15 +91,17 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         # Phase 4: Web detection
         await probe_host(host, config, tree, sem)
 
-        # Phases 4b-5: CMS, service enum, vuln scan, screenshots — parallel
-        cms_findings, svc_findings, findings, _ = await asyncio.gather(
+        # Phases 4b-5: CMS, service enum, SMB enum, vuln scan, screenshots — parallel
+        cms_findings, svc_findings, smb_findings, findings, _ = await asyncio.gather(
             scan_cms(host, config, tree, sem),
             enumerate_services(host, config, tree, sem),
+            enumerate_smb(host, config, tree, sem),
             scan_host_vulns(host, config, tree, sem),
             screenshot_host(host, config, tree, sem),
         )
         findings.extend(svc_findings)
         findings.extend(cms_findings)
+        findings.extend(smb_findings)
 
         log.info(
             "[%s] Pipeline done: %d port(s), %d endpoint(s), %d finding(s)",

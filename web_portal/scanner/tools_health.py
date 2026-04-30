@@ -32,6 +32,7 @@ TOOLS = [
     ('Searchsploit', 'searchsploit', ['--version']),
     ('WPScan',       'wpscan',       ['--version']),
     ('scannerctl',   'scannerctl',   ['--version']),
+    ('enum4linux',   'enum4linux',   ['-h']),
 ]
 
 

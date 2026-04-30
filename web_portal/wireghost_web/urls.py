@@ -3,7 +3,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from scanner.views import (
     ScanViewSet, HostViewSet, FindingViewSet, AssetViewSet,
-    ScanPolicyViewSet, ScheduledScanViewSet,
+    ScanPolicyViewSet, ScheduledScanViewSet, ExploitMatchViewSet,
     dashboard_stats, download_report, report_config, upload_logo,
     support_bundle, screenshot_image, dashboard_screenshots,
 )
@@ -18,6 +18,7 @@ from scanner.auth_views import (
     tokens_list_or_create, tokens_revoke,
     notifications_config, notifications_test, tools_health, system_stats,
     telegram_link_code,
+    update_check_view, update_apply_view, update_feeds_view,
 )
 
 router = DefaultRouter()
@@ -27,6 +28,7 @@ router.register(r'findings', FindingViewSet)
 router.register(r'assets', AssetViewSet)
 router.register(r'policies', ScanPolicyViewSet)
 router.register(r'schedules', ScheduledScanViewSet)
+router.register(r'exploits', ExploitMatchViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -88,4 +90,8 @@ urlpatterns = [
     path('api/tools-health/', tools_health, name='tools-health'),
     # Real-time container resource usage (drives /system page)
     path('api/system-stats/', system_stats, name='system-stats'),
+    # Updates
+    path('api/update-check/', update_check_view, name='update-check'),
+    path('api/update/apply/', update_apply_view, name='update-apply'),
+    path('api/update/feeds/', update_feeds_view, name='update-feeds'),
 ]

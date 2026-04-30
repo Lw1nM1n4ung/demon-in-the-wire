@@ -48,6 +48,7 @@ def run_scan(self, scan_id):
             nuclei_templates=scan.nuclei_templates,
             nuclei_default_templates=scan.nuclei_default_templates,
             scan_unresponsive=scan.scan_unresponsive,
+            skip_enum4linux=not scan.enum4linux,
             output_dir=str(output_dir),
         )
 
@@ -56,6 +57,65 @@ def run_scan(self, scan_id):
 
         # ── Persist results to ORM ──
         _persist_results(scan, report)
+
+        # ── Match MSF exploits ──
+        try:
+            from scanner.msf_matcher import match_exploits
+            from scanner.models import ExploitMatch, Port, Host as HostModel
+            ports_qs = Port.objects.filter(host__scan=scan).values(
+                'id', 'number', 'service_name', 'service_product',
+                'service_version', 'host__ip',
+            )
+            ports_for_match = [
+                {'number': p['number'], 'service_name': p['service_name'],
+                 'service_product': p['service_product'],
+                 'service_version': p['service_version'],
+                 'host_ip': p['host__ip'], '_port_id': p['id']}
+                for p in ports_qs
+            ]
+            findings_qs = scan.findings.values('id', 'cve', 'host_ip', 'port', 'host_id')
+            findings_for_match = [
+                {'cve': f['cve'], 'host_ip': f['host_ip'], 'port': f['port'],
+                 '_finding_id': f['id'], '_host_id': f['host_id']}
+                for f in findings_qs
+            ]
+            matches = match_exploits(ports_for_match, findings_for_match)
+            if matches:
+                ip_to_host = dict(HostModel.objects.filter(scan=scan).values_list('ip', 'id'))
+                ip_to_ports = {}
+                for p in ports_qs:
+                    ip_to_ports.setdefault(p['host__ip'], {})[p['number']] = p['id']
+                objs = []
+                for m in matches:
+                    hip = m.get('host_ip', '')
+                    host_id = ip_to_host.get(hip)
+                    if not host_id:
+                        continue
+                    port_id = None
+                    pn = m.get('port_number')
+                    if pn and hip in ip_to_ports:
+                        port_id = ip_to_ports[hip].get(pn)
+                    objs.append(ExploitMatch(
+                        scan=scan, host_id=host_id, port_id=port_id,
+                        module_fullname=m['module_fullname'],
+                        module_name=m['module_name'],
+                        module_type=m['module_type'],
+                        module_rank=m.get('module_rank', 0),
+                        module_rank_name=m.get('module_rank_name', ''),
+                        disclosure_date=m.get('disclosure_date', ''),
+                        description=m.get('description', ''),
+                        references=m.get('references', []),
+                        platform=m.get('platform', ''),
+                        confidence=m['confidence'],
+                        match_reason=m['match_reason'],
+                        host_ip=hip or None,
+                        port_number=pn,
+                    ))
+                if objs:
+                    ExploitMatch.objects.bulk_create(objs)
+                    logger.info('Scan %s: %d MSF exploit matches stored', scan_id, len(objs))
+        except Exception:
+            logger.exception('MSF exploit matching failed for scan %s', scan_id)
 
         # ── Generate reports ──
         from wireghost.reports.engine import ReportEngine
@@ -415,6 +475,7 @@ def check_scheduled_scans():
             skip_screenshots=policy.skip_screenshots if policy else False,
             nuclei_templates=policy.tools.get('nuclei_templates', '') if policy and policy.tools else '',
             nuclei_default_templates=policy.tools.get('nuclei_default_templates', True) if policy and policy.tools else True,
+            enum4linux=policy.tools.get('enum4linux', True) if policy and policy.tools else True,
             status='pending',
             created_by=sched.created_by,
         )
@@ -540,3 +601,32 @@ def send_mfa_otp(self, chat_id, otp_code, username):
     result = send_telegram(chat_id, text, bot_token=cfg.telegram_bot_token)
     if not result.get('ok'):
         logger.warning('MFA OTP delivery failed for %s: %s', username, result.get('error'))
+
+
+@shared_task
+def check_for_updates():
+    """Runs every 6h via Celery Beat. Checks GitHub for new releases."""
+    from scanner.update_check import check_latest_release
+    from django.core.cache import cache as _cache
+
+    result = check_latest_release(force=True)
+    if result.get('update_available') and result.get('latest'):
+        notified_key = 'wg:update:last_notified_ver'
+        if _cache.get(notified_key) != result['latest']:
+            try:
+                from scanner.notifications import notify
+                notify('update.available', extra={
+                    'current': result['current'],
+                    'latest': result['latest'],
+                    'url': result.get('latest_url', ''),
+                })
+            except Exception:
+                logger.exception('update notification dispatch failed')
+            _cache.set(notified_key, result['latest'], 30 * 24 * 3600)
+
+
+@shared_task(bind=True, soft_time_limit=900, time_limit=960)
+def update_security_feeds(self):
+    """Update nuclei templates, searchsploit DB, OpenVAS feeds on worker."""
+    from scanner.update_check import run_feed_update
+    return run_feed_update()

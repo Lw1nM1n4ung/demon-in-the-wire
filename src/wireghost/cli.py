@@ -73,6 +73,9 @@ def scan(
     skip_screenshots: bool = typer.Option(
         False, "--skip-screenshots", help="Skip web endpoint screenshots"
     ),
+    skip_enum4linux: bool = typer.Option(
+        False, "--skip-enum4linux", help="Skip SMB/NetBIOS enumeration via enum4linux"
+    ),
     config_file: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to wireghost.yml config"
     ),
@@ -92,6 +95,7 @@ def scan(
         "nuclei_templates": nuclei_templates,
         "nuclei_default_templates": nuclei_default_templates,
         "skip_screenshots": skip_screenshots,
+        "skip_enum4linux": skip_enum4linux,
     }
     if report_formats is not None:
         overrides["report_formats"] = [

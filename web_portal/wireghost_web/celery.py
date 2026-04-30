@@ -24,4 +24,8 @@ app.conf.beat_schedule = {
         'task': 'scanner.tasks.enforce_scan_deadlines',
         'schedule': 60.0,
     },
+    'check-for-updates': {
+        'task': 'scanner.tasks.check_for_updates',
+        'schedule': 6 * 3600,
+    },
 }

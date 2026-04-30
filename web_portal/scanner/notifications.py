@@ -124,6 +124,16 @@ def _render(event_type: str, *, scan=None, extra: Optional[dict] = None) -> str:
             f'{count} critical-severity finding(s).\n'
             f'<b>Target:</b> <code>{e(scan.target) if scan else "?"}</code>'
         )
+    if event_type == 'update.available':
+        current = e(extra.get('current', '?'))
+        latest = e(extra.get('latest', '?'))
+        url = extra.get('url', '')
+        return (
+            f'\U0001f4e6 <b>Wire_Ghost update available</b>\n'
+            f'<b>Current:</b> <code>{current}</code>\n'
+            f'<b>Latest:</b> <code>{latest}</code>\n'
+            + (f'<b>Release:</b> {e(url)}' if url else '')
+        )
     return f'Wire_Ghost event: {e(event_type)}'
 
 

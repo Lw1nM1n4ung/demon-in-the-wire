@@ -240,6 +240,14 @@ cmd_restore() {
 cmd_update() {
     require_env
 
+    # Check if update was requested from the web portal
+    local FLAG_FILE="${WIREGHOST_LOG_DIR:-./logs}/api/update-requested.json"
+    if [ -f "$FLAG_FILE" ]; then
+        info "Update was requested from the web portal:"
+        python3 -m json.tool "$FLAG_FILE" 2>/dev/null || cat "$FLAG_FILE"
+        printf "\n"
+    fi
+
     info "Creating pre-update backup..."
     cmd_backup
 
@@ -256,8 +264,17 @@ cmd_update() {
     sleep 5
     docker compose exec -T api python manage.py migrate --noinput
 
+    # Write update status for the web portal
+    local STATUS_DIR="${WIREGHOST_LOG_DIR:-./logs}/api"
+    mkdir -p "$STATUS_DIR"
+    local NEW_VER
+    NEW_VER=$(docker compose exec -T api python -c 'from wireghost import __version__; print(__version__)' 2>/dev/null || echo 'unknown')
+    printf '{"completed_at": "%s", "version": "%s"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NEW_VER" > "$STATUS_DIR/update-status.json"
+    rm -f "$FLAG_FILE"
+
     printf "\n"
-    ok "Update complete"
+    ok "Update complete (version: ${NEW_VER})"
     printf "  Verify with: ${CYAN}./scripts/wg-ctl status${NC}\n\n"
 }
 

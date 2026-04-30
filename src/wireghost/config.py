@@ -46,6 +46,7 @@ class ScanConfig:
     # that drop ICMP but have open TCP ports; expensive on large CIDRs
     # because every IP in the range becomes a scan target.
     scan_unresponsive: bool = False
+    skip_enum4linux: bool = False
 
     @classmethod
     def load(
@@ -130,6 +131,7 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "nuclei_batch_size": "nuclei_batch_size",
         "scan_unresponsive": "scan_unresponsive",
         "skip_screenshots": "skip_screenshots",
+        "skip_enum4linux": "skip_enum4linux",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -158,6 +160,7 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_NUCLEI_BATCH_SIZE": ("nuclei_batch_size", int),
         "WIREGHOST_SCAN_UNRESPONSIVE": ("scan_unresponsive", bool),
         "WIREGHOST_SKIP_SCREENSHOTS": ("skip_screenshots", bool),
+        "WIREGHOST_SKIP_ENUM4LINUX": ("skip_enum4linux", bool),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

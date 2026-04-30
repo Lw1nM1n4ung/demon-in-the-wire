@@ -57,12 +57,24 @@ FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap fping masscan libpcap0.8 libsnmp40 git rsync libxml2-utils \
     chromium \
+    smbclient samba-common-bin ldap-utils perl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install enum4linux
+RUN git clone --depth 1 https://github.com/CiscoCXSecurity/enum4linux.git /opt/enum4linux \
+    && ln -sf /opt/enum4linux/enum4linux.pl /usr/local/bin/enum4linux \
+    && chmod +x /opt/enum4linux/enum4linux.pl
 
 # Install searchsploit (exploitdb)
 RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb \
     && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit \
     && cp /opt/exploitdb/.searchsploit_rc /root/ 2>/dev/null || true
+
+# Download Metasploit module metadata (exploit matching, ~50MB)
+RUN mkdir -p /opt/msf \
+    && curl -sL https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json \
+       -o /opt/msf/modules_metadata_base.json \
+    && echo "MSF metadata: $(python3 -c "import json; print(len(json.load(open('/opt/msf/modules_metadata_base.json'))))" 2>/dev/null || echo 'download failed') modules"
 
 # Copy pre-built tool binaries
 COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
