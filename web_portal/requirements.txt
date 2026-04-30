@@ -26,3 +26,4 @@ defusedxml>=0.7
 # Real-time System Monitor page (cgroup-scoped CPU/mem/disk/net)
 psutil>=6.0
 python-telegram-bot>=21.0,<22.0
+pytest>=8.0

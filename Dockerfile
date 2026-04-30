@@ -88,7 +88,7 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 COPY wireghost.example.yml .
-RUN pip install --no-cache-dir ".[dev]" greenbone-feed-sync
+RUN pip install --no-cache-dir . greenbone-feed-sync
 
 # Download nuclei templates
 RUN nuclei -update-templates
