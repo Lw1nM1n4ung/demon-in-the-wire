@@ -6,7 +6,7 @@ security, and input validation against the live Docker stack.
 
 Expects Phase 3 to have already created the owner/engineer/viewer accounts.
 
-Usage: python3 qa_security.py --base https://localhost:28443 --results qa-results/phase-5.json
+Usage: python3 qa_security.py --base https://localhost:18443 --results qa-results/phase-5.json
 """
 import argparse, json, sys, urllib3
 urllib3.disable_warnings()
@@ -414,7 +414,7 @@ def phase_5f_throttle(qa):
 
 def main():
     ap = argparse.ArgumentParser(description="Wire_Ghost Phase 5 — Security Regression Tests")
-    ap.add_argument("--base", default="https://localhost:28443")
+    ap.add_argument("--base", default="https://localhost:18443")
     ap.add_argument("--results", default="qa-results/phase-5.json")
     args = ap.parse_args()
 
