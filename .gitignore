@@ -21,3 +21,4 @@ nginx.conf
 .playwright-mcp/
 .claude/scheduled_tasks.lock
 qa-results/
+reports/
