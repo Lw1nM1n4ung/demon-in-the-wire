@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from dataclasses import dataclass
 
@@ -25,9 +26,12 @@ async def check_tools(tools: list[str]) -> None:
     if not missing:
         return
 
-    # Try auto-install
-    from wireghost.utils.installer import install_missing_tools
-    still_missing = install_missing_tools(missing)
+    auto_install = os.getenv("WIREGHOST_AUTO_INSTALL_TOOLS", "1").strip().lower()
+    if auto_install in {"0", "false", "no", "off"}:
+        still_missing = missing
+    else:
+        from wireghost.utils.installer import install_missing_tools
+        still_missing = install_missing_tools(missing)
 
     if still_missing:
         raise ToolMissing(

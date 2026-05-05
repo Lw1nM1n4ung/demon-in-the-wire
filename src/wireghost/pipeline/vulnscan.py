@@ -13,6 +13,7 @@ from wireghost.models.scan import Host
 from wireghost.parsers.nmap import parse_nmap_vuln_xml
 from wireghost.parsers.nuclei import parse_nuclei_json
 from wireghost.parsers.searchsploit import parse_searchsploit_json
+from wireghost.pipeline.nikto_scan import run_nikto
 from wireghost.utils.process import run_tool
 
 if TYPE_CHECKING:
@@ -341,37 +342,6 @@ async def run_searchsploit(
     return all_findings
 
 
-async def run_openvas(
-    host: Host,
-    config: ScanConfig,
-    tree: OutputTree,
-) -> list[Finding]:
-    """Run OpenVAS scan via scannerctl (if enabled and available)."""
-    if config.skip_openvas:
-        return []
-
-    from wireghost.pipeline.openvas_client import scan_host_scannerctl
-    vuln_dir = tree.host_vuln_dir(host.ip)
-    result_path = await scan_host_scannerctl(
-        ip=host.ip,
-        output_dir=vuln_dir,
-        timeout=config.tool_timeout,
-    )
-    if result_path is None:
-        return []
-
-    # Try parsing as OpenVAS XML first, fall back to text parsing
-    from wireghost.parsers.openvas import parse_openvas_xml
-    xml_path = vuln_dir / f"openvas_report_{host.ip}.xml"
-    if xml_path.exists():
-        findings = parse_openvas_xml(xml_path, host.ip)
-    else:
-        findings = parse_openvas_xml(result_path, host.ip)
-
-    log.info("OpenVAS %s: %d finding(s)", host.ip, len(findings))
-    return findings
-
-
 async def scan_host_vulns(
     host: Host,
     config: ScanConfig,
@@ -394,9 +364,9 @@ async def scan_host_vulns(
         # Searchsploit: auto-find exploits for detected services (if installed)
         tasks.append(asyncio.create_task(run_searchsploit(host, config, tree)))
 
-        # OpenVAS: full vulnerability assessment (if enabled)
-        if not config.skip_openvas:
-            tasks.append(asyncio.create_task(run_openvas(host, config, tree)))
+        # Nikto: web server misconfiguration scanner (if enabled and web endpoints exist)
+        if not config.skip_nikto and host.web_endpoints:
+            tasks.append(asyncio.create_task(run_nikto(host, config, tree)))
 
         if not tasks:
             return []

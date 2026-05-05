@@ -12,6 +12,15 @@ output_dir: "./output"
 # Max concurrent host scans
 parallelism: 10
 
+# Enable nmap version detection (-sV)
+version_detect: true
+
+# Enable nmap OS detection (-O)
+os_detect: true
+
+# Run pure-Python service enumeration checks
+service_enum: true
+
 # Skip nuclei web vulnerability scanner
 skip_nuclei: false
 

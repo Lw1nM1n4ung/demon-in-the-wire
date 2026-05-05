@@ -10,7 +10,7 @@ from wireghost.models.severity import Severity
 
 @dataclass
 class Finding:
-    source: Literal["nmap_vuln", "nuclei", "nuclei_external", "nettacker", "searchsploit", "openvas", "service_enum", "wpscan", "enum4linux"]
+    source: Literal["nmap_vuln", "nuclei", "nuclei_external", "nettacker", "searchsploit", "service_enum", "wpscan", "enum4linux", "nikto", "netexec"]
     host: str
     port: str
     protocol: str

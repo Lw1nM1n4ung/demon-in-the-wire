@@ -149,15 +149,6 @@ def update_feeds() -> None:
     if shutil.which("searchsploit"):
         _run(["searchsploit", "-u"], "searchsploit database", timeout=120)
 
-    # OpenVAS NASL feeds (if scannerctl or greenbone-feed-sync available)
-    if shutil.which("greenbone-feed-sync"):
-        _run(
-            ["greenbone-feed-sync", "--type", "nasl"],
-            "OpenVAS NASL feeds (greenbone-feed-sync)",
-            timeout=600,
-        )
-    elif shutil.which("scannerctl"):
-        console.print("  [dim]scannerctl feed update requires feed path config[/]")
 
 
 def update_self() -> None:

@@ -60,9 +60,6 @@ def scan(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable debug logging"
     ),
-    skip_openvas: bool = typer.Option(
-        True, "--skip-openvas/--no-skip-openvas", help="Skip/enable OpenVAS scanning"
-    ),
     nuclei_templates: Optional[str] = typer.Option(
         None, "--nuclei-templates", help="Path to external nuclei template directory"
     ),
@@ -75,6 +72,12 @@ def scan(
     ),
     skip_enum4linux: bool = typer.Option(
         False, "--skip-enum4linux", help="Skip SMB/NetBIOS enumeration via enum4linux"
+    ),
+    skip_nikto: bool = typer.Option(
+        False, "--skip-nikto", help="Skip Nikto web server scanning"
+    ),
+    skip_netexec: bool = typer.Option(
+        False, "--skip-netexec", help="Skip NetExec network enumeration"
     ),
     config_file: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to wireghost.yml config"
@@ -91,11 +94,12 @@ def scan(
         "skip_vuln": skip_vuln,
         "tool_timeout": timeout,
         "verbose": verbose,
-        "skip_openvas": skip_openvas,
         "nuclei_templates": nuclei_templates,
         "nuclei_default_templates": nuclei_default_templates,
         "skip_screenshots": skip_screenshots,
         "skip_enum4linux": skip_enum4linux,
+        "skip_nikto": skip_nikto,
+        "skip_netexec": skip_netexec,
     }
     if report_formats is not None:
         overrides["report_formats"] = [
@@ -350,6 +354,9 @@ def _config_init() -> None:
             "# target: \"192.168.1.0/24\"\n"
             "output_dir: \"./output\"\n"
             "parallelism: 10\n"
+            "version_detect: true\n"
+            "os_detect: true\n"
+            "service_enum: true\n"
             "skip_nuclei: false\n"
             "skip_vuln: false\n"
             "tool_timeout: 3600\n"
@@ -377,6 +384,9 @@ def _config_show() -> None:
     table.add_row("target", cfg.target or "(not set)")
     table.add_row("output_dir", str(cfg.output_dir))
     table.add_row("parallelism", str(cfg.parallelism))
+    table.add_row("version_detect", str(cfg.version_detect))
+    table.add_row("os_detect", str(cfg.os_detect))
+    table.add_row("service_enum", str(cfg.service_enum))
     table.add_row("skip_nuclei", str(cfg.skip_nuclei))
     table.add_row("skip_vuln", str(cfg.skip_vuln))
     table.add_row("tool_timeout", str(cfg.tool_timeout))

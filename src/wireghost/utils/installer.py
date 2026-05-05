@@ -21,6 +21,7 @@ _APT_TOOLS = {
     "fping": "fping",
     "masscan": "masscan",
     "searchsploit": "exploitdb",
+    "nikto": "nikto",
 }
 
 # ProjectDiscovery tools — downloaded as pre-built binaries
@@ -28,6 +29,11 @@ _PD_TOOLS = {
     "nuclei": "projectdiscovery/nuclei",
     "httpx": "projectdiscovery/httpx",
     "naabu": "projectdiscovery/naabu",
+}
+
+# Tools installable via pip
+_PIP_TOOLS = {
+    "nxc": "netexec",
 }
 
 _INSTALL_DIR = Path("/usr/local/bin")
@@ -121,6 +127,23 @@ def _install_pd_binary(tool_name: str, repo: str) -> bool:
     return False
 
 
+def _install_pip(package: str) -> bool:
+    """Install a package via pip. Returns True on success."""
+    console.print(f"  [cyan]Installing {package} via pip...[/]")
+    try:
+        result = subprocess.run(
+            ["pip", "install", "--quiet", package],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            console.print(f"  [green]Installed {package}[/]")
+            return True
+        console.print(f"  [red]pip install failed:[/] {result.stderr.strip()}")
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        console.print(f"  [red]pip install failed:[/] {e}")
+    return False
+
+
 def install_missing_tools(tools: list[str]) -> list[str]:
     """Check which tools are missing and attempt to install them.
 
@@ -143,6 +166,9 @@ def install_missing_tools(tools: list[str]) -> list[str]:
                 still_missing.append(tool)
         elif tool in _PD_TOOLS:
             if not _install_pd_binary(tool, _PD_TOOLS[tool]):
+                still_missing.append(tool)
+        elif tool in _PIP_TOOLS:
+            if not _install_pip(_PIP_TOOLS[tool]):
                 still_missing.append(tool)
         else:
             console.print(f"  [yellow]Don't know how to install: {tool}[/]")

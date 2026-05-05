@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from wireghost.models.finding import Finding
-from wireghost.models.severity import Severity
+from wireghost.models.severity import SEVERITY_ORDER, Severity
 
 
 def parse_enum4linux_output(output: str, host_ip: str = "") -> list[Finding]:
@@ -186,7 +186,8 @@ def _parse_password_policy(output: str, host: str, findings: list[Finding]) -> N
 
     lockout = policies.get("Account Lockout Threshold", "")
     if lockout and lockout.lower() in ("none", "0"):
-        sev = max(sev, Severity.MEDIUM)
+        if SEVERITY_ORDER.get(Severity.MEDIUM, 99) < SEVERITY_ORDER.get(sev, 99):
+            sev = Severity.MEDIUM
 
     desc_lines = [f"  {k}: {v}" for k, v in policies.items()]
     findings.append(Finding(
