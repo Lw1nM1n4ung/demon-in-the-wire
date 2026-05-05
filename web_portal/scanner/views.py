@@ -5,6 +5,7 @@ from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology, Screenshot as DBScreenshot, ExploitMatch
+from .policy_tools import normalize_policy_tools
 
 
 def HasPerm(code):
@@ -131,9 +132,11 @@ class ScanViewSet(viewsets.ModelViewSet):
             service_enum=data['service_enum'],
             skip_nuclei=data['skip_nuclei'],
             skip_screenshots=data.get('skip_screenshots', False),
-            skip_openvas=data['skip_openvas'],
+
             scan_unresponsive=data.get('scan_unresponsive', False),
             enum4linux=data.get('enum4linux', True),
+            skip_nikto=data.get('skip_nikto', False),
+            skip_netexec=data.get('skip_netexec', False),
             status='pending',
             created_by=request.user,
         )
@@ -767,7 +770,7 @@ class ScanPolicyViewSet(viewsets.ModelViewSet):
             parallelism=policy.parallelism,
             timeout=policy.timeout,
             port_range=policy.port_range,
-            tools=policy.tools,
+            tools=normalize_policy_tools(policy.tools),
             version_detect=policy.version_detect,
             os_detect=policy.os_detect,
             severity_filter=policy.severity_filter,
@@ -807,11 +810,19 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
         # Apply policy settings if linked
         if schedule.policy:
             p = schedule.policy
+            tools = normalize_policy_tools(p.tools)
             scan.parallelism = p.parallelism
             scan.timeout = p.timeout
             scan.report_formats = p.report_formats
             scan.version_detect = p.version_detect
             scan.os_detect = p.os_detect
+            scan.service_enum = tools.get('service_enum', True)
+            scan.skip_nuclei = not tools.get('nuclei', True)
+            scan.nuclei_templates = tools.get('nuclei_templates', '')
+            scan.nuclei_default_templates = tools.get('nuclei_default_templates', True)
+            scan.enum4linux = tools.get('enum4linux', True)
+            scan.skip_nikto = not tools.get('nikto', True)
+            scan.skip_netexec = not tools.get('netexec', True)
             scan.skip_screenshots = p.skip_screenshots
             scan.save()
 

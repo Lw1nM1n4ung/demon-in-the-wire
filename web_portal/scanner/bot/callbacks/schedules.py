@@ -99,12 +99,7 @@ async def handle_toggle(query, user, rest, context):
         )
         return
 
-    status = '✅ Enabled' if sched.enabled else '⏸ Disabled'
-    await query.edit_message_text(
-        f'{status}: <code>{esc(sched.target[:30])}</code>',
-        reply_markup=schedule_detail_kb(short_id(sched.id), sched.enabled),
-        parse_mode=HTML,
-    )
+    await handle_detail(query, user, [short_id(sched.id)], context)
 
 
 async def handle_run_now(query, user, rest, context):

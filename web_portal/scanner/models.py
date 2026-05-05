@@ -163,13 +163,14 @@ class Scan(models.Model):
     service_enum = models.BooleanField(default=True)
     skip_nuclei = models.BooleanField(default=False)
     skip_screenshots = models.BooleanField(default=False)
-    skip_openvas = models.BooleanField(default=True)
     nuclei_templates = models.CharField(max_length=500, blank=True)
     nuclei_default_templates = models.BooleanField(default=True)
     # If True, ICMP-silent hosts get port-scanned too (nmap -Pn path). Default
     # False because it can blow up scope on big CIDRs.
     scan_unresponsive = models.BooleanField(default=False)
     enum4linux = models.BooleanField(default=True)
+    skip_nikto = models.BooleanField(default=False)
+    skip_netexec = models.BooleanField(default=False)
 
     # Results
     hosts_count = models.IntegerField(default=0)

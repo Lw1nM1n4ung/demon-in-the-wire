@@ -5,14 +5,15 @@ import logging
 from asgiref.sync import sync_to_async
 from django.db.models import Sum, Q, Count
 from django.utils import timezone as dj_tz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 
 from scanner.bot.auth import resolve_user, link_account, unlink_account, check_rate_limit
+from scanner.bot.reply_keyboards import main_reply_kb
 from scanner.bot.formatting import (
     esc, severity_emoji, severity_line, short_id,
     status_icon, truncate_list, format_duration,
-    time_ago, progress_bar,
+    time_ago, progress_bar, SEPARATOR, header,
 )
 from scanner.bot.menus import main_menu_kb, scan_detail_kb
 from scanner.models import (
@@ -84,7 +85,8 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_unlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok, msg = await sync_to_async(unlink_account)(update.effective_user.id)
     prefix = '✅' if ok else '❌'
-    await update.message.reply_text(f'{prefix} {esc(msg)}', parse_mode=HTML)
+    markup = ReplyKeyboardRemove() if ok else None
+    await update.message.reply_text(f'{prefix} {esc(msg)}', reply_markup=markup, parse_mode=HTML)
 
 
 async def cmd_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,14 +118,18 @@ async def cmd_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return token
 
     token = await sync_to_async(_do_unlock)()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
     await update.message.reply_text(
         '\U0001f513 <b>Account Unlocked</b>\n'
-        '━━━━━━━━━━━━━━━━━\n\n'
+        f'{SEPARATOR}\n\n'
         'Your login lockout has been cleared.\n\n'
         '<b>Option 1:</b> Go back to the login page and sign in normally.\n\n'
         '<b>Option 2:</b> Use this one-time login token (expires in 5 min):\n'
         f'<code>/login?token={token}</code>\n\n'
         '<i>Append this to your portal URL to auto-login.</i>',
+        reply_markup=kb,
         parse_mode=HTML,
     )
 
@@ -146,12 +152,11 @@ async def cmd_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = context.user_data.get('wg_user')
     role = user.role if user else 'viewer'
-    kb = main_menu_kb(role)
     await update.message.reply_text(
         '<b>🔰 Wire_Ghost Control Panel</b>\n'
         '━━━━━━━━━━━━━━━━━━━━━━\n'
-        'Select a category:',
-        reply_markup=kb,
+        'Use the buttons below to navigate:',
+        reply_markup=main_reply_kb(role),
         parse_mode=HTML,
     )
 
@@ -202,8 +207,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         next_info = f'<code>{esc(ns.target)}</code> at {ns.time.strftime("%H:%M")} ({time_ago(ns.next_run) if ns.next_run and ns.next_run < dj_tz.now() else ns.next_run.strftime("%Y-%m-%d %H:%M") if ns.next_run else "—"})'
 
     lines = [
-        '🛡 <b>Wire_Ghost Dashboard</b>',
-        '━━━━━━━━━━━━━━━━━━━━━',
+        header('📊', 'Wire_Ghost Dashboard'),
         '',
         f'<b>📊 Scan Activity</b>',
         f'  🔄 Running: <b>{d["active"]}</b>  │  ⏳ Pending: <b>{d["pending"]}</b>',
@@ -221,7 +225,20 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f'  Last scan: {last_info}',
         f'  Next scheduled: {next_info}',
     ]
-    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
+    user = context.user_data.get('wg_user')
+    role = user.role if user else 'viewer'
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton('🔍 Scans', callback_data='sl:0'),
+            InlineKeyboardButton('🛡 Findings', callback_data='fl:all:0'),
+        ],
+        [
+            InlineKeyboardButton('💻 Assets', callback_data='al:0'),
+            InlineKeyboardButton('➕ New Scan', callback_data='ns:pick'),
+        ],
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
+    await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
 async def cmd_scans(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -241,7 +258,7 @@ async def cmd_scans(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    lines = [f'📋 <b>Recent Scans</b> ({len(rows)} shown)', '━━━━━━━━━━━━━━━━━━━']
+    lines = [f'📋 <b>Recent Scans</b> ({len(rows)} shown)', SEPARATOR]
     for scan_id, name, target, stype, st, fcount, crit, high, dur, created, creator in rows:
         icon = status_icon(st)
         sid = short_id(scan_id)
@@ -258,8 +275,10 @@ async def cmd_scans(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f' │ {dur_str} │ {time_str}'
         )
 
-    lines.append(f'\n💡 <i>Detail: </i><code>/scan &lt;id&gt;</code>')
-    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
+    await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,7 +396,7 @@ async def cmd_findings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emoji_header = severity_emoji(severity_filter) + ' ' if severity_filter else '🔍 '
     lines = [
         f'{emoji_header}<b>{esc(label)} Findings</b> ({total} total)',
-        '━━━━━━━━━━━━━━━━━━━━',
+        SEPARATOR,
     ]
     shown, remaining = truncate_list(rows, 15)
     for sev, title, ip, port, cve, source, scan_target in shown:
@@ -389,7 +408,18 @@ async def cmd_findings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if remaining:
         lines.append(f'\n<i>… and {remaining} more</i>')
 
-    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton('🔴 Critical', callback_data='fl:critical:0'),
+            InlineKeyboardButton('🟠 High', callback_data='fl:high:0'),
+        ],
+        [
+            InlineKeyboardButton('🟡 Medium', callback_data='fl:medium:0'),
+            InlineKeyboardButton('🔵 Low', callback_data='fl:low:0'),
+        ],
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
+    await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
 async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -408,7 +438,7 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    lines = [f'🏠 <b>High-Risk Assets</b> (top {len(rows)})', '━━━━━━━━━━━━━━━━━━━━━']
+    lines = [f'🏠 <b>High-Risk Assets</b> (top {len(rows)})', SEPARATOR]
     for ip, hostname, svc, risk, fcount, ports, last_seen in rows:
         host_label = f'{ip}'
         if hostname:
@@ -425,7 +455,10 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f' │ {esc(svc_label)} │ {seen_str}'
         )
 
-    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
+    await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -475,7 +508,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<i>Scan types: full, quick, port, web, service</i>',
     ])
 
-    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
+    await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
 # ── Engineer commands ────────────────────────────────────
@@ -534,13 +570,17 @@ async def cmd_newscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     scan = await sync_to_async(_create)()
     sid = short_id(scan.id)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('📋 View Scan', callback_data=f'sd:{sid}')],
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
     await update.message.reply_text(
         f'🚀 <b>Scan Launched</b>\n'
-        f'━━━━━━━━━━━━━━\n\n'
+        f'{SEPARATOR}\n\n'
         f'  <b>ID:</b> <code>{esc(sid)}</code>\n'
         f'  <b>Target:</b> <code>{esc(target)}</code>\n'
-        f'  <b>Type:</b> {esc(scan_type)}\n\n'
-        f'Track: <code>/scan {esc(sid)}</code>',
+        f'  <b>Type:</b> {esc(scan_type)}',
+        reply_markup=kb,
         parse_mode=HTML,
     )
 
@@ -573,8 +613,15 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if err:
         await update.message.reply_text(f'❌ {err}')
         return
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton('🔍 Scans', callback_data='sl:0'),
+            InlineKeyboardButton('🔰 Menu', callback_data='mn'),
+        ],
+    ])
     await update.message.reply_text(
         f'⏹ Scan <code>{esc(short_id(scan.id))}</code> │ <code>{esc(scan.target)}</code> — cancelled.',
+        reply_markup=kb,
         parse_mode=HTML,
     )
 
@@ -610,7 +657,7 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=HTML,
             )
             return
-        lines = [f'📅 <b>Scheduled Scans</b> ({len(rows)} active)', '━━━━━━━━━━━━━━━━━━━━━']
+        lines = [f'📅 <b>Scheduled Scans</b> ({len(rows)} active)', SEPARATOR]
         for sid, name, target, freq, t, stop, nxt, last, stype in rows:
             nxt_str = nxt.strftime('%Y-%m-%d %H:%M') if nxt else '—'
             last_str = time_ago(last) if last else 'never'
@@ -621,7 +668,10 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f'\n     {esc(freq)} at {time_str}{stop_str} │ {esc(stype)}'
                 f'\n     Next: {esc(nxt_str)} │ Last: {last_str}'
             )
-        await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+        ])
+        await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
     elif sub == 'add':
         if len(context.args) < 4:
@@ -666,13 +716,18 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return sched
 
         sched = await sync_to_async(_create)()
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton('📅 Schedules', callback_data='cl:0')],
+            [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+        ])
         await update.message.reply_text(
             f'✅ <b>Schedule Created</b>\n'
-            f'━━━━━━━━━━━━━━━━\n\n'
+            f'{SEPARATOR}\n\n'
             f'  <b>Target:</b> <code>{esc(target)}</code>\n'
             f'  <b>Frequency:</b> {esc(freq)}\n'
             f'  <b>Run at:</b> {esc(time_str)}\n'
             f'  <b>ID:</b> <code>{esc(short_id(sched.id))}</code>',
+            reply_markup=kb,
             parse_mode=HTML,
         )
 
@@ -736,9 +791,14 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await sync_to_async(_launch)()
     sid = short_id(scan.id)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('📋 View Scan', callback_data=f'sd:{sid}')],
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
     await update.message.reply_text(
         f'📄 Generating reports for <code>{esc(sid)}</code> │ <code>{esc(scan.target)}</code>\n'
         f'<i>I\'ll send the file when ready.</i>',
+        reply_markup=kb,
         parse_mode=HTML,
     )
 
@@ -767,10 +827,14 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f'\n     Telegram: {link_str} │ Last login: {login_str}'
         )
 
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
     try:
         await context.bot.send_message(
             chat_id=update.effective_user.id,
             text='\n'.join(lines),
+            reply_markup=kb,
             parse_mode=HTML,
         )
         if update.effective_chat.type in ('group', 'supergroup'):
@@ -812,10 +876,17 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f'  <b>Shared chat:</b> {"✅ set" if data["shared_chat"] else "❌ not set"}',
     ]
 
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton('🏥 Health', callback_data='hl'),
+            InlineKeyboardButton('🔰 Menu', callback_data='mn'),
+        ],
+    ])
     try:
         await context.bot.send_message(
             chat_id=update.effective_user.id,
             text='\n'.join(lines),
+            reply_markup=kb,
             parse_mode=HTML,
         )
         if update.effective_chat.type in ('group', 'supergroup'):
@@ -850,12 +921,124 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk_bar = progress_bar(int(s['disk_pct']), 100, 10)
 
     lines = [
-        '💻 <b>System Health</b>',
-        '━━━━━━━━━━━━━━━',
+        header('💻', 'System Health'),
         '',
         f'<b>CPU</b>  {cpu_bar} {s["cpu"]}%',
         f'<b>RAM</b>  {ram_bar} {s["ram_used"]:.1f}/{s["ram_total"]:.1f} GB ({s["ram_pct"]}%)',
         f'<b>Disk</b> {disk_bar} {s["disk_used"]:.0f}/{s["disk_total"]:.0f} GB ({s["disk_pct"]}%)',
         f'<b>Uptime:</b> {format_duration(s["uptime"])}',
     ]
-    await update.message.reply_text('\n'.join(lines), parse_mode=HTML)
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton('🔄 Refresh', callback_data='hl'),
+            InlineKeyboardButton('⚙️ Config', callback_data='cf'),
+        ],
+        [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+    ])
+    await update.message.reply_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
+
+
+# ── Text message handler (reply keyboard + free-text input) ──
+
+BUTTON_MAP = {
+    '📊 Status': ('cmd_status', 'scan:read'),
+    '🔍 Scans': ('cmd_scans', 'scan:read'),
+    '🛡 Findings': ('cmd_findings', 'scan:read'),
+    '💻 Assets': ('cmd_assets', 'scan:read'),
+    '➕ New Scan': ('cmd_newscan', 'scan:write'),
+    '📅 Schedules': ('cmd_schedule', 'scan:write'),
+    '🏥 Health': ('cmd_health', 'site:config'),
+    '⚙️ Config': ('cmd_config', 'site:config'),
+    '🔰 Menu': ('cmd_menu', None),
+}
+
+_HANDLER_FUNCS = {
+    'cmd_status': cmd_status,
+    'cmd_scans': cmd_scans,
+    'cmd_findings': cmd_findings,
+    'cmd_assets': cmd_assets,
+    'cmd_newscan': cmd_newscan,
+    'cmd_schedule': cmd_schedule,
+    'cmd_health': cmd_health,
+    'cmd_config': cmd_config,
+    'cmd_menu': cmd_menu,
+}
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user = context.user_data.get('wg_user')
+
+    if not user:
+        tg_user = update.effective_user
+        if tg_user:
+            user = await sync_to_async(resolve_user)(tg_user.id)
+            if user:
+                context.user_data['wg_user'] = user
+
+    entry = BUTTON_MAP.get(text)
+    if entry:
+        func_name, perm = entry
+        if perm and not user:
+            await update.message.reply_text(
+                'Not linked. Use <code>/link &lt;code&gt;</code> first.',
+                parse_mode=HTML,
+            )
+            return
+        if perm and user:
+            has_perm = await sync_to_async(user.has_permission)(perm)
+            if not has_perm:
+                await update.message.reply_text(
+                    f'Permission denied (requires <code>{perm}</code>).',
+                    parse_mode=HTML,
+                )
+                return
+        await _HANDLER_FUNCS[func_name](update, context)
+        return
+
+    newscan_type = context.user_data.pop('_newscan_type', None)
+    if newscan_type and user:
+        import re
+        target = text[:500]
+        if not re.match(r'^[a-zA-Z0-9.:/,\-]+$', target):
+            await update.message.reply_text('Invalid target format. Try again:')
+            context.user_data['_newscan_type'] = newscan_type
+            return
+
+        if not check_rate_limit('tg:scanrate:', str(update.effective_user.id), 5, 3600):
+            await update.message.reply_text('⏱ Scan rate limit: max 5 per hour.')
+            return
+
+        def _create():
+            from scanner.tasks import run_scan
+            cfg = SiteConfig.get()
+            scan = Scan.objects.create(
+                name=f'Telegram: {target}',
+                target=target,
+                scan_type=newscan_type,
+                parallelism=cfg.default_parallelism,
+                timeout=cfg.default_timeout,
+                report_formats=cfg.default_report_formats,
+                status='pending',
+                created_by=user,
+            )
+            task = run_scan.delay(str(scan.id))
+            scan.celery_task_id = task.id
+            scan.status = 'running'
+            scan.save(update_fields=['celery_task_id', 'status'])
+            return scan
+
+        scan = await sync_to_async(_create)()
+        sid = short_id(scan.id)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton('📋 View Scan', callback_data=f'sd:{sid}')],
+            [InlineKeyboardButton('🔰 Menu', callback_data='mn')],
+        ])
+        await update.message.reply_text(
+            f'🚀 <b>Scan Launched</b>\n{SEPARATOR}\n\n'
+            f'  <b>ID:</b> <code>{esc(sid)}</code>\n'
+            f'  <b>Target:</b> <code>{esc(target)}</code>\n'
+            f'  <b>Type:</b> {esc(newscan_type)}',
+            reply_markup=kb,
+            parse_mode=HTML,
+        )

@@ -8,6 +8,8 @@ from pathlib import Path
 from celery import shared_task
 from django.utils import timezone
 
+from scanner.policy_tools import normalize_policy_tools
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +40,7 @@ def run_scan(self, scan_id):
         config = ScanConfig.load(
             target=scan.target,
             parallelism=scan.parallelism,
-            timeout=scan.timeout,
+            tool_timeout=scan.timeout,
             report_formats=scan.report_formats.split(','),
             version_detect=scan.version_detect,
             os_detect=scan.os_detect,
@@ -49,6 +51,8 @@ def run_scan(self, scan_id):
             nuclei_default_templates=scan.nuclei_default_templates,
             scan_unresponsive=scan.scan_unresponsive,
             skip_enum4linux=not scan.enum4linux,
+            skip_nikto=scan.skip_nikto,
+            skip_netexec=scan.skip_netexec,
             output_dir=str(output_dir),
         )
 
@@ -461,6 +465,7 @@ def check_scheduled_scans():
     for sched in due:
         # Apply policy settings if linked
         policy = sched.policy
+        policy_tools = normalize_policy_tools(policy.tools if policy else {})
         scan = Scan.objects.create(
             name=f"{sched.name} (scheduled)",
             target=sched.target,
@@ -470,12 +475,14 @@ def check_scheduled_scans():
             report_formats=policy.report_formats if policy else 'dashboard,docx,xlsx',
             version_detect=policy.version_detect if policy else True,
             os_detect=policy.os_detect if policy else True,
-            service_enum=policy.tools.get('service_enum', True) if policy and policy.tools else True,
-            skip_nuclei=not policy.tools.get('nuclei', True) if policy and policy.tools else False,
+            service_enum=policy_tools.get('service_enum', True),
+            skip_nuclei=not policy_tools.get('nuclei', True),
             skip_screenshots=policy.skip_screenshots if policy else False,
-            nuclei_templates=policy.tools.get('nuclei_templates', '') if policy and policy.tools else '',
-            nuclei_default_templates=policy.tools.get('nuclei_default_templates', True) if policy and policy.tools else True,
-            enum4linux=policy.tools.get('enum4linux', True) if policy and policy.tools else True,
+            nuclei_templates=policy_tools.get('nuclei_templates', ''),
+            nuclei_default_templates=policy_tools.get('nuclei_default_templates', True),
+            enum4linux=policy_tools.get('enum4linux', True),
+            skip_nikto=not policy_tools.get('nikto', True),
+            skip_netexec=not policy_tools.get('netexec', True),
             status='pending',
             created_by=sched.created_by,
         )
@@ -627,6 +634,6 @@ def check_for_updates():
 
 @shared_task(bind=True, soft_time_limit=900, time_limit=960)
 def update_security_feeds(self):
-    """Update nuclei templates, searchsploit DB, OpenVAS feeds on worker."""
+    """Update nuclei templates and searchsploit DB on worker."""
     from scanner.update_check import run_feed_update
     return run_feed_update()

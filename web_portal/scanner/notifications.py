@@ -53,7 +53,8 @@ def _validate_chat_id(chat_id: str) -> None:
         raise NotificationError(f'invalid chat_id: {chat_id!r}')
 
 
-def send_telegram(chat_id: str, text: str, *, bot_token: str, timeout: float = 5.0) -> dict:
+def send_telegram(chat_id: str, text: str, *, bot_token: str, timeout: float = 5.0,
+                   reply_markup: Optional[dict] = None) -> dict:
     """POST sendMessage to Telegram. Returns ``{'ok': bool, 'error': str|None}``.
 
     Never raises on network / API errors — returns the error in the dict so
@@ -66,12 +67,15 @@ def send_telegram(chat_id: str, text: str, *, bot_token: str, timeout: float = 5
     _validate_chat_id(chat_id)
 
     url = f'{TELEGRAM_API}/bot{bot_token}/sendMessage'
-    payload = json.dumps({
+    body = {
         'chat_id': chat_id,
         'text': text,
         'parse_mode': 'HTML',
         'disable_web_page_preview': True,
-    }).encode('utf-8')
+    }
+    if reply_markup:
+        body['reply_markup'] = reply_markup
+    payload = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(url, data=payload, method='POST')
     req.add_header('Content-Type', 'application/json')
 
@@ -137,6 +141,34 @@ def _render(event_type: str, *, scan=None, extra: Optional[dict] = None) -> str:
     return f'Wire_Ghost event: {e(event_type)}'
 
 
+def _render_keyboard(event_type: str, *, scan=None, extra: Optional[dict] = None) -> Optional[list]:
+    """Inline keyboard rows as JSON-serializable list for notification messages."""
+    if not scan or not hasattr(scan, 'id'):
+        return None
+    sid = str(scan.id)[:8]
+    if event_type == 'scan.complete':
+        return [
+            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
+            [{'text': '🛡 Findings', 'callback_data': f'sf:{sid}:0'}],
+            [{'text': '📄 Report', 'callback_data': f'sr:{sid}'}],
+        ]
+    if event_type == 'scan.failed':
+        return [
+            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
+            [{'text': '🔍 Scans', 'callback_data': 'sl:0'}],
+        ]
+    if event_type == 'critical.discovered':
+        return [
+            [{'text': '🚨 View Findings', 'callback_data': f'sf:{sid}:0:critical'}],
+            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
+        ]
+    if event_type == 'report.ready':
+        return [
+            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
+        ]
+    return None
+
+
 # ─── Fan-out ─────────────────────────────────────────────────────────────
 
 def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
@@ -151,12 +183,15 @@ def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
         if not cfg.telegram_bot_token:
             return
         text = _render(event_type, scan=scan, extra=extra)
+        keyboard = _render_keyboard(event_type, scan=scan, extra=extra)
+        inline_kb = {'inline_keyboard': keyboard} if keyboard else None
         bot_token = cfg.telegram_bot_token
 
         # Shared channel — fires regardless of user prefs when configured.
         if cfg.telegram_shared_chat_id:
             try:
-                send_telegram(cfg.telegram_shared_chat_id, text, bot_token=bot_token)
+                send_telegram(cfg.telegram_shared_chat_id, text,
+                              bot_token=bot_token, reply_markup=inline_kb)
             except NotificationError as e:
                 log.warning('skipping shared channel: %s', e)
 
@@ -174,7 +209,8 @@ def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
                 and prefs.telegram_chat_id
                 and (pref_field is None or getattr(prefs, pref_field, True))):
                 try:
-                    send_telegram(prefs.telegram_chat_id, text, bot_token=bot_token)
+                    send_telegram(prefs.telegram_chat_id, text,
+                                  bot_token=bot_token, reply_markup=inline_kb)
                 except NotificationError as e:
                     log.warning('skipping DM for user=%s: %s', creator.username, e)
 
@@ -187,6 +223,8 @@ def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
                     'event': event_type,
                     'text': text,
                 }
+                if keyboard:
+                    pub_data['reply_markup'] = keyboard
                 if scan and event_type == 'report.ready':
                     has_docx = scan.reports.filter(format='docx').exists()
                     if has_docx:

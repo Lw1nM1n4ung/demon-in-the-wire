@@ -1421,6 +1421,25 @@ def system_stats(request):
     })
 
 
+class ProcessThrottle(UserRateThrottle):
+    rate = '30/min'
+    scope = 'container_processes'
+
+    def get_cache_key(self, request, view):
+        if request.user.is_authenticated:
+            return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+        return self.cache_format % {'scope': self.scope, 'ident': self.get_ident(request)}
+
+
+@api_view(['GET'])
+@throttle_classes([ProcessThrottle])
+def container_processes(request):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=401)
+    from scanner.docker_stats import get_processes
+    return Response(get_processes())
+
+
 @api_view(['POST'])
 def telegram_link_code(request):
     """Generate a 6-digit one-time code for Telegram account linking."""

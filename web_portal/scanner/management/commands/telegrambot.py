@@ -14,6 +14,8 @@ from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
+    MessageHandler,
+    filters,
 )
 
 from scanner.bot.auth import require_permission
@@ -39,6 +41,7 @@ from scanner.bot.handlers import (
     cmd_unlock,
     cmd_users,
     cmd_yes,
+    handle_text,
 )
 from scanner.models import SiteConfig
 
@@ -95,6 +98,9 @@ class Command(BaseCommand):
         # Callback queries (inline buttons)
         app.add_handler(CallbackQueryHandler(handle_callback))
 
+        # Plain text messages (reply keyboard buttons + free-text input)
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
         # Start Redis pub/sub listener in background thread.
         # Must capture the main event loop BEFORE run_polling() takes ownership.
         main_loop = asyncio.new_event_loop()
@@ -150,10 +156,17 @@ class Command(BaseCommand):
                             elif document_path:
                                 log.warning('Document not found: %s', document_path)
                             elif text:
+                                kwargs = dict(chat_id=cid, text=text, parse_mode='HTML')
+                                reply_markup_data = data.get('reply_markup')
+                                if reply_markup_data:
+                                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                                    kwargs['reply_markup'] = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton(btn['text'], callback_data=btn['callback_data'])
+                                         for btn in row]
+                                        for row in reply_markup_data
+                                    ])
                                 future = asyncio.run_coroutine_threadsafe(
-                                    app.bot.send_message(
-                                        chat_id=cid, text=text, parse_mode='HTML',
-                                    ),
+                                    app.bot.send_message(**kwargs),
                                     main_loop,
                                 )
                                 future.result(timeout=30)

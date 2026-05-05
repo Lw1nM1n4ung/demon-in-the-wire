@@ -132,7 +132,7 @@ async def handle_findings(query, user, rest, context):
         total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         rows = list(
             qs[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-            .values_list('severity', 'title', 'host_ip', 'port', 'cve', 'source')
+            .values_list('id', 'severity', 'title', 'host_ip', 'port', 'cve', 'source')
         )
         return scan, rows, total_pages
 
@@ -144,21 +144,31 @@ async def handle_findings(query, user, rest, context):
         )
         return
 
+    scan_sid = short_id(scan.id)
+    sev_filter = severity or 'all'
+    back_cb = f'sf:{scan_sid}:{page}:{sev_filter}'
     label = severity.title() if severity and severity != 'all' else 'All'
     lines = [
-        f'<b>🛡 {esc(label)} Findings</b> — <code>{short_id(scan.id)}</code>',
+        f'<b>🛡 {esc(label)} Findings</b> — <code>{scan_sid}</code>',
         '━━━━━━━━━━━━━━━━━━',
     ]
+    finding_buttons = []
     if not rows:
         lines.append('<i>No findings.</i>')
-    for sev, title, ip, port, cve, source in rows:
+    for fid, sev, title, ip, port, cve, source in rows:
         emoji = severity_emoji(sev)
         loc = f'{ip}:{port}' if port else ip or ''
         cve_str = f' — {esc(cve)}' if cve else ''
         lines.append(f'{emoji} {esc(title[:60])}{cve_str}')
         lines.append(f'   📍 <code>{esc(loc)}</code> │ {esc(source or "—")}')
+        finding_buttons.append([
+            InlineKeyboardButton(
+                f'{emoji} {title[:35]}',
+                callback_data=f'fd:{short_id(fid)}:{back_cb}',
+            )
+        ])
 
-    kb = findings_list_kb(page, total_pages, severity or 'all', short_id(scan.id))
+    kb = findings_list_kb(page, total_pages, sev_filter, scan_sid, finding_buttons=finding_buttons)
     await query.edit_message_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
 
 
@@ -236,6 +246,81 @@ async def handle_new(query, user, rest, context):
         await query.edit_message_text(
             '<b>➕ New Scan</b>\n━━━━━━━━━━\n\nSelect scan type:',
             reply_markup=new_scan_kb(),
+            parse_mode=HTML,
+        )
+    elif action == 'go':
+        scan_type = rest[1] if len(rest) > 1 else 'full'
+        idx = int(rest[2]) if len(rest) > 2 and rest[2].isdigit() else -1
+        recent = context.user_data.get('_recent_targets', [])
+        if 0 <= idx < len(recent):
+            target = recent[idx]
+            def _create():
+                from scanner.tasks import run_scan
+                from scanner.models import SiteConfig
+                cfg = SiteConfig.get()
+                scan = Scan.objects.create(
+                    name=f'Telegram: {target}',
+                    target=target[:500],
+                    scan_type=scan_type,
+                    parallelism=cfg.default_parallelism,
+                    timeout=cfg.default_timeout,
+                    report_formats=cfg.default_report_formats,
+                    status='pending',
+                    created_by=user,
+                )
+                task = run_scan.delay(str(scan.id))
+                scan.celery_task_id = task.id
+                scan.status = 'running'
+                scan.save(update_fields=['celery_task_id', 'status'])
+                return scan
+            scan = await sync_to_async(_create)()
+            sid = short_id(scan.id)
+            await query.edit_message_text(
+                f'🚀 <b>Scan Launched</b>\n━━━━━━━━━━━━━━\n\n'
+                f'  <b>ID:</b> <code>{esc(sid)}</code>\n'
+                f'  <b>Target:</b> <code>{esc(target)}</code>\n'
+                f'  <b>Type:</b> {esc(scan_type)}',
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton('📋 View Scan', callback_data=f'sd:{sid}')],
+                    [InlineKeyboardButton('⬅ Menu', callback_data='mn')],
+                ]),
+                parse_mode=HTML,
+            )
+        else:
+            await query.edit_message_text(
+                'Target not found. Try again.',
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('⬅ Menu', callback_data='mn')]]),
+                parse_mode=HTML,
+            )
+    elif action == 'custom':
+        scan_type = rest[1] if len(rest) > 1 else 'full'
+        context.user_data['_newscan_type'] = scan_type
+        await query.edit_message_text(
+            f'<b>➕ New Scan</b> — {esc(scan_type)}\n\n'
+            f'Send the target (IP, CIDR, or hostname) as a text message:',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('⬅ Cancel', callback_data='mn')]]),
+            parse_mode=HTML,
+        )
+    elif action in ('full', 'quick', 'port', 'web', 'service'):
+        def _recent():
+            return list(
+                Scan.objects.order_by('-created_at')
+                .values_list('target', flat=True).distinct()[:5]
+            )
+        recent = await sync_to_async(_recent)()
+        context.user_data['_recent_targets'] = recent
+        context.user_data['_newscan_type'] = action
+
+        rows = []
+        for i, t in enumerate(recent):
+            rows.append([InlineKeyboardButton(f'🎯 {t[:35]}', callback_data=f'ns:go:{action}:{i}')])
+        rows.append([InlineKeyboardButton('⌨ Custom Target', callback_data=f'ns:custom:{action}')])
+        rows.append([InlineKeyboardButton('⬅ Cancel', callback_data='mn')])
+
+        await query.edit_message_text(
+            f'<b>➕ New Scan</b> — {esc(action)}\n━━━━━━━━━━━━━━\n\n'
+            f'Pick a recent target or enter a custom one:',
+            reply_markup=InlineKeyboardMarkup(rows),
             parse_mode=HTML,
         )
     else:

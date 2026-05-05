@@ -31,7 +31,9 @@ TOOLS = [
     ('fping',        'fping',        ['-v']),
     ('Searchsploit', 'searchsploit', ['--version']),
     ('WPScan',       'wpscan',       ['--version']),
-    ('scannerctl',   'scannerctl',   ['--version']),
+    ('Nikto',         'nikto',        ['-Version']),
+    ('NetExec',       'nxc',          ['--version']),
+
     ('enum4linux',   'enum4linux',   ['-h']),
 ]
 

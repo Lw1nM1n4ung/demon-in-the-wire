@@ -16,7 +16,7 @@ from scanner.auth_views import (
     list_sessions, revoke_session, revoke_all_sessions,
     audit_log,
     tokens_list_or_create, tokens_revoke,
-    notifications_config, notifications_test, tools_health, system_stats,
+    notifications_config, notifications_test, tools_health, system_stats, container_processes,
     telegram_link_code, telegram_link_status, auth_token_login,
     update_check_view, update_apply_view, update_feeds_view,
 )
@@ -92,6 +92,7 @@ urlpatterns = [
     path('api/tools-health/', tools_health, name='tools-health'),
     # Real-time container resource usage (drives /system page)
     path('api/system-stats/', system_stats, name='system-stats'),
+    path('api/system-processes/', container_processes, name='system-processes'),
     # Updates
     path('api/update-check/', update_check_view, name='update-check'),
     path('api/update/apply/', update_apply_view, name='update-apply'),

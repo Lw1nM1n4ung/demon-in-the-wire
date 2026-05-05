@@ -156,18 +156,6 @@ def run_feed_update() -> dict:
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
             errors.append(f'searchsploit: {e}')
 
-    if shutil.which('greenbone-feed-sync'):
-        try:
-            r = subprocess.run(
-                ['greenbone-feed-sync', '--type', 'nasl'],
-                capture_output=True, text=True, timeout=600,
-            )
-            if r.returncode == 0:
-                updated.append('openvas-nasl')
-            else:
-                errors.append(f'greenbone-feed-sync: exit {r.returncode}')
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            errors.append(f'greenbone-feed-sync: {e}')
 
     status = 'completed' if not errors else ('partial' if updated else 'failed')
     return {'status': status, 'updated': updated, 'errors': errors}

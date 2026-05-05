@@ -82,8 +82,11 @@ def finding_filter_kb(scan_sid: str | None = None) -> InlineKeyboardMarkup:
 
 
 def findings_list_kb(page: int, total_pages: int, severity: str = 'all',
-                     scan_sid: str | None = None) -> InlineKeyboardMarkup:
+                     scan_sid: str | None = None,
+                     finding_buttons: list | None = None) -> InlineKeyboardMarkup:
     rows = []
+    if finding_buttons:
+        rows.extend(finding_buttons)
     if scan_sid:
         prefix = f'sf:{scan_sid}'
         rows.append(_pagination_row_ext(prefix, page, total_pages, severity))
@@ -161,6 +164,12 @@ def new_scan_kb() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton('🔧 Service', callback_data='ns:service')],
         [InlineKeyboardButton('⬅ Menu', callback_data='mn')],
+    ])
+
+
+def finding_detail_kb(back_callback: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('⬅ Back', callback_data=back_callback)],
     ])
 
 

@@ -38,20 +38,22 @@ async def handle(query, user, rest, context):
         total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         rows = list(
             qs[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-            .values_list('severity', 'title', 'host_ip', 'port', 'cve', 'source', 'scan__target')
+            .values_list('id', 'severity', 'title', 'host_ip', 'port', 'cve', 'source', 'scan__target')
         )
         return rows, total, total_pages
 
     rows, total, total_pages = await sync_to_async(_q)()
 
+    back_cb = f'fl:{severity}:{page}'
     label = severity.title() if severity != 'all' else 'All'
     lines = [
         f'<b>🛡 {esc(label)} Findings</b> ({total})',
         '━━━━━━━━━━━━━━━━━━',
     ]
+    finding_buttons = []
     if not rows:
         lines.append(f'<i>No {esc(severity)} findings found.</i>')
-    for sev, title, ip, port, cve, source, scan_target in rows:
+    for fid, sev, title, ip, port, cve, source, scan_target in rows:
         emoji = severity_emoji(sev)
         loc = f'{ip}:{port}' if port else ip or ''
         cve_str = f' — {esc(cve)}' if cve else ''
@@ -65,6 +67,12 @@ async def handle(query, user, rest, context):
             parts.append(f'scan: {esc(scan_target[:20])}')
         if parts:
             lines.append(f'   📍 {" │ ".join(parts)}')
+        finding_buttons.append([
+            InlineKeyboardButton(
+                f'{emoji} {title[:35]}',
+                callback_data=f'fd:{short_id(fid)}:{back_cb}',
+            )
+        ])
 
-    kb = findings_list_kb(page, total_pages, severity)
+    kb = findings_list_kb(page, total_pages, severity, finding_buttons=finding_buttons)
     await query.edit_message_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)

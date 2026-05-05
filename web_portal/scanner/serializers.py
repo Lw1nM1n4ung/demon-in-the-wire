@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Screenshot, ExploitMatch
+from .policy_tools import normalize_policy_tools
 
 
 class AssetListSerializer(serializers.ModelSerializer):
@@ -97,9 +98,15 @@ class HostListSerializer(serializers.ModelSerializer):
 
 
 class ReportSerializer(serializers.ModelSerializer):
+    filename = serializers.SerializerMethodField()
+
     class Meta:
         model = Report
-        fields = ['id', 'format', 'file_size', 'created_at']  # file_path excluded (path disclosure)
+        fields = ['id', 'format', 'file_size', 'created_at', 'filename']
+
+    def get_filename(self, obj):
+        from pathlib import Path
+        return Path(obj.file_path).name
 
 
 class ScanSerializer(serializers.ModelSerializer):
@@ -111,11 +118,13 @@ class ScanSerializer(serializers.ModelSerializer):
 
 
 class ScanListSerializer(serializers.ModelSerializer):
+    reports = ReportSerializer(many=True, read_only=True)
+
     class Meta:
         model = Scan
         fields = ['id', 'name', 'target', 'scan_type', 'status', 'hosts_count', 'findings_count',
                   'critical_count', 'high_count', 'medium_count', 'low_count', 'info_count',
-                  'duration_seconds', 'created_at']
+                  'duration_seconds', 'created_at', 'reports']
 
 
 class ScanCreateSerializer(serializers.Serializer):
@@ -130,13 +139,14 @@ class ScanCreateSerializer(serializers.Serializer):
     service_enum = serializers.BooleanField(default=True)
     skip_nuclei = serializers.BooleanField(default=False)
     skip_screenshots = serializers.BooleanField(default=False)
-    skip_openvas = serializers.BooleanField(default=True)
     nuclei_templates = serializers.CharField(max_length=500, required=False, default='', allow_blank=True)
     nuclei_default_templates = serializers.BooleanField(required=False, default=True)
     # When True, hosts that don't answer ICMP are still port-scanned. Useful
     # against firewalled targets; massively expands scope on big CIDRs.
     scan_unresponsive = serializers.BooleanField(required=False, default=False)
     enum4linux = serializers.BooleanField(required=False, default=True)
+    skip_nikto = serializers.BooleanField(required=False, default=False)
+    skip_netexec = serializers.BooleanField(required=False, default=False)
 
     def validate_target(self, value):
         """Block SSRF targets: localhost, link-local, cloud metadata, non-routable."""
@@ -230,6 +240,24 @@ class ReportConfigSerializer(serializers.ModelSerializer):
 
 
 class ScanPolicySerializer(serializers.ModelSerializer):
+    def validate_tools(self, value):
+        return normalize_policy_tools(value)
+
+    def create(self, validated_data):
+        validated_data['tools'] = normalize_policy_tools(validated_data.get('tools'))
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data['tools'] = normalize_policy_tools(
+            validated_data.get('tools', instance.tools)
+        )
+        return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['tools'] = normalize_policy_tools(data.get('tools'))
+        return data
+
     class Meta:
         model = ScanPolicy
         fields = '__all__'

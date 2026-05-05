@@ -93,3 +93,14 @@ def progress_bar(done, total, width: int = 10) -> str:
         return '░' * width
     filled = round(done / total * width)
     return '▓' * filled + '░' * (width - filled)
+
+
+SEPARATOR = '━━━━━━━━━━━━━━━━━━'
+
+
+def header(emoji: str, title: str) -> str:
+    return f'<b>{emoji} {esc(title)}</b>\n{SEPARATOR}'
+
+
+def section(emoji: str, title: str) -> str:
+    return f'\n<b>{emoji} {title}</b>'
