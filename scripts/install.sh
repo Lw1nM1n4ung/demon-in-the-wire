@@ -460,10 +460,34 @@ create_dirs() {
     ok "Log directories created"
 }
 
+# ── Docker daemon hardening ──────────────────────────────────────────
+harden_docker_daemon() {
+    local DAEMON_JSON="/etc/docker/daemon.json"
+    if [ ! -f "$DAEMON_JSON" ]; then
+        step "Hardening Docker daemon"
+        cat > "$DAEMON_JSON" <<'DAEMONJSON'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "3"
+  },
+  "live-restore": true,
+  "no-new-privileges": true
+}
+DAEMONJSON
+        systemctl reload docker 2>/dev/null || true
+        ok "Created ${DAEMON_JSON} (log rotation + no-new-privileges)"
+    else
+        info "Docker daemon.json already exists — skipping"
+    fi
+}
+
 # ── Build and start ──────────────────────────────────────────────────
 build_and_start() {
     step "Building containers"
     info "This may take several minutes on first run..."
+    export DOCKER_CONTENT_TRUST=1
     docker compose build --pull 2>&1 | tail -5
 
     step "Starting services"
@@ -580,6 +604,7 @@ step "Writing configuration"
 render_nginx
 write_env
 create_dirs
+harden_docker_daemon
 
 build_and_start
 
