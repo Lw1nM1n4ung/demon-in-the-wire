@@ -18,6 +18,7 @@ RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/re
 
 # ── Stage 2: final image ──
 FROM python:3.12-slim-bookworm
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 WORKDIR /app
 
@@ -50,7 +51,7 @@ RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
 # Python deps
 COPY web_portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec
+RUN pip install --no-cache-dir netexec
 
 # App code
 COPY web_portal/ .
@@ -71,6 +72,10 @@ RUN chmod +x /docker-entrypoint.sh
 RUN groupadd -g 1000 appuser && useradd -u 1000 -g 1000 -m -s /bin/sh appuser \
     && mkdir -p /data/output /data/assets /app/logs \
     && chown -R appuser:appuser /data /app/logs
+
+RUN find / -perm -4000 -type f -exec chmod u-s {} + 2>/dev/null; \
+    find / -perm -2000 -type f -exec chmod g-s {} + 2>/dev/null; \
+    true
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app:/app/src

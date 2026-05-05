@@ -1,5 +1,6 @@
 # === Stage 1: Download pre-built Go tool binaries ===
 FROM debian:bookworm-slim AS tools
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip ca-certificates && rm -rf /var/lib/apt/lists/*
 
@@ -38,6 +39,7 @@ RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/re
 
 # === Stage 2: Final image ===
 FROM python:3.12-slim-bookworm
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap fping masscan libpcap0.8 libsnmp40 git rsync libxml2-utils \
@@ -94,6 +96,10 @@ RUN echo "=== Tool verification ===" \
     && masscan --version 2>&1 | head -1 \
     && gowitness version 2>&1 | head -1 \
     && wireghost --version
+
+RUN find / -perm -4000 -type f -exec chmod u-s {} + 2>/dev/null; \
+    find / -perm -2000 -type f -exec chmod g-s {} + 2>/dev/null; \
+    true
 
 ENV WIREGHOST_OUTPUT_DIR=/data/output
 ENTRYPOINT ["wireghost"]
