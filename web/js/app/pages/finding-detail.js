@@ -20,6 +20,7 @@ WG.renderFindingDetail = function(id) {
   var refs = [];
   try { refs = JSON.parse(f.references || '[]'); } catch (e) {}
   var safeHref = function(r) { return /^https?:\/\//i.test(r) ? esc(r) : '#'; };
+  var curlCopy = encodeURIComponent(String(f.curl_command || ''));
 
   return '' +
     '<div class="breadcrumbs">' +
@@ -57,7 +58,7 @@ WG.renderFindingDetail = function(id) {
       '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">HTTP Response</div></div><div class="panel-body" style="padding:0;"><div class="code-block">' + esc(f.response) + '</div></div></div>' : '') +
 
     (f.curl_command ?
-      '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">Reproduce</div><button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(' + JSON.stringify(f.curl_command) + ');WG.toast(\'Copied\',\'success\');">Copy</button></div><div class="panel-body" style="padding:0;"><div class="code-block" style="color:var(--accent);">' + esc(f.curl_command) + '</div></div></div>' : '') +
+      '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">Reproduce</div><button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(decodeURIComponent(\'' + curlCopy + '\'));WG.toast(\'Copied\',\'success\');">Copy</button></div><div class="panel-body" style="padding:0;"><div class="code-block" style="color:var(--accent);">' + esc(f.curl_command) + '</div></div></div>' : '') +
 
     (refs.length ?
       '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">References</div></div><div class="panel-body">' +

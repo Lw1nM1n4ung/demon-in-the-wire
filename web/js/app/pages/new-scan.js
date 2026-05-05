@@ -53,12 +53,12 @@ WG.renderNewScan = function() {
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="nsTools">' +
               WG._nsToolToggle('nmap', 'Nmap', 'Port scanner & service detection', true) +
               WG._nsToolToggle('nuclei', 'Nuclei', 'Template-based vuln scanner', true) +
-              WG._nsToolToggle('dirsearch', 'Dirsearch', 'Directory brute-force', true) +
               WG._nsToolToggle('searchsploit', 'Searchsploit', 'Exploit DB search', true) +
               WG._nsToolToggle('wpscan', 'WPScan', 'WordPress scanner', false) +
               WG._nsToolToggle('service_enum', 'Service Enum', 'Default cred checks', true) +
               WG._nsToolToggle('enum4linux', 'enum4linux', 'SMB/NetBIOS enumeration', true) +
-              WG._nsToolToggle('openvas', 'OpenVAS', 'Full vulnerability assessment', false) +
+              WG._nsToolToggle('nikto', 'Nikto', 'Web server scanner', true) +
+              WG._nsToolToggle('netexec', 'NetExec', 'SMB/FTP/RDP/MSSQL enum', true) +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -142,6 +142,11 @@ WG._nsToolToggle = function(id, name, desc, on) {
     '<div style="font-size:0.65rem;color:var(--text-dim);">' + desc + '</div></div></div>';
 };
 
+WG._nsPolicyToolEnabled = function(tools, name) {
+  if (name === 'nikto' || name === 'netexec') return tools[name] !== false;
+  return !!tools[name];
+};
+
 WG._nsToggleSchedule = function() {
   var el = document.getElementById('nsScheduleOpts');
   var on = document.getElementById('nsScheduleEnabled').classList.contains('on');
@@ -169,11 +174,11 @@ WG._nsCheckPartition = function(val) {
 
 WG._nsUpdateType = function(type) {
   var presets = {
-    full: { ports: '1-65535', parallel: 10, tools: ['nmap','nuclei','dirsearch','searchsploit','service_enum','enum4linux'] },
+    full: { ports: '1-65535', parallel: 10, tools: ['nmap','nuclei','searchsploit','service_enum','enum4linux','nikto','netexec'] },
     quick: { ports: '1-10000', parallel: 20, tools: ['nmap','nuclei'] },
     port: { ports: '1-65535', parallel: 10, tools: ['nmap'] },
-    web: { ports: '80,443,8080,8443,8000,3000', parallel: 10, tools: ['nmap','nuclei','dirsearch','wpscan'] },
-    service: { ports: '1-65535', parallel: 5, tools: ['nmap','searchsploit','service_enum','enum4linux'] },
+    web: { ports: '80,443,8080,8443,8000,3000', parallel: 10, tools: ['nmap','nuclei','wpscan','nikto'] },
+    service: { ports: '1-65535', parallel: 5, tools: ['nmap','searchsploit','service_enum','enum4linux','netexec'] },
   };
   var p = presets[type] || presets.full;
   document.getElementById('nsPortRange').value = p.ports;
@@ -194,7 +199,7 @@ WG._nsApplyPolicy = function(id) {
   document.getElementById('nsVersionDetect').classList.toggle('on', p.version_detect);
   document.getElementById('nsOsDetect').classList.toggle('on', p.os_detect);
   document.querySelectorAll('#nsTools [data-tool]').forEach(function(t) {
-    t.classList.toggle('on', !!p.tools[t.dataset.tool]);
+    t.classList.toggle('on', WG._nsPolicyToolEnabled(p.tools || {}, t.dataset.tool));
   });
   document.getElementById('nsNucleiTemplates').value = (p.tools && p.tools.nuclei_templates) || '';
   document.getElementById('nsNucleiDefaults').classList.toggle('on', p.tools ? p.tools.nuclei_default_templates !== false : true);
@@ -227,6 +232,8 @@ WG._nsLaunch = function() {
     service_enum: !!document.querySelector('#nsTools [data-tool="service_enum"].on'),
     enum4linux: !!document.querySelector('#nsTools [data-tool="enum4linux"].on'),
     skip_nuclei: !document.querySelector('#nsTools [data-tool="nuclei"].on'),
+    skip_nikto: !document.querySelector('#nsTools [data-tool="nikto"].on'),
+    skip_netexec: !document.querySelector('#nsTools [data-tool="netexec"].on'),
     nuclei_templates: (document.getElementById('nsNucleiTemplates').value || '').trim(),
     nuclei_default_templates: document.getElementById('nsNucleiDefaults').classList.contains('on'),
   };

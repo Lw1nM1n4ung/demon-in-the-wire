@@ -387,7 +387,7 @@ WG._settingsTools = function() {
     ((WG.currentUser && WG.currentUser() && WG.currentUser().role === 'owner')
       ? '<div class="panel" style="max-width:760px;margin-top:16px;"><div class="panel-header"><div class="panel-title">Security Feeds</div></div>' +
         '<div class="panel-body">' +
-          '<div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">Update nuclei templates, searchsploit database, and OpenVAS NASL feeds on the worker container.</div>' +
+          '<div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">Update nuclei templates and the Searchsploit database on the worker container.</div>' +
           '<div style="display:flex;align-items:center;gap:10px;">' +
             '<button class="btn btn-secondary btn-sm" id="btnUpdateFeeds" onclick="WG._updateFeeds()">Update Security Feeds</button>' +
             '<span id="feedsUpdateStatus" style="font-size:0.78rem;color:var(--text-dim);"></span>' +
@@ -751,7 +751,7 @@ WG._settingsAbout = function() {
     '<div id="aboutUpdateStatus" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);">' +
       WG._aboutUpdateStatusHtml(ud, isOwner) +
     '</div>' +
-    '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);font-size:0.82rem;color:var(--text-dim);line-height:1.7;">Security scanning orchestration toolkit. Coordinates Nmap, Nuclei, Dirsearch, WPScan, and more into a parallel pipeline with automated DOCX/XLSX/HTML reporting.</div></div></div>';
+    '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);font-size:0.82rem;color:var(--text-dim);line-height:1.7;">Security scanning orchestration toolkit. Coordinates Nmap, Nuclei, Nikto, NetExec, WPScan, and more into a parallel pipeline with automated DOCX/XLSX/HTML reporting.</div></div></div>';
 };
 
 WG._aboutUpdateStatusHtml = function(data, isOwner) {

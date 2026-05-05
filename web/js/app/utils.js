@@ -1,10 +1,14 @@
 /* Wire_Ghost — Utility functions */
 
 WG.escHtml = function(str) {
-  if (!str) return '';
+  if (str == null || str === '') return '';
+  var s = String(str);
+  if (/^[=+\-@]/.test(s)) s = "'" + s;
   var d = document.createElement('div');
-  d.textContent = str;
-  return d.innerHTML;
+  d.textContent = s;
+  return d.innerHTML
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 };
 
 WG.timeAgo = function(dateStr) {

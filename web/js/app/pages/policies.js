@@ -10,7 +10,7 @@ WG.renderPolicies = function() {
   // Background refresh from API
   WG.refreshAndRerender('policies', '/policies/', WG.renderPolicies, 'policies');
   var esc = WG.escHtml;
-  var toolNames = ['nmap','nuclei','dirsearch','searchsploit','wpscan','service_enum','enum4linux','openvas'];
+  var toolNames = ['nmap','nuclei','searchsploit','wpscan','service_enum','enum4linux','nikto','netexec'];
 
   return '' +
     '<div class="page-header"><div class="page-header-left"><h1>Scan Policies</h1><p>' + policies.length + ' policy templates</p></div>' +
@@ -32,7 +32,7 @@ WG.renderPolicies = function() {
     '<div id="policiesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">' +
     policies.map(function(p) {
       var tools = p.tools || {};
-      var enabledTools = toolNames.filter(function(t) { return tools[t]; });
+      var enabledTools = toolNames.filter(function(t) { return WG._policyToolEnabled(tools, t); });
       return '<div class="panel policy-card" data-search="' + esc((p.name + ' ' + (p.description || '') + ' ' + p.scan_type + ' ' + (p.port_range || '')).toLowerCase()) + '" data-type="' + esc(p.scan_type) + '">' +
         '<div class="panel-body">' +
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
@@ -76,7 +76,7 @@ WG.renderPolicies = function() {
       '<div class="form-group"><label class="form-label">Severity Filter</label><select class="form-select" id="policySevFilter"><option value="all">All Severities</option><option value="critical,high">Critical + High only</option><option value="critical,high,medium">Critical + High + Medium</option></select></div>' +
       '<div class="form-group"><label class="form-label" style="margin-bottom:10px;">Tools</label>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;" id="policyTools">' +
-          ['nmap','nuclei','dirsearch','searchsploit','wpscan','service_enum','openvas'].map(function(t) {
+          ['nmap','nuclei','searchsploit','wpscan','service_enum','enum4linux','nikto','netexec'].map(function(t) {
             return '<div class="form-toggle" onclick="this.querySelector(\'.toggle-track\').classList.toggle(\'on\')"><div class="toggle-track on" data-tool="' + t + '"></div><span class="toggle-label">' + t + '</span></div>';
           }).join('') +
         '</div></div>' +
@@ -89,6 +89,11 @@ WG.renderPolicies = function() {
       '<div class="form-toggle" onclick="this.querySelector(\'.toggle-track\').classList.toggle(\'on\')"><div class="toggle-track on" id="policyNucleiDefaults"></div><span class="toggle-label">Include default nuclei templates</span></div>' +
     '</div>' +
     '<div class="modal-footer"><button class="btn btn-secondary" onclick="WG.closeModal(\'policyModal\')">Cancel</button><button class="btn btn-primary" onclick="WG._savePolicy()">Save Policy</button></div></div></div>';
+};
+
+WG._policyToolEnabled = function(tools, name) {
+  if (name === 'nikto' || name === 'netexec') return tools[name] !== false;
+  return !!tools[name];
 };
 
 WG.openPolicyEditor = function(id) {
@@ -113,7 +118,7 @@ WG.openPolicyEditor = function(id) {
     document.getElementById('policyOsDetect').classList.toggle('on', p.os_detect);
     var tools = p.tools || {};
     document.querySelectorAll('#policyTools [data-tool]').forEach(function(t) {
-      t.classList.toggle('on', !!tools[t.dataset.tool]);
+      t.classList.toggle('on', WG._policyToolEnabled(tools, t.dataset.tool));
     });
     document.getElementById('policyNucleiTemplates').value = (tools.nuclei_templates) || '';
     document.getElementById('policyNucleiDefaults').classList.toggle('on', tools.nuclei_default_templates !== false);
@@ -236,7 +241,7 @@ WG._launchWithPolicy = function(id) {
     document.getElementById('nsOsDetect').classList.toggle('on', p.os_detect);
     var tools = p.tools || {};
     document.querySelectorAll('#nsTools [data-tool]').forEach(function(t) {
-      t.classList.toggle('on', !!tools[t.dataset.tool]);
+      t.classList.toggle('on', WG._policyToolEnabled(tools, t.dataset.tool));
     });
     var nt = document.getElementById('nsNucleiTemplates');
     if (nt) nt.value = (tools.nuclei_templates) || '';

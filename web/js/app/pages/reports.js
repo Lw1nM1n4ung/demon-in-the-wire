@@ -274,7 +274,7 @@ WG.renderReports = function() {
 
     '<div class="panel"><table class="data-table" id="reportsTable"><thead><tr><th>Scan</th><th>Format</th><th>File</th><th>Size</th><th>Generated</th><th></th></tr></thead><tbody>' +
     reports.map(function(r) {
-      var fname = r._file || (r.file_path ? r.file_path.split('/').pop() : r.format);
+      var fname = r._file || r.filename || (r.file_path ? r.file_path.split('/').pop() : r.format);
       var fcolor = fmtColors[r.format] || '--text-dim';
       return '<tr data-search="' + esc((r._scanName + ' ' + r.format + ' ' + fname).toLowerCase()) + '" data-fmt="' + esc(r.format) + '" data-scan="' + esc(r._scanName) + '">' +
         '<td>' + (r._demo

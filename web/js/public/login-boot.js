@@ -9,6 +9,30 @@
 window.WG = window.WG || {};
 WG.API_BASE = '/api';
 
+WG._getLoginCSRF = function() {
+  var m = document.cookie.match(/csrftoken=([^;]+)/);
+  return m ? m[1] : '';
+};
+
+WG._ensureLoginCSRF = async function() {
+  var existing = WG._getLoginCSRF();
+  if (existing) return existing;
+  var res = await fetch(WG.API_BASE + '/auth/csrf/', { credentials: 'include' });
+  var data = await res.json().catch(function() { return {}; });
+  return data.csrf || data.csrfToken || WG._getLoginCSRF() || '';
+};
+
+WG._awaitSessionReady = async function() {
+  for (var i = 0; i < 10; i++) {
+    try {
+      var res = await fetch(WG.API_BASE + '/auth/check/', { credentials: 'include', cache: 'no-store' });
+      if (res.status === 204) return true;
+    } catch (e) {}
+    await new Promise(function(resolve) { setTimeout(resolve, 200); });
+  }
+  return false;
+};
+
 /* Cache the auth'd user payload in localStorage so the SPA shell can render
  * the topbar/avatar on the next page without an extra /auth/me/ round-trip. */
 WG._setLoginCache = function(data) {
@@ -72,9 +96,10 @@ WG._handleLogin = async function() {
   err.style.display = 'none';
 
   try {
+    var csrf = await WG._ensureLoginCSRF();
     var res = await fetch(WG.API_BASE + '/auth/login/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
       body: JSON.stringify({ username: u, password: p }),
       credentials: 'include',
     });
@@ -85,6 +110,7 @@ WG._handleLogin = async function() {
         return;
       }
       WG._setLoginCache(data);
+      await WG._awaitSessionReady();
       WG._redirectAfterLogin();
       return;
     }
@@ -106,15 +132,17 @@ WG._handleTokenLogin = async function(token) {
   var btn = document.getElementById('loginBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
   try {
+    var csrf = await WG._ensureLoginCSRF();
     var res = await fetch(WG.API_BASE + '/auth/token-login/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
       body: JSON.stringify({ token: token }),
       credentials: 'include',
     });
     if (res.ok) {
       var data = await res.json();
       WG._setLoginCache(data);
+      await WG._awaitSessionReady();
       WG._redirectAfterLogin();
       return;
     }
@@ -172,15 +200,17 @@ WG._handleMfaVerify = async function(token) {
   err.style.display = 'none';
 
   try {
+    var csrf = await WG._ensureLoginCSRF();
     var res = await fetch(WG.API_BASE + '/auth/mfa/verify/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
       body: JSON.stringify({ mfa_token: token, code: code }),
       credentials: 'include',
     });
     if (res.ok) {
       var data = await res.json();
       WG._setLoginCache(data);
+      await WG._awaitSessionReady();
       WG._redirectAfterLogin();
       return;
     }
@@ -202,9 +232,10 @@ WG._handleMfaResend = async function(token) {
   btn.textContent = 'Sending...';
 
   try {
+    var csrf = await WG._ensureLoginCSRF();
     var res = await fetch(WG.API_BASE + '/auth/mfa/resend/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
       body: JSON.stringify({ mfa_token: token }),
       credentials: 'include',
     });

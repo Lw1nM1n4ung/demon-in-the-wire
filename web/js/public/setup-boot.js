@@ -324,18 +324,21 @@ WG._setupTools = function() {
     { name: 'Nuclei', desc: 'Vuln scanner', required: true },
     { name: 'fping', desc: 'Host discovery', required: true },
     { name: 'httpx', desc: 'HTTP probe', required: true },
-    { name: 'Dirsearch', desc: 'Dir brute', required: false },
+    { name: 'Naabu', desc: 'Fast port scan fallback', required: false },
+    { name: 'Masscan', desc: 'High-speed port scan fallback', required: false },
     { name: 'Searchsploit', desc: 'Exploit DB', required: false },
     { name: 'WPScan', desc: 'WordPress', required: false },
-    { name: 'OpenVAS', desc: 'Full VA', required: false },
+    { name: 'enum4linux', desc: 'SMB/NetBIOS enum', required: false },
+    { name: 'Nikto', desc: 'Web server scan', required: false },
+    { name: 'NetExec', desc: 'Network enum', required: false },
   ];
 
   return '' +
     '<h2 class="setup-title">Tool Verification</h2>' +
-    '<p class="setup-desc">Checking installed security tools</p>' +
+    '<p class="setup-desc">Core and optional tools bundled with the standard worker stack</p>' +
     '<div style="margin-top:16px;" id="setupToolsList">' +
       tools.map(function(t) {
-        var status = t.name !== 'OpenVAS';
+        var status = true;
         return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-dim);">' +
           '<div style="display:flex;align-items:center;gap:10px;">' +
             '<div style="width:8px;height:8px;border-radius:50%;background:' + (status ? 'var(--success)' : 'var(--text-dim)') + ';"></div>' +
@@ -348,7 +351,7 @@ WG._setupTools = function() {
       }).join('') +
     '</div>' +
     '<div style="margin-top:12px;padding:10px 14px;background:var(--accent-dim);border-radius:var(--radius-md);font-size:0.78rem;color:var(--accent);">' +
-      '&#9432; Required tools marked with <span style="color:var(--critical);">*</span>. Optional tools extend scan capabilities.' +
+      '&#9432; Required tools marked with <span style="color:var(--critical);">*</span>. Optional tools expand coverage when enabled in scan settings.' +
     '</div>' +
     '<div id="setupToolsError" style="display:none;color:var(--critical);font-size:0.82rem;padding:10px 14px;background:rgba(255,59,92,0.08);border-radius:var(--radius-md);margin-top:12px;"></div>' +
     '<div class="setup-footer">' +

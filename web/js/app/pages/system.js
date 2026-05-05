@@ -26,6 +26,10 @@ WG._sysPrevNet = null;  /* last (ts, sent, recv) for rate delta */
 WG._sysCharts = {};
 WG._sysTimer = null;
 
+WG._procTimer = null;
+WG._procTickMs = 3000;
+WG._procPrevNet = {};
+
 WG._sysFmtBytes = function(n) {
   if (n == null || isNaN(n)) return '—';
   var u = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -59,9 +63,13 @@ WG.renderSystem = function() {
    * before we reach for canvas elements. */
   setTimeout(function() {
     if (WG._sysTimer) { clearInterval(WG._sysTimer); WG._sysTimer = null; }
+    if (WG._procTimer) { clearInterval(WG._procTimer); WG._procTimer = null; }
+    WG._procPrevNet = {};
     WG._sysInitCharts();
-    WG._sysTick();  /* paint first sample immediately */
+    WG._sysTick();
     WG._sysTimer = setInterval(WG._sysTick, WG._sysTickMs);
+    WG._procTick();
+    WG._procTimer = setInterval(WG._procTick, WG._procTickMs);
   }, 0);
 
   return '' +
@@ -90,6 +98,24 @@ WG.renderSystem = function() {
         '<strong style="color:var(--text-bright);">Note:</strong> Values reflect the <em>api container\'s</em> cgroup ' +
         'limits, not the host machine. Disk is measured at the container root filesystem. ' +
         'Network counters are cumulative; the rate shown is derived per sample.' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="panel" style="margin-top:20px;">' +
+      '<div class="panel-header" style="padding:16px 16px 12px;">' +
+        '<h3 style="font-size:0.95rem;font-weight:700;color:var(--text-bright);margin:0;">Container Processes</h3>' +
+        '<span class="mono" style="font-size:0.72rem;color:var(--text-dim);">Updates every ' + (WG._procTickMs / 1000) + 's</span>' +
+      '</div>' +
+      '<div id="procTableWrap" style="overflow-x:auto;">' +
+        '<table class="data-table" style="min-width:700px;">' +
+          '<thead><tr>' +
+            '<th>Container</th><th>State</th><th>CPU %</th>' +
+            '<th>Memory</th><th>Net I/O</th><th>PIDs</th>' +
+          '</tr></thead>' +
+          '<tbody id="procTableBody">' +
+            '<tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:24px;">Loading...</td></tr>' +
+          '</tbody>' +
+        '</table>' +
       '</div>' +
     '</div>';
 };
@@ -169,6 +195,7 @@ WG._sysTick = function() {
   /* Self-clean: user navigated away → tear down timer + charts. */
   if (WG.state.currentPage !== 'system') {
     if (WG._sysTimer) { clearInterval(WG._sysTimer); WG._sysTimer = null; }
+    if (WG._procTimer) { clearInterval(WG._procTimer); WG._procTimer = null; }
     Object.keys(WG._sysCharts).forEach(function(k) {
       try { WG._sysCharts[k].destroy(); } catch (e) {}
     });
@@ -244,5 +271,117 @@ WG._sysTick = function() {
       WG._sysCharts.net.data.datasets[1].data = copy(WG._sysBuf.netDown, WG._sysBufSize);
       WG._sysCharts.net.update('none');
     }
+  });
+};
+
+WG._procClear = function(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+};
+
+WG._procTick = function() {
+  if (WG.state.currentPage !== 'system') {
+    if (WG._procTimer) { clearInterval(WG._procTimer); WG._procTimer = null; }
+    return;
+  }
+
+  WG.api('/system-processes/').then(function(data) {
+    if (!data) return;
+    if (WG.state.currentPage !== 'system') return;
+
+    var tbody = document.getElementById('procTableBody');
+    if (!tbody) return;
+
+    if (!data.available) {
+      WG._procClear(tbody);
+      var tr = document.createElement('tr');
+      var td = document.createElement('td');
+      td.setAttribute('colspan', '6');
+      td.style.cssText = 'text-align:center;color:var(--text-dim);padding:24px;';
+      td.textContent = 'Docker proxy unavailable' + (data.error ? ' — ' + data.error : '');
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    var containers = data.containers || [];
+    if (containers.length === 0) {
+      WG._procClear(tbody);
+      var tr = document.createElement('tr');
+      var td = document.createElement('td');
+      td.setAttribute('colspan', '6');
+      td.style.cssText = 'text-align:center;color:var(--text-dim);padding:24px;';
+      td.textContent = 'No containers found';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    var ts = data.ts || Date.now();
+    var frag = document.createDocumentFragment();
+
+    containers.forEach(function(c) {
+      var tr = document.createElement('tr');
+
+      var tdName = document.createElement('td');
+      var nameSpan = document.createElement('span');
+      nameSpan.style.fontWeight = '600';
+      nameSpan.style.color = 'var(--text-bright)';
+      nameSpan.textContent = c.name;
+      tdName.appendChild(nameSpan);
+      var imgSpan = document.createElement('div');
+      imgSpan.className = 'mono';
+      imgSpan.style.cssText = 'font-size:0.7rem;color:var(--text-dim);margin-top:2px;';
+      imgSpan.textContent = c.image;
+      tdName.appendChild(imgSpan);
+      tr.appendChild(tdName);
+
+      var tdState = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className = 'status-badge ' + (c.state === 'running' ? 'running' : 'failed');
+      badge.textContent = c.state;
+      tdState.appendChild(badge);
+      tr.appendChild(tdState);
+
+      var tdCpu = document.createElement('td');
+      tdCpu.className = 'mono';
+      tdCpu.textContent = c.cpu_percent.toFixed(1) + '%';
+      tr.appendChild(tdCpu);
+
+      var tdMem = document.createElement('td');
+      tdMem.className = 'mono';
+      var mem = c.memory || {};
+      tdMem.textContent = WG._sysFmtBytes(mem.used) + ' / ' + WG._sysFmtBytes(mem.limit);
+      var memPct = document.createElement('div');
+      memPct.style.cssText = 'font-size:0.7rem;color:var(--text-dim);';
+      memPct.textContent = (mem.percent || 0).toFixed(1) + '%';
+      tdMem.appendChild(memPct);
+      tr.appendChild(tdMem);
+
+      var tdNet = document.createElement('td');
+      tdNet.className = 'mono';
+      var net = c.network || {};
+      var prev = WG._procPrevNet[c.id];
+      var rxRate = 0, txRate = 0;
+      if (prev && ts > prev.ts) {
+        var dt = (ts - prev.ts) / 1000;
+        if (dt > 0) {
+          rxRate = Math.max(0, (net.rx_bytes - prev.rx) / dt);
+          txRate = Math.max(0, (net.tx_bytes - prev.tx) / dt);
+        }
+      }
+      WG._procPrevNet[c.id] = { ts: ts, rx: net.rx_bytes, tx: net.tx_bytes };
+      tdNet.textContent = '↑ ' + WG._sysFmtRate(txRate) + '  ↓ ' + WG._sysFmtRate(rxRate);
+      tr.appendChild(tdNet);
+
+      var tdPids = document.createElement('td');
+      tdPids.className = 'mono';
+      tdPids.textContent = c.pids || '—';
+      tr.appendChild(tdPids);
+
+      frag.appendChild(tr);
+    });
+
+    WG._procClear(tbody);
+    tbody.appendChild(frag);
   });
 };

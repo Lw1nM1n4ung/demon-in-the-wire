@@ -99,7 +99,7 @@ WG._scanReportsTab = function(reports) {
     reports.map(function(r) {
       return '<tr>' +
         '<td><span class="tag">' + esc(r.format.toUpperCase()) + '</span></td>' +
-        '<td class="mono" style="font-size:0.75rem;">' + esc(r.file_path.split('/').pop()) + '</td>' +
+        '<td class="mono" style="font-size:0.75rem;">' + esc(r.filename || (r.file_path ? r.file_path.split('/').pop() : r.format)) + '</td>' +
         '<td class="mono">' + WG.fmtBytes(r.file_size) + '</td>' +
         '<td class="mono">' + WG.fmtDate(r.created_at) + '</td>' +
         '<td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();WG.downloadReport(\'' + r.id + '\')">Download</button></td></tr>';
