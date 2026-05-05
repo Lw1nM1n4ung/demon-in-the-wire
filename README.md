@@ -154,7 +154,7 @@ pip install -e ".[dev]"
 ### One-line Remote Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/install-wireghost.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/stable/scripts/install-wireghost.sh | sudo bash
 ```
 
 This auto-installs Docker + Compose if missing, clones the repo to `/opt/wireghost`, and runs the interactive installer.
@@ -186,7 +186,7 @@ If you just want to pull pre-built images instead of building from source:
 
 ```bash
 git clone https://github.com/Lw1nM1n4ung/demon-in-the-wire.git
-cd demon-in-the-wire && git checkout rewrite-v2
+cd demon-in-the-wire && git checkout stable
 
 # Create .env and certs/ (run the installer or copy from .env.example)
 sudo bash scripts/install.sh

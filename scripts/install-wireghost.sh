@@ -3,10 +3,10 @@
 # Wire_Ghost — One-Line Remote Installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/install-wireghost.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/stable/scripts/install-wireghost.sh | sudo bash
 #
 # Or download-and-run:
-#   wget -qO install-wireghost.sh https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/install-wireghost.sh
+#   wget -qO install-wireghost.sh https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/stable/scripts/install-wireghost.sh
 #   sudo bash install-wireghost.sh
 #
 # What it does:
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/Lw1nM1n4ung/demon-in-the-wire.git"
-BRANCH="rewrite-v2"
+BRANCH="${1:-stable}"
 INSTALL_DIR="/opt/wireghost"
 
 # ── Colours ──────────────────────────────────────────────────────────
