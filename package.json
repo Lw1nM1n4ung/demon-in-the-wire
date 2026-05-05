@@ -1,0 +1,15 @@
+{
+  "name": "wireghost-qa",
+  "private": true,
+  "devDependencies": {
+    "playwright": "^1.54.2"
+  },
+  "scripts": {
+    "test:frontend": "node tests/test_frontend_js.js",
+    "test:topology": "node tests/test_topology_js.js",
+    "test:js-regression": "node tests/test_js_regression.js",
+    "test:xss-regression": "node tests/test_xss_regression.js",
+    "test:portal-e2e": "node tests/test_portal_e2e.js",
+    "test:browser": "npm run test:js-regression && npm run test:xss-regression && npm run test:portal-e2e"
+  }
+}

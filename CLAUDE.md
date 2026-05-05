@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Wire_Ghost (v2.0) is a security scanning toolkit that orchestrates multiple tools (nmap, nuclei, naabu, masscan, httpx, wpscan, searchsploit, scannerctl) through an async Python pipeline, persists results to typed models, and renders them into HTML / DOCX / XLSX / interactive dashboard reports. It ships in two modes:
+Wire_Ghost (v2.0) is a security scanning toolkit that orchestrates multiple tools (nmap, nuclei, nikto, naabu, masscan, httpx, wpscan, searchsploit, enum4linux, netexec) through an async Python pipeline, persists results to typed models, and renders them into HTML / DOCX / XLSX / interactive dashboard reports. It ships in two modes:
 
 - **Standalone CLI** — `wireghost scan <target>` (Typer-based, Python 3.11+)
 - **Full web portal** — Django REST API + vanilla-JS SPA + Celery workers, orchestrated via Docker Compose (MySQL, Redis, Nginx)
@@ -26,7 +26,7 @@ wireghost report ./output/192.168.1.0_24 --formats dashboard,docx,xlsx
 
 # Update tools / feeds / self
 wireghost update --tools   # nuclei, naabu, httpx, apt packages
-wireghost update --feeds   # nuclei templates, searchsploit DB, OpenVAS NASL
+wireghost update --feeds   # nuclei templates, searchsploit DB
 wireghost update --self    # git pull + pip install
 
 # Config
@@ -63,14 +63,14 @@ docker compose run --rm wireghost scan 10.0.0.0/24
    - `webdetect.probe_host` — async HTTP/S probing + httpx tech detect
    - `cms_scan.scan_cms` — auto-triggers WPScan when WordPress fingerprinted
    - `service_enum.enumerate_services` — 18 services, pure-Python, no brute force
-   - `vulnscan.scan_host_vulns` — nuclei + nmap `--script=vuln` + searchsploit (concurrent inside)
+   - `vulnscan.scan_host_vulns` — nuclei + nmap `--script=vuln` + searchsploit + nikto (concurrent inside)
 4. `_generate_reports` — calls `ReportEngine.generate()` if available
 
 Nuclei external templates are batched (`nuclei_batch_size`, default 5000) to cap CPU/RAM on 37K+ template sets.
 
 ### Models → Parsers → Renderers (one-in, many-out)
 
-All parsers in `src/wireghost/parsers/` (nmap, nuclei, naabu, masscan, openvas, searchsploit, wpscan) produce the same typed objects from `src/wireghost/models/`:
+All parsers in `src/wireghost/parsers/` (nmap, nuclei, naabu, masscan, searchsploit, wpscan, nikto, netexec) produce the same typed objects from `src/wireghost/models/`:
 
 - `Host`, `Port`, `WebTech` (scan.py)
 - `Finding` with full forensic fields: `request`, `response`, `curl_command`, `cvss`, `cwe`, `cve`, `references` (finding.py)
@@ -105,7 +105,7 @@ The portal container exposes only port 80 → `9995` on host. Nginx serves `/web
 
 ### Docker image layout (`Dockerfile`)
 
-Three-stage build: (1) pull latest nuclei/httpx/naabu release binaries, (2) compile `scannerctl` from OpenVAS Rust source, (3) assemble the `python:3.12-slim` runtime with nmap/fping/masscan/searchsploit + the wireghost package + pre-fetched nuclei templates and NASL feeds. `ENTRYPOINT ["wireghost"]`, so `docker run callmedemon/wireghost scan <target>` works directly.
+Two-stage build: (1) pull latest nuclei/httpx/naabu/gowitness release binaries, (2) assemble the `python:3.12-slim` runtime with nmap/fping/masscan/searchsploit/enum4linux/netexec + the wireghost package + pre-fetched nuclei templates. `ENTRYPOINT ["wireghost"]`, so `docker run callmedemon/wireghost scan <target>` works directly.
 
 External nuclei template archives (`templates/*.tar.gz`) are extracted at build **and** extracted by `web_portal/docker-entrypoint.sh` at container start, so dropping a new archive into `templates/` and restarting the stack is enough.
 
@@ -117,7 +117,7 @@ External nuclei template archives (`templates/*.tar.gz`) are extracted at build 
 | `src/wireghost/config.py` | `ScanConfig` with layered loader (defaults → YAML → env → overrides) |
 | `src/wireghost/pipeline/orchestrator.py` | Async phase coordinator; call site for the full pipeline |
 | `src/wireghost/pipeline/portscan.py` | nmap → naabu → masscan fallback chain |
-| `src/wireghost/pipeline/vulnscan.py` | nuclei + nmap vuln + searchsploit, with nuclei template batching |
+| `src/wireghost/pipeline/vulnscan.py` | nuclei + nmap vuln + searchsploit + nikto, with nuclei template batching |
 | `src/wireghost/reports/engine.py` | Single dispatcher; one `ScanReport` in, N files out |
 | `web_portal/scanner/tasks.py` | Celery bridge: ORM → `run_pipeline` → ORM |
 | `web_portal/scanner/models.py` | Django models (UUIDv7 PKs, custom `User`, singleton config rows) |

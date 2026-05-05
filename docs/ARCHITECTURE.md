@@ -163,6 +163,23 @@ masscan <ip> -p0-65535 --rate 1000 -oX <output.xml>
 - `-oX`: nmap-compatible XML output
 - Parsed by `parsers/masscan.py:parse_masscan_xml()`
 
+### nikto — Web Server Scanner
+
+**Vulnerability Scanning (Phase 6):**
+```bash
+nikto -h <url> -o <output.json> -Format json -timeout 15 -maxtime 1200s -nointeractive -no404 -Tuning 1234589ab
+```
+- `-h <url>`: Target URL from web detection phase
+- `-o <path> -Format json`: JSON output
+- `-timeout 15`: Per-request timeout (seconds)
+- `-maxtime 1200s`: Max scan duration per endpoint
+- `-nointeractive`: Suppress prompts
+- `-no404`: Skip 404 guessing (reduces noise)
+- `-Tuning 1234589ab`: Skip DoS and remote retrieval; keep file/misconfig/injection/auth checks
+- Runs sequentially per web endpoint (IO-heavy); only fires when `host.web_endpoints` is non-empty
+- Nikto has no native severity — severity inferred from message keywords by `parsers/nikto.py`
+- Parsed by `parsers/nikto.py:parse_nikto_json()`
+
 ---
 
 ## Scanner Fallback Chain
@@ -229,7 +246,7 @@ _SCANNERS = [
 |--------|------------|---------|
 | `asyncio` | `pipeline/*`, `utils/process.py`, `cli.py` | Async subprocess execution, `gather()`, `Semaphore`, `create_subprocess_exec` |
 | `xml.etree.ElementTree` | `parsers/nmap.py`, `parsers/masscan.py` | Parse nmap and masscan XML output |
-| `json` | `parsers/nuclei.py`, `parsers/naabu.py`, `reports/dashboard.py` | Parse JSON/JSONL, serialize scan data for dashboard |
+| `json` | `parsers/nuclei.py`, `parsers/naabu.py`, `parsers/nikto.py`, `reports/dashboard.py` | Parse JSON/JSONL, serialize scan data for dashboard |
 | `dataclasses` | `models/*`, `utils/fs.py`, `utils/process.py`, `config.py` | `@dataclass`, `field()` for typed data structures |
 | `pathlib` | Everywhere | `Path` objects for all file operations |
 | `logging` | Everywhere | Standard Python logger (`logging.getLogger("wireghost")`) |
@@ -414,6 +431,17 @@ All functions return empty list/None on `FileNotFoundError` or `ParseError`.
 | Function | Input | Output | Notes |
 |----------|-------|--------|-------|
 | `parse_masscan_xml(path)` | nmap-compatible XML | `list[Host]` | Open ports only, no service detection |
+
+### nikto.py — Nikto JSON Parser
+
+| Function | Input | Output | Notes |
+|----------|-------|--------|-------|
+| `parse_nikto_json(path)` | JSON array of host objects | `list[Finding]` | Severity inferred from message keywords (no native severity). Dedupes by `template_id:endpoint`. Template IDs prefixed `NIKTO-` |
+
+**JSON format:**
+```json
+[{"host": "example.com", "ip": "10.0.0.1", "port": "443", "vulnerabilities": [{"id": "000726", "msg": "...", "method": "GET", "url": "/", "references": "..."}]}]
+```
 
 ---
 
@@ -651,7 +679,8 @@ src/wireghost/
 │   ├── nmap.py              # parse_nmap_xml, parse_nmap_vuln_xml, extract_open_ports
 │   ├── nuclei.py            # parse_nuclei_json (array + JSONL)
 │   ├── naabu.py             # parse_naabu_json (JSONL)
-│   └── masscan.py           # parse_masscan_xml
+│   ├── masscan.py           # parse_masscan_xml
+│   └── nikto.py             # parse_nikto_json (severity inferred from keywords)
 │
 ├── pipeline/
 │   ├── __init__.py
@@ -659,7 +688,8 @@ src/wireghost/
 │   ├── discovery.py         # Phase 2: nmap -sn + fping host discovery
 │   ├── portscan.py          # Phase 3: fallback chain nmap → naabu → masscan
 │   ├── webdetect.py         # Phase 4: async HTTP/HTTPS probing
-│   └── vulnscan.py          # Phase 5: nuclei + nmap --script=vuln
+│   ├── vulnscan.py          # Phase 5: nuclei + nmap --script=vuln + nikto
+│   └── nikto_scan.py        # run_nikto() — per-endpoint web server scanning
 │
 ├── reports/
 │   ├── __init__.py          # Exports ReportEngine

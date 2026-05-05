@@ -36,28 +36,15 @@ RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/re
     && curl -sL "$GOWITNESS_URL" -o /tools/gowitness \
     && chmod +x /tools/gowitness
 
-# === Stage 2: Build scannerctl from OpenVAS Rust source ===
-FROM rust:1.93-bookworm AS scannerctl-builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpcap-dev libssl-dev pkg-config cmake libsnmp-dev capnproto \
-    libclang-dev clang \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-# Clone and build only scannerctl (not the full openvasd server)
-RUN git clone --depth 1 https://github.com/greenbone/openvas-scanner.git . \
-    && cd rust \
-    && cargo build --release --bin scannerctl \
-    && cp target/release/scannerctl /usr/local/bin/scannerctl
-
-# === Stage 3: Final image ===
+# === Stage 2: Final image ===
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap fping masscan libpcap0.8 libsnmp40 git rsync libxml2-utils \
     chromium \
     smbclient samba-common-bin ldap-utils perl \
+    libnet-ssleay-perl libio-socket-ssl-perl \
+    libjson-perl libxml-writer-perl libxml-libxml-perl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install enum4linux
@@ -70,6 +57,12 @@ RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/e
     && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit \
     && cp /opt/exploitdb/.searchsploit_rc /root/ 2>/dev/null || true
 
+# Install nikto from the official upstream repo (portable git-based install)
+RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
+    && ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto \
+    && chmod +x /usr/local/bin/nikto \
+    && rm -rf /opt/nikto/.git
+
 # Download Metasploit module metadata (exploit matching, ~50MB)
 RUN mkdir -p /opt/msf \
     && curl -sL https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json \
@@ -81,22 +74,16 @@ COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
 COPY --from=tools /tools/httpx /usr/local/bin/httpx
 COPY --from=tools /tools/naabu /usr/local/bin/naabu
 COPY --from=tools /tools/gowitness /usr/local/bin/gowitness
-COPY --from=scannerctl-builder /usr/local/bin/scannerctl /usr/local/bin/scannerctl
 
 # Install wireghost
 WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 COPY wireghost.example.yml .
-RUN pip install --no-cache-dir . greenbone-feed-sync
+RUN pip install --no-cache-dir . netexec
 
 # Download nuclei templates
 RUN nuclei -update-templates
-
-# Download OpenVAS NASL feeds via rsync
-RUN mkdir -p /var/lib/openvas/plugins \
-    && rsync -avz --timeout=120 rsync://feed.community.greenbone.net/community/vulnerability-feed/current/vt-data/nasl/ /var/lib/openvas/plugins/ 2>/dev/null || true \
-    && echo "NASL feed: $(ls /var/lib/openvas/plugins/*.nasl 2>/dev/null | wc -l) scripts"
 
 # Verify all tools
 RUN echo "=== Tool verification ===" \
@@ -106,7 +93,6 @@ RUN echo "=== Tool verification ===" \
     && naabu -version 2>&1 | head -1 \
     && masscan --version 2>&1 | head -1 \
     && gowitness version 2>&1 | head -1 \
-    && scannerctl version 2>&1 | head -1 \
     && wireghost --version
 
 ENV WIREGHOST_OUTPUT_DIR=/data/output

@@ -22,7 +22,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "mysqladmin ping --silent --protocol=tcp -h 127.0.0.1 -P 3306 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -53,6 +53,40 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    networks: [internal]
+    environment:
+      CONTAINERS: 1
+      POST: 0
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EXEC: 0
+      IMAGES: 0
+      INFO: 0
+      NETWORKS: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.25"
 
   # ══════════════════════════════════════
   # WIRE_GHOST — APPLICATION
@@ -85,6 +119,8 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       CSRF_COOKIE_SECURE: ${CSRF_COOKIE_SECURE:-true}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+      DOCKER_PROXY_URL: http://docker-proxy:2375
+      COMPOSE_PROJECT: demon-in-the-wire
       EMAIL_HOST: ${EMAIL_HOST:-}
       EMAIL_PORT: ${EMAIL_PORT:-587}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
@@ -101,6 +137,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      docker-proxy:
+        condition: service_started
     command: ["sh", "-c", "python manage.py migrate --noinput && gunicorn wireghost_web.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 60 --max-requests 1000 --max-requests-jitter 100 --forwarded-allow-ips='*'"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

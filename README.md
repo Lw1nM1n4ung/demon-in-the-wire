@@ -1,6 +1,6 @@
 # Wire\_Ghost
 
-Automated vulnerability scanner and attack surface management platform. Chains **nmap, nuclei, naabu, masscan, httpx, gowitness, wpscan, and searchsploit** into an 8-phase async pipeline — discovers hosts, scans ports (with fallback scanners), detects web services and CMS platforms, enumerates 18 services, runs vulnerability scans, maps known exploits, captures screenshots, and generates professional reports. Ships as both a standalone CLI tool and a full web portal with Django REST API, Telegram bot, scheduled scans, and role-based access control.
+Automated vulnerability scanner and attack surface management platform. Chains **nmap, nuclei, nikto, naabu, masscan, httpx, gowitness, wpscan, and searchsploit** into an 8-phase async pipeline — discovers hosts, scans ports (with fallback scanners), detects web services and CMS platforms, enumerates 18 services, runs vulnerability scans, maps known exploits, captures screenshots, and generates professional reports. Ships as both a standalone CLI tool and a full web portal with Django REST API, Telegram bot, scheduled scans, and role-based access control.
 
 **v2.0** · Python 3.12 · Docker · MySQL · Redis · Celery
 
@@ -41,6 +41,7 @@ Automated vulnerability scanner and attack surface management platform. Chains *
 - **18-service enumeration** — SSH, FTP, Redis, MongoDB, MySQL, PostgreSQL, SMTP, VNC, RDP, LDAP, Memcached, Elasticsearch, Docker API, Telnet, and more (pure Python, no brute force)
 - **CMS detection** — auto-triggers WPScan when WordPress is detected
 - **External nuclei templates** — configurable template directories with batched execution (5000/batch) to limit resource usage
+- **Web server scanning** — nikto detects misconfigurations, dangerous files, outdated software, and insecure headers on web endpoints
 - **Version-aware exploit detection** — searchsploit per detected software version, linked to Exploit-DB
 - **Web screenshots** — gowitness captures of discovered web services
 - **SSRF-safe target validation** — blocks loopback, link-local, multicast, reserved, cloud metadata IPs; detects hex/octal/short-form IP encoding; resolves hostnames via getaddrinfo (IPv4+IPv6) against full blocklist
@@ -112,7 +113,7 @@ Automated vulnerability scanner and attack surface management platform. Chains *
 | Docker Compose v2 | 2.20+ |
 | A POSIX shell | bash or zsh |
 
-Everything else — Python, Django, Celery, MySQL, Redis, nginx, nmap, nuclei, naabu, masscan, httpx, gowitness, searchsploit, fping — ships inside the compose stack.
+Everything else — Python, Django, Celery, MySQL, Redis, nginx, nmap, nuclei, nikto, naabu, masscan, httpx, gowitness, searchsploit, fping — ships inside the compose stack.
 
 ### Software — CLI-only / bare-metal
 
@@ -127,6 +128,7 @@ Everything else — Python, Django, Celery, MySQL, Redis, nginx, nmap, nuclei, n
 | httpx (ProjectDiscovery) | any | optional (tech detection) |
 | gowitness | v3+ | optional (web screenshots) |
 | wpscan | 3.8+ | optional (WordPress CMS) |
+| nikto | 2.1+ | optional (web server scanner) |
 | searchsploit | any | optional (exploit DB lookup) |
 
 ```bash
@@ -198,7 +200,7 @@ Pre-built images on Docker Hub:
 | Image | Size | Contains |
 |-------|------|----------|
 | `callmedemon/wireghost:web` | ~180 MB | Django API, Celery beat, Telegram bot |
-| `callmedemon/wireghost:worker` | ~700 MB | Celery worker with all scan tools (nmap, nuclei, naabu, masscan, httpx, gowitness, searchsploit, fping) |
+| `callmedemon/wireghost:worker` | ~700 MB | Celery worker with all scan tools (nmap, nuclei, nikto, naabu, masscan, httpx, gowitness, searchsploit, fping) |
 | `callmedemon/wireghost:latest` | ~700 MB | Standalone CLI scanner |
 
 ---
@@ -243,7 +245,8 @@ wireghost config [show | init]                   # Show resolved config / create
 | `-j, --parallelism INT` | Max concurrent host scans | `10` |
 | `--skip-nuclei` | Skip nuclei web scanning | off |
 | `--skip-vuln` | Skip nmap vuln scanning | off |
-| `--skip-openvas / --no-skip-openvas` | Skip/enable OpenVAS scanning | skip |
+| `--skip-nikto` | Skip Nikto web server scanning | off |
+
 | `--nuclei-templates PATH` | External nuclei template directory | none |
 | `--nuclei-default-templates / --no-nuclei-default-templates` | Include default nuclei templates | on |
 | `-t, --timeout FLOAT` | Per-tool timeout (seconds) | `3600` |
@@ -283,6 +286,7 @@ output/<target>/
             nmap_vuln.xml
             nuclei.json
             searchsploit_*.json
+            nikto_*.json
         service_enum/
         cms/
     reports/
@@ -524,8 +528,7 @@ Authentication: Session cookie (browser) or `Authorization: Token wg_...` header
   "version_detect": true,
   "os_detect": true,
   "service_enum": true,
-  "skip_nuclei": false,
-  "skip_openvas": true
+  "skip_nuclei": false
 }
 ```
 
@@ -634,7 +637,7 @@ Phase 2  Port Scanning         nmap -sV -sC -O → naabu → masscan (fallback c
 Phase 3  Web Detection         async HTTP/HTTPS probing + httpx tech-detect
 Phase 4  CMS Scanning          WordPress detection → WPScan
 Phase 5  Service Enumeration   18 services, pure Python (no brute force)
-Phase 6  Vuln Scanning         nuclei + nmap --script=vuln (parallel per host)
+Phase 6  Vuln Scanning         nuclei + nmap --script=vuln + nikto (parallel per host)
 Phase 7  Exploit Detection     searchsploit per detected version → Exploit-DB
 Phase 8  Report Generation     DOCX, XLSX, HTML, Interactive Dashboard
 Phase 9  Asset Sync            upsert Asset rows keyed by (ip, port, protocol)
@@ -809,21 +812,44 @@ All log content passes through a redaction step that strips: Authorization heade
 
 ## Tests
 
-```bash
-# Full Django test suite (228 tests)
-docker compose exec api python manage.py test scanner --verbosity=2
+Fast local suites:
 
-# CLI pipeline tests
-python -m pytest tests/ -v
+```bash
+python -m pytest tests -q
+cd web_portal && DJANGO_SECRET_KEY=wireghost-test-secret python manage.py test scanner --verbosity=1
+node tests/test_frontend_js.js
+node tests/test_topology_js.js
+bash tests/test_installers.sh
 ```
 
-Test coverage includes:
-- SSRF target validation (28 tests) — loopback, link-local, hex/octal/short-form IP, DNS rebinding domains, hostname resolution
-- Authentication (12 tests) — token auth, CSRF exemption, revoked tokens
-- Notification dispatch (23 tests) — chat ID validation, Telegram send, HTML escaping, error handling
-- Role permissions (20+ tests) — viewer/engineer/owner access matrix across all endpoints
-- Bot pub/sub (3 tests) — Redis message format, report delivery, failure resilience
-- Scan policies, scheduled scans, report config, audit log, API tokens, setup wizard
+Repo-managed browser QA setup:
+
+```bash
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci
+npm ci
+npx playwright install chromium
+```
+
+Browser and live QA environment variables:
+- `WG_BASE` overrides the browser target URL. Default: `https://localhost:18443`.
+- `WG_BROWSER_PATH` optionally points Playwright at a custom Chromium/Chrome binary.
+- `WG_FAIL_ON_SKIP=1` turns browser data skips into hard failures for release gating.
+
+Full release gate against a disposable local Docker stack:
+
+```bash
+bash scripts/run_qa.sh
+bash scripts/run_qa.sh --fresh-clone
+```
+
+The release gate validates the current candidate tree by default, then runs:
+- Python/pytest and Django scanner suites
+- Frontend and topology JS suites
+- Installer shell tests
+- Disposable-stack API integration, browser regression, portal E2E, and security regression suites
+- Worker tool probes for the installed scanner runtime
+
+Browser/live QA always runs against disposable local Docker stacks, never the shared long-running stack.
 
 ---
 

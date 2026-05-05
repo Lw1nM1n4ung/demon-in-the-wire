@@ -17,16 +17,18 @@ RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/re
     && curl -sL "$GOWITNESS_URL" -o /tools/gowitness && chmod +x /tools/gowitness
 
 # ── Stage 2: final image ──
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
-# System deps: MySQL client + scan tools (nmap, fping, masscan, searchsploit).
+# System deps: MySQL client + scan tools. Nikto is installed from the
+# upstream repo because Debian doesn't ship a native `nikto` package here.
 # Nuclei / httpx / naabu are copied from the builder stage above.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc default-libmysqlclient-dev pkg-config \
     nmap fping masscan git libpcap0.8 \
-    chromium \
+    chromium perl libnet-ssleay-perl libio-socket-ssl-perl \
+    libjson-perl libxml-writer-perl libxml-libxml-perl \
     && rm -rf /var/lib/apt/lists/*
 
 # ProjectDiscovery binaries + gowitness
@@ -39,9 +41,16 @@ COPY --from=pd-tools /tools/gowitness /usr/local/bin/gowitness
 RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb \
     && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
 
+# nikto — official portable install from the upstream git repo
+RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
+    && ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto \
+    && chmod +x /usr/local/bin/nikto \
+    && rm -rf /opt/nikto/.git
+
 # Python deps
 COPY web_portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec
 
 # App code
 COPY web_portal/ .
@@ -61,7 +70,7 @@ RUN chmod +x /docker-entrypoint.sh
 
 RUN groupadd -g 1000 appuser && useradd -u 1000 -g 1000 -m -s /bin/sh appuser \
     && mkdir -p /data/output /data/assets /app/logs \
-    && chown -R appuser:appuser /data /app/logs /opt/nuclei-external-templates
+    && chown -R appuser:appuser /data /app/logs
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app:/app/src

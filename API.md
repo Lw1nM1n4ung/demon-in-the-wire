@@ -34,7 +34,7 @@ Aggregate statistics across all scans.
     "service_enum": 30,
     "searchsploit": 28,
     "wpscan": 15,
-    "openvas": 15
+    "nikto": 12
   },
   "recent_scans": [ ... ]
 }
@@ -89,8 +89,7 @@ Create and launch a new scan. Dispatches a Celery task immediately.
   "version_detect": true,
   "os_detect": true,
   "service_enum": true,
-  "skip_nuclei": false,
-  "skip_openvas": true
+  "skip_nuclei": false
 }
 ```
 
@@ -106,7 +105,6 @@ Create and launch a new scan. Dispatches a Celery task immediately.
 | `os_detect` | bool | `true` | Enable nmap `-O` |
 | `service_enum` | bool | `true` | Run service enumeration |
 | `skip_nuclei` | bool | `false` | Skip Nuclei scanner |
-| `skip_openvas` | bool | `true` | Skip OpenVAS scanner |
 
 **Response:** `201 Created` — Full `ScanSerializer` with `status: "running"`
 
@@ -129,7 +127,6 @@ Full scan detail including nested reports.
   "os_detect": true,
   "service_enum": true,
   "skip_nuclei": false,
-  "skip_openvas": true,
   "hosts_count": 23,
   "ports_count": 187,
   "findings_count": 89,
@@ -174,7 +171,7 @@ Findings for a specific scan with filters.
 | Param | Description |
 |-------|-------------|
 | `severity` | Filter: `critical`, `high`, `medium`, `low`, `info` |
-| `source` | Filter: `nuclei`, `nmap_vuln`, `service_enum`, `searchsploit`, `wpscan`, `openvas` |
+| `source` | Filter: `nuclei`, `nmap_vuln`, `service_enum`, `searchsploit`, `wpscan`, `nikto`, `netexec` |
 | `search` | Search title (case-insensitive contains) |
 
 **Response:** List of `FindingListSerializer`
@@ -264,7 +261,7 @@ List all findings across all scans with filters.
 | Param | Description |
 |-------|-------------|
 | `severity` | `critical`, `high`, `medium`, `low`, `info` |
-| `source` | `nuclei`, `nmap_vuln`, `service_enum`, `searchsploit`, `wpscan`, `openvas` |
+| `source` | `nuclei`, `nmap_vuln`, `service_enum`, `searchsploit`, `wpscan`, `nikto`, `netexec` |
 | `search` | Search title |
 | `scan` | Filter by scan ID |
 
