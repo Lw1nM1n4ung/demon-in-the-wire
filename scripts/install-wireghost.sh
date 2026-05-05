@@ -169,6 +169,8 @@ clone_repo() {
         cd "$INSTALL_DIR"
         git fetch origin "$BRANCH" || die "git fetch failed — check network connectivity to GitHub"
         git checkout "$BRANCH" 2>/dev/null || true
+        git checkout -- nginx.conf 2>/dev/null || true
+        git reset HEAD nginx.conf 2>/dev/null || true
         git pull origin "$BRANCH" || die "git pull failed — check network connectivity to GitHub"
         ok "Repository updated"
     else
