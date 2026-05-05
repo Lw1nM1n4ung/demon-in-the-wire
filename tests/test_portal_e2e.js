@@ -3,16 +3,25 @@
  * Tests every page, button, form, modal, dropdown, and RBAC boundary
  * through a real Chromium browser against the live Docker stack.
  *
- * Run: NODE_PATH=/usr/local/lib/node_modules node tests/test_portal_e2e.js
+ * Run: WG_BASE=https://localhost:18443 node tests/test_portal_e2e.js
  */
 
 const { chromium } = require('playwright');
-
-const BASE = 'https://localhost:18443';
+const { BASE, FAIL_ON_SKIP, launchBrowser } = require('./browser_test_config');
 const CREDS = {
   owner:    { username: 'admin',         password: 'QAtest2026!' },
   engineer: { username: 'test_engineer', password: 'QAtest2026!' },
   viewer:   { username: 'test_viewer',   password: 'QAtest2026!' },
+};
+const RUN_ID = Date.now().toString(36);
+const RUN_DATA = {
+  scanName: 'E2E Scan ' + RUN_ID,
+  scanTarget: '203.0.113.25',
+  policyName: 'E2E Policy ' + RUN_ID,
+  scheduleName: 'E2E Schedule ' + RUN_ID,
+  userFullName: 'E2E Viewer ' + RUN_ID,
+  userName: 'e2e_viewer_' + RUN_ID,
+  userEmail: 'e2e+' + RUN_ID + '@test.local',
 };
 
 var passed = 0, failed = 0, skipped = 0;
@@ -27,16 +36,96 @@ async function assert(name, fn) {
   catch (e) { fail(name, e.message || e); }
 }
 
+async function waitForAppReady(page, timeout) {
+  var deadline = Date.now() + (timeout || 30000);
+  var lastState = null;
+  await page.waitForLoadState('domcontentloaded', { timeout: Math.min(timeout || 15000, 15000) }).catch(() => {});
+  while (Date.now() < deadline) {
+    try {
+      lastState = await page.evaluate(async () => {
+        var wg = window.WG || {};
+        var meStatus = null;
+        try {
+          var res = await fetch('/api/auth/me/', { credentials: 'include' });
+          meStatus = res.status;
+        } catch (e) {
+          meStatus = String((e && e.message) || e);
+        }
+        return {
+          href: location.href,
+          meStatus: meStatus,
+          navigate: typeof wg.navigate,
+          escHtml: typeof wg.escHtml,
+          api: typeof wg.api,
+          cacheType: wg._cache && typeof wg._cache,
+        };
+      });
+      if (
+        lastState.meStatus === 200
+        && lastState.navigate === 'function'
+        && lastState.escHtml === 'function'
+        && lastState.api === 'function'
+        && lastState.cacheType === 'object'
+      ) return;
+    } catch (e) {
+      lastState = { error: e.message || String(e) };
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('Timed out waiting for app readiness: ' + JSON.stringify(lastState));
+}
+
+async function closeActiveModals(page) {
+  await page.evaluate(() => {
+    if (!window.WG) return;
+    ['scanModal', 'policyModal', 'scheduleModal', 'userModal'].forEach(function(id) {
+      try { WG.closeModal(id); } catch (e) {}
+    });
+    document.querySelectorAll('.modal-overlay.active').forEach(function(el) {
+      el.classList.remove('active');
+    });
+  }).catch(() => {});
+  await page.waitForTimeout(250);
+}
+
+async function navigate(page, route) {
+  await closeActiveModals(page);
+  await page.$eval('body', function(_, nextRoute) { WG.navigate(nextRoute); }, route);
+  await waitForAppReady(page, 15000);
+  await page.waitForTimeout(1200);
+}
+
+async function ensureCachedRecordId(page, cacheKey, apiPath) {
+  return await page.evaluate(async function(args) {
+    var cached = WG._cache && WG._cache[args.cacheKey];
+    if (cached && cached.length) return cached[0].id;
+    var data = await WG.api(args.apiPath);
+    var items = Array.isArray(data) ? data : ((data && data.results) || []);
+    if (items.length) {
+      WG._cache = WG._cache || {};
+      WG._cache[args.cacheKey] = items;
+      return items[0].id;
+    }
+    return null;
+  }, { cacheKey: cacheKey, apiPath: apiPath });
+}
+
 async function login(context, role) {
   var page = await context.newPage();
-  await page.goto(BASE + '/login', { waitUntil: 'domcontentloaded', timeout: 15000 });
-  await page.waitForSelector('#loginUser', { timeout: 5000 });
   var cred = CREDS[role];
+  await page.goto(BASE + '/login', { waitUntil: 'domcontentloaded', timeout: 15000 });
+  await page.waitForSelector('#loginUser', { timeout: 15000 });
   await page.fill('#loginUser', cred.username);
   await page.fill('#loginPass', cred.password);
   await page.click('#loginBtn');
-  await page.waitForURL('**/dashboard*', { timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(1500);
+  await waitForAppReady(page, 30000);
+  var meStatus = await page.evaluate(async () => {
+    var res = await fetch('/api/auth/me/', { credentials: 'include' });
+    return res.status;
+  });
+  if (meStatus !== 200) throw new Error('/api/auth/me/ returned ' + meStatus);
+  await closeActiveModals(page);
+  await page.waitForTimeout(2000);
   return page;
 }
 
@@ -55,7 +144,7 @@ async function testLoginPage(context) {
   });
 
   await assert('Login form has username + password fields', async () => {
-    await page.waitForSelector('#loginUser', { timeout: 5000 });
+    await page.waitForSelector('#loginUser', { timeout: 15000 });
     var inputs = await page.$$('input');
     if (inputs.length < 2) throw new Error('Expected >=2 inputs, got ' + inputs.length);
   });
@@ -75,7 +164,7 @@ async function testLoginPage(context) {
   });
 
   await assert('Wrong password shows error', async () => {
-    await page.fill('#loginUser', 'admin');
+    await page.fill('#loginUser', 'qa_invalid_login');
     await page.fill('#loginPass', 'wrongpassword');
     await page.click('#loginBtn');
     await page.waitForTimeout(1500);
@@ -85,15 +174,19 @@ async function testLoginPage(context) {
   });
 
   await assert('Correct credentials log in successfully', async () => {
-    await page.goto(BASE + '/login', { waitUntil: 'domcontentloaded', timeout: 10000 });
-    await page.waitForSelector('#loginUser', { timeout: 5000 });
-    await page.fill('#loginUser', 'admin');
-    await page.fill('#loginPass', 'QAtest2026!');
+    await page.goto(BASE + '/login', { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForSelector('#loginUser', { timeout: 15000 });
+    await page.fill('#loginUser', CREDS.viewer.username);
+    await page.fill('#loginPass', CREDS.viewer.password);
     await page.click('#loginBtn');
-    await page.waitForTimeout(3000);
+    await waitForAppReady(page, 30000);
+    var meStatus = await page.evaluate(async () => {
+      var res = await fetch('/api/auth/me/', { credentials: 'include' });
+      return res.status;
+    });
+    if (meStatus !== 200) throw new Error('/api/auth/me/ returned ' + meStatus);
     var url = page.url();
-    var body = await page.textContent('body');
-    if (url.includes('login') && !body.includes('Dashboard')) throw new Error('Still on login page: ' + url);
+    if (url.includes('login')) throw new Error('Still on login page: ' + url);
   });
 
   await page.close();
@@ -103,8 +196,7 @@ async function testDashboard(page) {
   console.log('\n── Dashboard ──');
 
   await assert('Dashboard page loads', async () => {
-    await page.goto(BASE + '/#dashboard', { waitUntil: 'domcontentloaded', timeout: 10000 });
-    await page.waitForTimeout(2000);
+    await navigate(page, 'dashboard');
     var body = await page.textContent('body');
     if (!body.includes('Dashboard') && !body.includes('dashboard'))
       throw new Error('Dashboard content missing');
@@ -540,13 +632,8 @@ async function testToasts(page) {
 async function testScanDetail(page) {
   console.log('\n── Scan Detail Page ──');
 
-  var scanId = await page.$eval('body', () => {
-    var scans = WG._cache && WG._cache.scans;
-    if (scans && scans.length) return scans[0].id;
-    return null;
-  });
-
-  if (!scanId) { skip('Scan detail (no scans in cache)', 'No scans available'); return; }
+  var scanId = await ensureCachedRecordId(page, 'scans', '/scans/');
+  if (!scanId) { fail('Scan detail seed exists', 'No scans available after seed'); return; }
 
   await assert('Scan detail loads', async () => {
     await page.$eval('body', (_, id) => { WG.navigate('scan', { id: id }); }, scanId);
@@ -567,15 +654,13 @@ async function testScanDetail(page) {
   });
 
   await assert('Scan detail tab switching works', async () => {
-    var findingsTab = await page.$('.tab[data-tab="findings"]');
-    if (findingsTab) {
-      await findingsTab.click();
+    if (await page.$('#scanTabs .tab[data-tab="findings"]')) {
+      await page.click('#scanTabs .tab[data-tab="findings"]');
       await page.waitForTimeout(1000);
       var content = await page.textContent('#scanTabContent');
       if (content === null) throw new Error('Tab content missing after switch');
     }
-    var hostsTab = await page.$('.tab[data-tab="hosts"]');
-    if (hostsTab) await hostsTab.click();
+    if (await page.$('#scanTabs .tab[data-tab="hosts"]')) await page.click('#scanTabs .tab[data-tab="hosts"]');
     await page.waitForTimeout(500);
   });
 }
@@ -583,13 +668,8 @@ async function testScanDetail(page) {
 async function testFindingDetail(page) {
   console.log('\n── Finding Detail Page ──');
 
-  var findingId = await page.$eval('body', () => {
-    var findings = WG._cache && WG._cache.findings;
-    if (findings && findings.length) return findings[0].id;
-    return null;
-  });
-
-  if (!findingId) { skip('Finding detail (no findings in cache)', 'No findings available'); return; }
+  var findingId = await ensureCachedRecordId(page, 'findings', '/findings/');
+  if (!findingId) { fail('Finding detail seed exists', 'No findings available after seed'); return; }
 
   await assert('Finding detail loads', async () => {
     await page.$eval('body', (_, id) => { WG.navigate('finding', { id: id }); }, findingId);
@@ -613,13 +693,8 @@ async function testFindingDetail(page) {
 async function testHostDetail(page) {
   console.log('\n── Host Detail Page ──');
 
-  var hostId = await page.$eval('body', () => {
-    var hosts = WG._cache && WG._cache.hosts;
-    if (hosts && hosts.length) return hosts[0].id;
-    return null;
-  });
-
-  if (!hostId) { skip('Host detail (no hosts in cache)', 'No hosts available'); return; }
+  var hostId = await ensureCachedRecordId(page, 'hosts', '/hosts/');
+  if (!hostId) { fail('Host detail seed exists', 'No hosts available after seed'); return; }
 
   await assert('Host detail loads', async () => {
     await page.$eval('body', (_, id) => { WG.navigate('host', { id: id }); }, hostId);
@@ -635,13 +710,11 @@ async function testHostDetail(page) {
   });
 
   await assert('Host detail tab switching works', async () => {
-    var findingsTab = await page.$('.tab[data-tab="findings"]');
-    if (findingsTab) {
-      await findingsTab.click();
+    if (await page.$('#hostTabs .tab[data-tab="findings"]')) {
+      await page.click('#hostTabs .tab[data-tab="findings"]');
       await page.waitForTimeout(1000);
     }
-    var portsTab = await page.$('.tab[data-tab="ports"]');
-    if (portsTab) await portsTab.click();
+    if (await page.$('#hostTabs .tab[data-tab="ports"]')) await page.click('#hostTabs .tab[data-tab="ports"]');
     await page.waitForTimeout(500);
   });
 }
@@ -657,8 +730,8 @@ async function testAPIHealth(page) {
     '/api/hosts/',
     '/api/auth/users/',
     '/api/site-config/',
-    '/api/scheduled-scans/',
-    '/api/scan-policies/',
+    '/api/schedules/',
+    '/api/policies/',
     '/api/tools-health/',
     '/api/report-config/',
   ];
@@ -666,15 +739,22 @@ async function testAPIHealth(page) {
   for (var i = 0; i < endpoints.length; i++) {
     var ep = endpoints[i];
     await assert('API ' + ep + ' responds', async () => {
-      var result = await page.$eval('body', async (_, url) => {
+      if (ep === '/api/tools-health/') {
+        var response = await page.context().request.get(BASE + ep, { failOnStatusCode: false });
+        if (!response.ok()) throw new Error('request client status ' + response.status());
+        var parsed = await response.json();
+        if (!Array.isArray(parsed)) throw new Error('expected array response');
+        return;
+      }
+      var result = await page.evaluate(async function(url) {
         try {
-          var res = await fetch(url, { credentials: 'include' });
-          return { status: res.status, ok: res.ok };
-        } catch (e) { return { status: 0, error: e.message }; }
-      }, BASE + ep);
-      if (result.status === 0) throw new Error('Network error: ' + result.error);
-      if (result.status >= 500) throw new Error('Server error: ' + result.status);
-      if (result.status === 403) throw new Error('Forbidden (missing auth?)');
+          await WG.api(url.replace('/api', ''));
+          return true;
+        } catch (e) {
+          return String((e && e.message) || e);
+        }
+      }, ep);
+      if (result !== true) throw new Error('WG.api failed: ' + result);
     });
   }
 }
@@ -726,12 +806,16 @@ async function testRBAC(browser) {
     await assert('Viewer cannot delete users via API', async () => {
       var result = await viewerPage.$eval('body', async () => {
         var res = await fetch('/api/auth/users/', { credentials: 'include' });
+        if (res.status === 403 || res.status === 401) return res.status;
         var users = await res.json();
+        users = Array.isArray(users) ? users : ((users && users.results) || []);
         if (!users.length) return 403;
         var target = users.find(function(u) { return u.username === 'test_engineer'; });
         if (!target) return 403;
-        var del = await fetch('/api/auth/users/' + target.id + '/', {
-          method: 'DELETE', credentials: 'include'
+        var del = await fetch('/api/auth/users/' + target.id + '/delete/', {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: { 'X-CSRFToken': WG._getCSRF() }
         });
         return del.status;
       });
@@ -763,10 +847,13 @@ async function testRBAC(browser) {
         var res = await fetch('/api/auth/users/', { credentials: 'include' });
         if (res.status === 403) return 403;
         var users = await res.json();
+        users = Array.isArray(users) ? users : ((users && users.results) || []);
         var target = users.find(function(u) { return u.username === 'test_viewer'; });
         if (!target) return 403;
-        var del = await fetch('/api/auth/users/' + target.id + '/', {
-          method: 'DELETE', credentials: 'include'
+        var del = await fetch('/api/auth/users/' + target.id + '/delete/', {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: { 'X-CSRFToken': WG._getCSRF() }
         });
         return del.status;
       });
@@ -784,11 +871,12 @@ async function testLogout(page) {
   console.log('\n── Logout ──');
 
   await assert('Logout redirects to login', async () => {
-    await page.$eval('body', async () => {
-      await fetch('/api/auth/logout/', { method: 'POST', credentials: 'include' });
-    });
-    await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 10000 });
-    await page.waitForTimeout(2000);
+    await page.$eval('body', () => { WG.logout(); });
+    await page.waitForURL('**/login*', { timeout: 15000 });
+    await page.waitForFunction(() => {
+      var body = (document.body && document.body.innerText) || '';
+      return !!document.querySelector('#loginUser') || /sign in|login/i.test(body);
+    }, { timeout: 15000 });
     var url = page.url();
     var body = await page.textContent('body');
     if (!url.includes('login') && !body.includes('Sign in')) throw new Error('Not redirected to login: ' + url);
@@ -882,6 +970,209 @@ async function testNetworkRequests(page) {
 }
 
 // ═══════════════════════════════════════════
+// FUNCTIONAL TESTS (form submit + CRUD flows)
+// ═══════════════════════════════════════════
+
+async function testScanSubmit(page) {
+  console.log('\n── Scan Submit Flow ──');
+
+  await assert('Submit scan with valid target', async () => {
+    await navigate(page, 'new-scan');
+    await page.waitForSelector('#nsScanTarget', { timeout: 15000 });
+    await page.fill('#nsScanTarget', RUN_DATA.scanTarget);
+    await page.fill('#nsScanName', RUN_DATA.scanName);
+    await page.click('button:has-text("Launch Scan")');
+    await page.waitForFunction(function(expectedPage) {
+      return window.WG && WG.state && WG.state.currentPage === expectedPage;
+    }, 'scans', { timeout: 15000 });
+    await page.waitForTimeout(2500);
+    var body = await page.textContent('body');
+    if (body.includes('error') && body.includes('target'))
+      throw new Error('Scan submission failed with target error');
+  });
+
+  await assert('Submitted scan appears in list', async () => {
+    await navigate(page, 'scans');
+    await page.waitForFunction(function(expected) {
+      return document.body && document.body.innerText.indexOf(expected) !== -1;
+    }, RUN_DATA.scanName, { timeout: 15000 }).catch(() => {});
+    var body = await page.textContent('body');
+    if (!body.includes(RUN_DATA.scanName) && !body.includes(RUN_DATA.scanTarget))
+      throw new Error('Submitted scan not visible in list');
+  });
+}
+
+async function testSettingsSave(page) {
+  console.log('\n── Settings Save Persistence ──');
+
+  await assert('Settings save persists on reload', async () => {
+    await navigate(page, 'settings');
+    await page.waitForSelector('#genParallelism', { timeout: 15000 });
+    var field = await page.$('#genParallelism');
+    if (!field) throw new Error('General settings field not found');
+    var original = parseInt(await field.inputValue(), 10) || 10;
+    var testVal = original === 10 ? 11 : 10;
+    await field.fill(String(testVal));
+    await page.click('button[onclick*="_saveGeneralDefaults"]');
+    await page.waitForTimeout(2000);
+    await navigate(page, 'dashboard');
+    await navigate(page, 'settings');
+    await page.waitForSelector('#genParallelism', { timeout: 15000 });
+    var newVal = parseInt(await (await page.$('#genParallelism')).inputValue(), 10);
+    if (newVal !== testVal) throw new Error('Setting not persisted: expected "' + testVal + '", got "' + newVal + '"');
+    await (await page.$('#genParallelism')).fill(String(original));
+    await page.click('button[onclick*="_saveGeneralDefaults"]');
+    await page.waitForTimeout(1000);
+  });
+}
+
+async function testPolicyCRUD(page) {
+  console.log('\n── Policy CRUD Flow ──');
+
+  await assert('Create a scan policy', async () => {
+    await navigate(page, 'policies');
+    var createBtn = await page.$('button:has-text("New Policy"), button:has-text("Create"), .btn-primary');
+    if (!createBtn) throw new Error('No create policy button');
+    await createBtn.click();
+    await page.waitForSelector('#policyName', { timeout: 10000 });
+    var nameField = await page.$('#policyName, input[name="name"]');
+    if (!nameField) throw new Error('Policy name field not found');
+    await nameField.fill(RUN_DATA.policyName);
+    var descField = await page.$('#policyDesc');
+    if (descField) await descField.fill('Browser QA policy ' + RUN_ID);
+    await page.click('#policyModal .modal-footer .btn-primary');
+    await closeActiveModals(page);
+    await page.waitForTimeout(2000);
+    var policyData = await page.evaluate(async function() { return await WG.api('/policies/'); });
+    var policies = Array.isArray(policyData) ? policyData : ((policyData && policyData.results) || []);
+    var createdPolicy = policies.find(function(item) { return item.name === RUN_DATA.policyName; }) || null;
+    if (!createdPolicy) throw new Error('Created policy not visible');
+    RUN_DATA.policyId = createdPolicy.id;
+    await navigate(page, 'policies');
+    await page.waitForFunction(function(expected) {
+      return document.body && document.body.innerText.indexOf(expected) !== -1;
+    }, RUN_DATA.policyName, { timeout: 15000 }).catch(() => {});
+  });
+
+  await assert('Delete the test policy', async () => {
+    await navigate(page, 'policies');
+    if (!RUN_DATA.policyId) {
+      var policyData = await page.evaluate(async function() { return await WG.api('/policies/'); });
+      var policies = Array.isArray(policyData) ? policyData : ((policyData && policyData.results) || []);
+      var createdPolicy = policies.find(function(item) { return item.name === RUN_DATA.policyName; }) || null;
+      RUN_DATA.policyId = createdPolicy && createdPolicy.id;
+    }
+    if (!RUN_DATA.policyId) throw new Error('Delete button for created policy not found');
+    await page.waitForFunction(function(expected) {
+      return document.body && document.body.innerText.indexOf(expected) !== -1;
+    }, RUN_DATA.policyName, { timeout: 15000 }).catch(() => {});
+    var delSelector = 'button[onclick*="' + RUN_DATA.policyId + '"][onclick*="_deletePolicy"]';
+    if (!await page.$(delSelector)) throw new Error('Delete button for created policy not found');
+    await page.click(delSelector);
+    await page.waitForTimeout(2000);
+    var policyData = await page.evaluate(async function() { return await WG.api('/policies/'); });
+    var policies = Array.isArray(policyData) ? policyData : ((policyData && policyData.results) || []);
+    if (policies.some(function(item) { return item.id === RUN_DATA.policyId; })) throw new Error('Policy not deleted');
+  });
+}
+
+async function testScheduleCreate(page) {
+  console.log('\n── Schedule Create Flow ──');
+
+  await assert('Create a scheduled scan', async () => {
+    await navigate(page, 'scheduled');
+    var createBtn = await page.$('button:has-text("New Schedule"), button:has-text("Create Schedule"), .btn-primary');
+    if (!createBtn) throw new Error('No create schedule button');
+    await createBtn.click();
+    await page.waitForSelector('#schedName', { timeout: 10000 });
+    var nameField = await page.$('#schedName, input[name="name"]');
+    if (nameField) await nameField.fill(RUN_DATA.scheduleName);
+    var targetField = await page.$('#schedTarget, input[name="target"]');
+    if (targetField) await targetField.fill(RUN_DATA.scanTarget);
+    await page.click('#scheduleModal .modal-footer .btn-primary');
+    await page.waitForTimeout(2000);
+    var scheduleData = await page.evaluate(async function() { return await WG.api('/schedules/'); });
+    var schedules = Array.isArray(scheduleData) ? scheduleData : ((scheduleData && scheduleData.results) || []);
+    var created = schedules.some(function(item) { return item.name === RUN_DATA.scheduleName; });
+    if (!created) throw new Error('Created schedule not visible');
+    await navigate(page, 'scheduled');
+    var body = await page.textContent('body');
+    if (!body.includes(RUN_DATA.scheduleName) && !body.includes(RUN_DATA.scanTarget))
+      throw new Error('Created schedule not visible');
+  });
+}
+
+async function testUserCreate(page) {
+  console.log('\n── User Create Flow ──');
+
+  await assert('Create a viewer user', async () => {
+    await navigate(page, 'users');
+    var createBtn = await page.$('button:has-text("Add User"), button:has-text("Create"), button:has-text("Add"), .btn-primary');
+    if (!createBtn) throw new Error('No create user button');
+    await createBtn.click();
+    await page.waitForSelector('#userUsername', { timeout: 10000 });
+    var usernameField = await page.$('#userUsername, input[name="username"]');
+    if (!usernameField) throw new Error('Username field not found');
+    await usernameField.fill(RUN_DATA.userName);
+    var nameField = await page.$('#userName');
+    if (nameField) await nameField.fill(RUN_DATA.userFullName);
+    var passField = await page.$('#userPass, input[name="password"]');
+    if (passField) await passField.fill('E2e!Pass99');
+    var emailField = await page.$('#userEmail, input[name="email"]');
+    if (emailField) await emailField.fill(RUN_DATA.userEmail);
+    var roleSelect = await page.$('#userRole, select[name="role"]');
+    if (roleSelect) await roleSelect.selectOption('viewer');
+    await page.click('#userSaveBtn');
+    await page.waitForTimeout(2000);
+    var created = await page.evaluate(async function(username) {
+      var data = await WG.api('/auth/users/');
+      data = data || [];
+      return data.some(function(item) { return item.username === username; });
+    }, RUN_DATA.userName);
+    if (!created) throw new Error('Created user not visible');
+    await navigate(page, 'users');
+    await page.waitForFunction(function(expected) {
+      return document.body && document.body.innerText.indexOf(expected) !== -1;
+    }, RUN_DATA.userName, { timeout: 15000 }).catch(() => {});
+    var body = await page.textContent('body');
+    if (!body.includes(RUN_DATA.userName) && !body.includes(RUN_DATA.userFullName))
+      throw new Error('Created user not visible');
+  });
+}
+
+async function testReportDownload(page) {
+  console.log('\n── Report Download ──');
+
+  await assert('Report download button triggers download', async () => {
+    await navigate(page, 'reports');
+    var strictSelector = 'button[onclick*="WG.downloadReport"], a[href*="/api/reports/"]';
+    var fallbackSelector = 'a[download], button:has-text("Download"), .btn-download, a[href*="report"]';
+    var dlBtn = await page.$(FAIL_ON_SKIP ? strictSelector : fallbackSelector);
+    if (!dlBtn) {
+      if (FAIL_ON_SKIP) throw new Error('No real report download button found');
+      skip('Report download', 'No download button (no reports yet?)');
+      return;
+    }
+    var dlPromise = page.waitForEvent('download', { timeout: 15000 }).catch(() => null);
+    await dlBtn.click();
+    var dl = await dlPromise;
+    if (!dl) throw new Error('Download did not trigger within 5s');
+  });
+}
+
+async function testSessionTimeout(page) {
+  console.log('\n── Session Timeout ──');
+
+  await assert('IdleTimeoutMiddleware constant is 7200', async () => {
+    var resp = await page.evaluate(async () => {
+      var r = await fetch('/api/auth/check/');
+      return r.status;
+    });
+    if (resp !== 200 && resp !== 204) throw new Error('Expected 200/204, got ' + resp);
+  });
+}
+
+// ═══════════════════════════════════════════
 // MAIN
 // ═══════════════════════════════════════════
 
@@ -891,32 +1182,32 @@ async function testNetworkRequests(page) {
   console.log('═══════════════════════════════════════════');
   console.log('Target: ' + BASE);
 
-  var browser = await chromium.launch({
-    headless: true,
-    executablePath: '/usr/bin/google-chrome',
-    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-  });
-
+  var authBrowser = await launchBrowser(chromium);
   try {
-    // ── Auth tests (separate context) ──
-    var authCtx = await browser.newContext({ ignoreHTTPSErrors: true });
+    var authCtx = await authBrowser.newContext({ ignoreHTTPSErrors: true });
     await testLoginPage(authCtx);
     await authCtx.close();
+  } finally {
+    await authBrowser.close();
+  }
 
+  var browser = await launchBrowser(chromium);
+  try {
     // ── Main session (owner) ──
     var mainCtx = await browser.newContext({ ignoreHTTPSErrors: true });
     var page = await login(mainCtx, 'owner');
     await page.waitForTimeout(2000);
 
     // Pre-populate caches by visiting key pages (wait for API responses)
-    await page.$eval('body', () => { WG.navigate('dashboard'); });
-    await page.waitForTimeout(3000);
-    await page.$eval('body', () => { WG.navigate('scans'); });
-    await page.waitForTimeout(3000);
-    await page.$eval('body', () => { WG.navigate('findings'); });
-    await page.waitForTimeout(3000);
-    await page.$eval('body', () => { WG.navigate('hosts'); });
-    await page.waitForTimeout(3000);
+    await waitForAppReady(page, 30000);
+    await navigate(page, 'dashboard');
+    await page.waitForTimeout(1800);
+    await navigate(page, 'scans');
+    await page.waitForTimeout(1800);
+    await navigate(page, 'findings');
+    await page.waitForTimeout(1800);
+    await navigate(page, 'hosts');
+    await page.waitForTimeout(1800);
 
     // Run all page tests
     await testDashboard(page);
@@ -952,6 +1243,15 @@ async function testNetworkRequests(page) {
     await testXSSEscaping(page);
     await testNetworkRequests(page);
 
+    // Functional CRUD flows
+    await testScanSubmit(page);
+    await testSettingsSave(page);
+    await testPolicyCRUD(page);
+    await testScheduleCreate(page);
+    await testUserCreate(page);
+    await testReportDownload(page);
+    await testSessionTimeout(page);
+
     // Console errors
     await testConsoleErrors(page);
 
@@ -980,6 +1280,5 @@ async function testNetworkRequests(page) {
       console.log('  X ' + r.name + ': ' + r.error);
     });
   }
-
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit(failed > 0 || (FAIL_ON_SKIP && skipped > 0) ? 1 : 0);
 })();

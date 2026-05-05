@@ -8,7 +8,8 @@ Expects Phase 3 to have already created the owner/engineer/viewer accounts.
 
 Usage: python3 qa_security.py --base https://localhost:18443 --results qa-results/phase-5.json
 """
-import argparse, json, sys, urllib3
+import argparse, json, subprocess, sys, urllib3
+from pathlib import Path
 urllib3.disable_warnings()
 
 try:
@@ -70,11 +71,11 @@ ENGINEER_USER = "test_engineer"
 ENGINEER_PASS = "QAtest2026!"
 VIEWER_USER = "test_viewer"
 VIEWER_PASS = "QAtest2026!"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def flush_rate_limits():
     """Clear DRF throttle and login lockout keys from Redis."""
-    import subprocess
     subprocess.run(
         ["docker", "compose", "exec", "-T", "api",
          "python", "manage.py", "shell", "-c",
@@ -82,7 +83,7 @@ def flush_rate_limits():
          "r=c._cache.get_client();"
          "[r.delete(k) for k in r.keys('*throttle*')+r.keys('*login*')]"],
         capture_output=True, text=True,
-        cwd="/home/demon/Tools/demon-in-the-wire",
+        cwd=REPO_ROOT,
     )
 
 

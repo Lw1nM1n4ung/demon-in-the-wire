@@ -72,8 +72,11 @@ class TestCheckTools:
     @pytest.mark.asyncio
     async def test_missing_tool_raises(self, monkeypatch):
         import shutil
+        from wireghost.utils import installer
 
+        monkeypatch.setenv("WIREGHOST_AUTO_INSTALL_TOOLS", "0")
         monkeypatch.setattr(shutil, "which", lambda _name: None)
+        monkeypatch.setattr(installer, "install_missing_tools", lambda missing: missing)
         with pytest.raises(ToolMissing, match="nmap"):
             await check_tools(["nmap"])
 

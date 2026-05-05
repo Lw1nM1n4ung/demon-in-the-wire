@@ -1,66 +1,129 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Wire_Ghost — Full QA from Fresh Git Clone
-# Usage: sudo bash scripts/run_qa.sh [--keep]
-#   --keep   Do not tear down containers or remove the clone after completion.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HEAD_SHA="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 
-REPO_URL="https://github.com/Lw1nM1n4ung/demon-in-the-wire.git"
-BRANCH="rewrite-v2"
+pick_free_port() {
+    python3 - <<'PYPORT'
+import socket
+sock = socket.socket()
+sock.bind(('127.0.0.1', 0))
+print(sock.getsockname()[1])
+sock.close()
+PYPORT
+}
+
 QA_DIR="/tmp/wireghost-qa-$(date +%s)"
-PORT=28443
-KEEP=false
-[[ "${1:-}" == "--keep" ]] && KEEP=true
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
-p()  { printf "${GREEN}[PASS]${NC} %s\n" "$1"; }
-f()  { printf "${RED}[FAIL]${NC} %s\n" "$1"; }
-h()  { printf "\n${CYAN}══════ %s ══════${NC}\n" "$1"; }
-TOTAL=0; PASSED=0; FAILED=0; SKIPPED=0
 RESULTS_DIR=""
+PORT="${WIREGHOST_QA_PORT:-$(pick_free_port)}"
+HTTP_PORT="${WIREGHOST_QA_HTTP_PORT:-$(pick_free_port)}"
+while [[ "$HTTP_PORT" == "$PORT" ]]; do
+    HTTP_PORT="$(pick_free_port)"
+done
+KEEP=false
+SOURCE_MODE="current-tree"
+PLAYWRIGHT_BROWSERS_PATH=""
+QA_PY=""
 
-pass() { ((TOTAL++)); ((PASSED++)); p "$1"; }
-fail() { ((TOTAL++)); ((FAILED++)); f "$1"; }
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[1;33m'
+CYAN='[0;36m'
+NC='[0m'
+
+TOTAL=0
+PASSED=0
+FAILED=0
+SKIPPED=0
+
+p() { printf "${GREEN}[PASS]${NC} %s
+" "$1"; }
+f() { printf "${RED}[FAIL]${NC} %s
+" "$1"; }
+s() { printf "${YELLOW}[SKIP]${NC} %s
+" "$1"; }
+h() { printf "
+${CYAN}══════ %s ══════${NC}
+" "$1"; }
+pass() { ((TOTAL+=1)); ((PASSED+=1)); p "$1"; }
+fail() { ((TOTAL+=1)); ((FAILED+=1)); f "$1"; }
+skip() { ((TOTAL+=1)); ((SKIPPED+=1)); s "$1"; }
+
+usage() {
+    cat <<USAGE
+Usage: bash scripts/run_qa.sh [--fresh-clone] [--keep]
+  --fresh-clone   Validate a clean clone of the current HEAD instead of the current working tree.
+  --keep          Leave the disposable QA workspace and Docker stack running.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --fresh-clone)
+            SOURCE_MODE="fresh-clone"
+            ;;
+        --keep)
+            KEEP=true
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 cleanup() {
-    if [[ "$KEEP" == false && -d "$QA_DIR" ]]; then
-        echo -e "\n${YELLOW}Cleaning up...${NC}"
-        cd /tmp
-        docker compose -f "$QA_DIR/docker-compose.yml" down -v --remove-orphans 2>/dev/null || true
-        rm -rf "$QA_DIR"
-        echo "Cleanup complete."
-    elif [[ -d "$QA_DIR" ]]; then
-        echo -e "\n${YELLOW}--keep: leaving stack at $QA_DIR${NC}"
+    if [[ -d "$QA_DIR" ]]; then
+        if [[ "$KEEP" == false ]]; then
+            echo -e "
+${YELLOW}Cleaning up disposable QA stack...${NC}"
+            docker compose -f "$QA_DIR/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1 || true
+            rm -rf "$QA_DIR"
+        else
+            echo -e "
+${YELLOW}--keep enabled: leaving QA workspace at $QA_DIR${NC}"
+        fi
     fi
 }
 trap cleanup EXIT
 
-# ══════════════════════════════════════════════════════════════════════
-h "PHASE 0 — Fresh Clone & Environment Setup"
-# ══════════════════════════════════════════════════════════════════════
+run_logged() {
+    local logfile="$1"
+    shift
+    set +e
+    "$@" 2>&1 | tee "$logfile"
+    local rc=${PIPESTATUS[0]}
+    set -e
+    return "$rc"
+}
 
-echo "Cloning to $QA_DIR ..."
-git clone --branch "$BRANCH" "$REPO_URL" "$QA_DIR" --quiet 2>/dev/null && pass "Git clone" || { fail "Git clone"; exit 1; }
-cd "$QA_DIR"
+playwright_install_complete() {
+    find "$PLAYWRIGHT_BROWSERS_PATH" -path '*/INSTALLATION_COMPLETE' -print -quit 2>/dev/null | grep -q .
+}
 
-RESULTS_DIR="$QA_DIR/qa-results"
-mkdir -p "$RESULTS_DIR"
+render_env() {
+    local secret mysql_root_pw mysql_pw redis_pw
+    secret="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 64)"
+    mysql_root_pw="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)"
+    mysql_pw="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)"
+    redis_pw="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)"
 
-# Generate .env with random secrets
-SECRET=$(openssl rand -base64 48 | tr -d '\n/+=' | head -c 64)
-MYSQL_ROOT_PW=$(openssl rand -base64 32 | tr -d '\n/+=' | head -c 32)
-MYSQL_PW=$(openssl rand -base64 32 | tr -d '\n/+=' | head -c 32)
-REDIS_PW=$(openssl rand -base64 32 | tr -d '\n/+=' | head -c 32)
-
-cat > .env << EOF
-DJANGO_SECRET_KEY=${SECRET}
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PW}
+    cat > "$QA_DIR/.env" <<ENV
+DJANGO_SECRET_KEY=${secret}
+MYSQL_ROOT_PASSWORD=${mysql_root_pw}
 MYSQL_DATABASE=wireghost
 MYSQL_USER=wireghost
-MYSQL_PASSWORD=${MYSQL_PW}
-REDIS_PASSWORD=${REDIS_PW}
+MYSQL_PASSWORD=${mysql_pw}
+REDIS_PASSWORD=${redis_pw}
 WIREGHOST_HOST=localhost
 WIREGHOST_PORT=${PORT}
+WIREGHOST_HTTP_PORT=${HTTP_PORT}
 WIREGHOST_PROTO=https
 SESSION_COOKIE_SECURE=true
 CSRF_COOKIE_SECURE=true
@@ -68,159 +131,335 @@ WIREGHOST_LOG_DIR=./logs
 WIREGHOST_LOG_LEVEL=INFO
 TELEGRAM_BOT_TOKEN=disabled
 CSRF_TRUSTED_ORIGINS=https://localhost:${PORT},https://127.0.0.1:${PORT}
-EOF
-chmod 600 .env
-pass "Generated .env"
+ENV
+    chmod 600 "$QA_DIR/.env"
+}
 
-# Generate self-signed TLS cert
-mkdir -p certs logs/api logs/nginx
-openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem \
-    -days 1 -nodes -subj "/CN=localhost" 2>/dev/null
-pass "Generated TLS cert"
+prepare_current_tree() {
+    mkdir -p "$QA_DIR"
+    tar         --exclude='.git'         --exclude='node_modules'         --exclude='.qa-venv'         --exclude='.playwright-browsers'         --exclude='.pytest_cache'         --exclude='__pycache__'         --exclude='qa-results'         --exclude='logs'         --exclude='certs'         --exclude='nginx.conf'         --exclude='.env'         -cf - -C "$ROOT_DIR" . | tar -xf - -C "$QA_DIR"
+    pass "Copied current working tree into disposable QA workspace"
+}
 
-# Render nginx.conf from template
-sed -e "s/{{WIREGHOST_HOST}}/localhost/g" \
-    -e "s/{{WIREGHOST_PORT}}/${PORT}/g" \
-    config/nginx.conf.tpl > nginx.conf
-pass "Rendered nginx.conf"
+prepare_fresh_clone() {
+    git clone --no-local "$ROOT_DIR" "$QA_DIR" --quiet
+    git -C "$QA_DIR" checkout --quiet "$HEAD_SHA"
+    pass "Cloned clean workspace at HEAD ${HEAD_SHA:0:12}"
+}
 
-# Build and start services (skip bot — it crashes without valid Telegram token)
-echo "Building Docker images (this may take several minutes)..."
-docker compose build --quiet 2>&1 | tail -5
-docker compose up -d db redis api worker beat portal 2>&1 | tail -5
-pass "Docker compose up"
-
-# Wait for health
-echo "Waiting for services to become healthy..."
-HEALTHY=false
-for i in $(seq 1 90); do
-    DB_H=$(docker compose ps db --format '{{.Health}}' 2>/dev/null || echo "")
-    REDIS_H=$(docker compose ps redis --format '{{.Health}}' 2>/dev/null || echo "")
-    if [[ "$DB_H" == *"healthy"* && "$REDIS_H" == *"healthy"* ]]; then
-        HEALTHY=true
-        break
+prepare_workspace() {
+    h "PHASE 0 — Candidate Workspace"
+    if [[ "$SOURCE_MODE" == "fresh-clone" ]]; then
+        prepare_fresh_clone
+    else
+        prepare_current_tree
     fi
-    sleep 2
-done
-[[ "$HEALTHY" == true ]] && pass "DB + Redis healthy" || fail "DB + Redis healthy (timeout)"
+    RESULTS_DIR="$QA_DIR/qa-results"
+    mkdir -p "$RESULTS_DIR"
+    echo "Workspace: $QA_DIR"
+    echo "Mode: $SOURCE_MODE"
+    echo "HEAD: $HEAD_SHA"
+}
 
-# Wait for Django API
-API_READY=false
-for i in $(seq 1 60); do
-    HTTP=$(curl -ks -o /dev/null -w "%{http_code}" "https://localhost:${PORT}/api/auth/csrf/" 2>/dev/null || echo "000")
-    if [[ "$HTTP" == "200" ]]; then
-        API_READY=true
-        break
+bootstrap_dependencies() {
+    h "PHASE 1 — Toolchain Bootstrap"
+    cd "$QA_DIR"
+
+    python3 -m venv --system-site-packages .qa-venv
+    QA_PY="$QA_DIR/.qa-venv/bin/python"
+    "$QA_PY" -m pip install --upgrade pip setuptools wheel >/dev/null
+    if run_logged "$RESULTS_DIR/bootstrap-pip.log" "$QA_PY" -m pip install -e '.[dev]' -r web_portal/requirements.txt requests; then
+        pass "Python dependencies installed"
+    else
+        if python3 - <<'PYENV' >/dev/null 2>&1
+import django
+import pytest
+import requests
+import rest_framework
+PYENV
+        then
+            QA_PY=python3
+            pass "Using host Python environment fallback"
+        else
+            fail "Python dependency install failed"
+            return 1
+        fi
     fi
-    sleep 2
-done
-[[ "$API_READY" == true ]] && pass "Django API responding" || { fail "Django API responding (timeout)"; exit 1; }
 
-pass "Login page serves ($(curl -ks -o /dev/null -w '%{http_code}' "https://localhost:${PORT}/login"))"
+    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+        fail "Node.js and npm are required for QA"
+        return 1
+    fi
 
-# ══════════════════════════════════════════════════════════════════════
-h "PHASE 1 — Build Verification"
-# ══════════════════════════════════════════════════════════════════════
+    if run_logged "$RESULTS_DIR/bootstrap-npm.log" env PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci; then
+        pass "Node dependencies installed via npm ci"
+    else
+        fail "npm ci failed"
+        return 1
+    fi
 
-# Check services running
-RUNNING=$(docker compose ps --format '{{.Service}}:{{.State}}' 2>/dev/null | grep -c "running" || echo 0)
-[[ "$RUNNING" -ge 6 ]] && pass "All 6 services running ($RUNNING)" || fail "Expected 6 running services, got $RUNNING"
+    PLAYWRIGHT_BROWSERS_PATH="${WIREGHOST_PLAYWRIGHT_BROWSERS_PATH:-$QA_DIR/.playwright-browsers}"
+    mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+    if playwright_install_complete; then
+        pass "Playwright Chromium already installed"
+    elif [[ $(id -u) -eq 0 ]]; then
+        if run_logged "$RESULTS_DIR/bootstrap-playwright.log" env PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" timeout 20m npx playwright install --with-deps chromium; then
+            pass "Playwright Chromium installed with system dependencies"
+        elif playwright_install_complete; then
+            pass "Playwright Chromium installed despite installer exit issue"
+        else
+            fail "Playwright Chromium install failed"
+            return 1
+        fi
+    else
+        if run_logged "$RESULTS_DIR/bootstrap-playwright.log" env PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" timeout 20m npx playwright install chromium; then
+            pass "Playwright Chromium installed"
+        elif playwright_install_complete; then
+            pass "Playwright Chromium installed despite installer exit issue"
+        else
+            fail "Playwright Chromium install failed"
+            return 1
+        fi
+    fi
+}
 
-# Migrations applied
-PENDING=$(docker compose exec -T api python manage.py showmigrations --plan 2>/dev/null | grep -c '\[ \]' || echo 0)
-[[ "$PENDING" -eq 0 ]] && pass "All migrations applied" || fail "$PENDING unapplied migrations"
+run_fast_gate() {
+    h "PHASE 2 — Fast Non-Live Gate"
+    cd "$QA_DIR"
 
-# No users yet
-ME_CODE=$(curl -ks -o /dev/null -w "%{http_code}" "https://localhost:${PORT}/api/auth/me/" 2>/dev/null)
-[[ "$ME_CODE" == "401" || "$ME_CODE" == "403" ]] && pass "No authenticated users (${ME_CODE})" || fail "Expected 401/403, got $ME_CODE"
+    if run_logged "$RESULTS_DIR/phase-2-pytest.log" env WIREGHOST_AUTO_INSTALL_TOOLS=0 "$QA_PY" -m pytest tests -q; then
+        pass "pytest suite passed"
+    else
+        fail "pytest suite failed"
+    fi
 
-# Root redirects to login
-ROOT_CODE=$(curl -ks -o /dev/null -w "%{http_code}" -L --max-redirs 0 "https://localhost:${PORT}/" 2>/dev/null)
-[[ "$ROOT_CODE" == "302" || "$ROOT_CODE" == "301" ]] && pass "Root redirects to login ($ROOT_CODE)" || fail "Expected 302, got $ROOT_CODE"
+    if run_logged "$RESULTS_DIR/phase-2-django.log" bash -lc "cd '$QA_DIR/web_portal' && WIREGHOST_AUTO_INSTALL_TOOLS=0 DJANGO_SECRET_KEY=wireghost-qa-test-secret '$QA_PY' manage.py test scanner --verbosity=1"; then
+        pass "Django scanner suite passed"
+    else
+        fail "Django scanner suite failed"
+    fi
 
-# ══════════════════════════════════════════════════════════════════════
-h "PHASE 2 — Unit Tests"
-# ══════════════════════════════════════════════════════════════════════
+    if run_logged "$RESULTS_DIR/phase-2-frontend.log" node tests/test_frontend_js.js; then
+        pass "Frontend JS suite passed"
+    else
+        fail "Frontend JS suite failed"
+    fi
 
-echo "Running Django test suite..."
-docker compose exec -T api python manage.py test scanner.tests --verbosity=1 --parallel 2>&1 | tee "$RESULTS_DIR/phase-2-django.log" | tail -5
-DJANGO_EXIT=${PIPESTATUS[0]}
-if [[ $DJANGO_EXIT -eq 0 ]]; then
-    DJANGO_COUNT=$(grep -oP 'Ran \K[0-9]+' "$RESULTS_DIR/phase-2-django.log" | tail -1 || echo "?")
-    pass "Django tests passed ($DJANGO_COUNT tests)"
-else
-    DJANGO_FAIL=$(grep -c "FAIL\|ERROR" "$RESULTS_DIR/phase-2-django.log" || echo "?")
-    fail "Django tests failed ($DJANGO_FAIL failures)"
-fi
+    if run_logged "$RESULTS_DIR/phase-2-topology.log" node tests/test_topology_js.js; then
+        pass "Topology JS suite passed"
+    else
+        fail "Topology JS suite failed"
+    fi
 
-echo "Running pytest suite..."
-docker compose exec -T api python -m pytest tests/ -v --tb=short 2>&1 | tee "$RESULTS_DIR/phase-2-pytest.log" | tail -5
-PYTEST_EXIT=${PIPESTATUS[0]}
-if [[ $PYTEST_EXIT -eq 0 ]]; then
-    PYTEST_COUNT=$(grep -oP '[0-9]+ passed' "$RESULTS_DIR/phase-2-pytest.log" | head -1 || echo "? passed")
-    pass "Pytest suite passed ($PYTEST_COUNT)"
-else
-    fail "Pytest suite failed"
-fi
+    if run_logged "$RESULTS_DIR/phase-2-installers.log" bash tests/test_installers.sh; then
+        pass "Installer shell tests passed"
+    else
+        fail "Installer shell tests failed"
+    fi
+}
 
-# ══════════════════════════════════════════════════════════════════════
-h "PHASE 3 — Integration Tests (Live API)"
-# ══════════════════════════════════════════════════════════════════════
+build_stack() {
+    h "PHASE 3 — Disposable Stack Build"
+    cd "$QA_DIR"
 
-echo "Running API integration tests..."
-python3 "$QA_DIR/scripts/qa_integration.py" --base "https://localhost:${PORT}" --results "$RESULTS_DIR/phase-3.json" 2>&1 | tee "$RESULTS_DIR/phase-3.log"
-INTEG_EXIT=$?
-if [[ $INTEG_EXIT -eq 0 ]]; then
-    INTEG_P=$(python3 -c "import json; d=json.load(open('$RESULTS_DIR/phase-3.json')); print(d['passed'])" 2>/dev/null || echo "?")
-    INTEG_T=$(python3 -c "import json; d=json.load(open('$RESULTS_DIR/phase-3.json')); print(d['total'])" 2>/dev/null || echo "?")
-    pass "Integration tests: $INTEG_P/$INTEG_T passed"
-else
-    INTEG_F=$(python3 -c "import json; d=json.load(open('$RESULTS_DIR/phase-3.json')); print(d['failed'])" 2>/dev/null || echo "?")
-    fail "Integration tests: $INTEG_F failures"
-fi
+    render_env
+    pass "Rendered QA .env"
 
-# ══════════════════════════════════════════════════════════════════════
-h "PHASE 4 — Browser/UI Tests (Playwright)"
-# ══════════════════════════════════════════════════════════════════════
+    mkdir -p certs logs/api logs/nginx
+    if openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 1 -nodes -subj '/CN=localhost' >/dev/null 2>&1; then
+        pass "Generated self-signed TLS certificate"
+    else
+        fail "TLS certificate generation failed"
+        return 1
+    fi
 
-if command -v node &>/dev/null && node -e "require('playwright')" 2>/dev/null; then
-    echo "Running Playwright E2E tests..."
-    WG_BASE="https://localhost:${PORT}" node "$QA_DIR/tests/test_portal_e2e.js" 2>&1 | tee "$RESULTS_DIR/phase-4.log"
-    E2E_EXIT=$?
-    E2E_PASS=$(grep -c '✓\|PASS' "$RESULTS_DIR/phase-4.log" || echo 0)
-    E2E_FAIL=$(grep -c '✗\|FAIL' "$RESULTS_DIR/phase-4.log" || echo 0)
-    [[ $E2E_EXIT -eq 0 ]] && pass "E2E tests: $E2E_PASS passed" || fail "E2E tests: $E2E_FAIL failures"
-else
-    echo "Playwright not available — skipping E2E tests"
-    ((TOTAL++)); ((SKIPPED++))
-fi
+    if sed -e "s/{{WIREGHOST_HOST}}/localhost/g" -e "s/{{WIREGHOST_PORT}}/${PORT}/g" config/nginx.conf.tpl > nginx.conf; then
+        pass "Rendered nginx.conf"
+    else
+        fail "nginx.conf rendering failed"
+        return 1
+    fi
 
-# ══════════════════════════════════════════════════════════════════════
-h "PHASE 5 — Security Regression Tests"
-# ══════════════════════════════════════════════════════════════════════
+    if run_logged "$RESULTS_DIR/phase-3-build.log" docker compose build; then
+        pass "Docker images built"
+    else
+        fail "Docker build failed"
+        return 1
+    fi
 
-echo "Running security regression tests..."
-python3 "$QA_DIR/scripts/qa_security.py" --base "https://localhost:${PORT}" --results "$RESULTS_DIR/phase-5.json" 2>&1 | tee "$RESULTS_DIR/phase-5.log"
-SEC_EXIT=$?
-if [[ $SEC_EXIT -eq 0 ]]; then
-    SEC_P=$(python3 -c "import json; d=json.load(open('$RESULTS_DIR/phase-5.json')); print(d['passed'])" 2>/dev/null || echo "?")
-    SEC_T=$(python3 -c "import json; d=json.load(open('$RESULTS_DIR/phase-5.json')); print(d['total'])" 2>/dev/null || echo "?")
-    pass "Security tests: $SEC_P/$SEC_T passed"
-else
-    SEC_F=$(python3 -c "import json; d=json.load(open('$RESULTS_DIR/phase-5.json')); print(d['failed'])" 2>/dev/null || echo "?")
-    fail "Security tests: $SEC_F failures"
-fi
+    if run_logged "$RESULTS_DIR/phase-3-up.log" docker compose up -d db redis docker-proxy; then
+        pass "Infrastructure services started"
+    else
+        fail "Infrastructure startup failed"
+        return 1
+    fi
 
-# ══════════════════════════════════════════════════════════════════════
-h "SUMMARY"
-# ══════════════════════════════════════════════════════════════════════
+    local healthy=false
+    # Fresh MySQL volumes can take several minutes to initialize before the
+    # health check flips green; keep the live gate tolerant of clean boot time.
+    for _ in $(seq 1 300); do
+        local db_h redis_h
+        db_h="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' "$(docker compose ps -q db)" 2>/dev/null || true)"
+        redis_h="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' "$(docker compose ps -q redis)" 2>/dev/null || true)"
+        if [[ "$db_h" == "healthy" && "$redis_h" == "healthy" ]]; then
+            healthy=true
+            break
+        fi
+        sleep 2
+    done
+    if [[ "$healthy" == true ]]; then
+        pass "DB and Redis reached healthy state"
+    else
+        fail "DB and Redis health check timed out"
+        return 1
+    fi
 
-printf "\n${CYAN}Total: %d | Passed: %d | Failed: %d | Skipped: %d${NC}\n" "$TOTAL" "$PASSED" "$FAILED" "$SKIPPED"
+    if run_logged "$RESULTS_DIR/phase-3-up-app.log" docker compose up -d api worker beat portal; then
+        pass "Application services started"
+    else
+        fail "Application service startup failed"
+        return 1
+    fi
 
-if [[ $FAILED -eq 0 ]]; then
-    printf "\n${GREEN}✅ ALL QA CHECKS PASSED${NC}\n"
-    exit 0
-else
-    printf "\n${RED}❌ %d FAILURES${NC}\n" "$FAILED"
-    exit 1
-fi
+    local api_ready=false
+    # The API container performs migrations before gunicorn binds 8000, so a
+    # clean disposable stack needs a wider readiness window than warm starts.
+    for _ in $(seq 1 600); do
+        local code
+        code="$(curl -ks -o /dev/null -w '%{http_code}' "https://localhost:${PORT}/api/auth/csrf/" || true)"
+        if [[ "$code" == "200" ]]; then
+            api_ready=true
+            break
+        fi
+        sleep 2
+    done
+    if [[ "$api_ready" == true ]]; then
+        pass "Django API responded on https://localhost:${PORT}"
+    else
+        fail "Django API did not become ready"
+        return 1
+    fi
+}
+
+verify_stack() {
+    h "PHASE 4 — Live Stack Verification"
+    cd "$QA_DIR"
+
+    local running
+    running="$(docker compose ps --format '{{.Service}}:{{.State}}' 2>/dev/null | grep -c 'running' || true)"
+    if [[ "$running" -ge 6 ]]; then
+        pass "Expected services are running ($running detected)"
+    else
+        fail "Expected at least 6 running services, found $running"
+    fi
+
+    local pending
+    pending="$(docker compose exec -T api python manage.py showmigrations --plan 2>/dev/null | grep -c '\[ \]' || true)"
+    if [[ "$pending" -eq 0 ]]; then
+        pass "All migrations applied"
+    else
+        fail "$pending migrations remain unapplied"
+    fi
+
+    local me_code
+    me_code="$(curl -ks -o /dev/null -w '%{http_code}' "https://localhost:${PORT}/api/auth/me/" || true)"
+    if [[ "$me_code" == "401" || "$me_code" == "403" ]]; then
+        pass "Unauthenticated /api/auth/me/ is blocked"
+    else
+        fail "Unexpected unauthenticated /api/auth/me/ status: $me_code"
+    fi
+
+    local root_code
+    root_code="$(curl -ks -o /dev/null -w '%{http_code}' -L --max-redirs 0 "https://localhost:${PORT}/" || true)"
+    if [[ "$root_code" == "301" || "$root_code" == "302" ]]; then
+        pass "Portal root redirects to login"
+    else
+        fail "Portal root returned $root_code instead of redirect"
+    fi
+
+    if run_logged "$RESULTS_DIR/phase-4-worker-tools.log" docker compose exec -T worker sh -lc 'set -e; for bin in nmap fping masscan nuclei httpx naabu gowitness searchsploit nikto nxc; do command -v "$bin" >/dev/null || { echo "missing $bin"; exit 1; }; done; nmap --version | head -1; nuclei -version 2>&1 | head -1; httpx -version 2>&1 | head -1; naabu -version 2>&1 | head -1; nikto -Version 2>&1 | head -1; nxc --version 2>&1 | head -1'; then
+        pass "Worker scanner tool probe passed"
+    else
+        fail "Worker scanner tool probe failed"
+    fi
+}
+
+run_live_gate() {
+    h "PHASE 5 — Live API Gate"
+    cd "$QA_DIR"
+
+    if run_logged "$RESULTS_DIR/phase-5-integration.log" "$QA_PY" scripts/qa_integration.py --base "https://localhost:${PORT}" --results "$RESULTS_DIR/phase-5-integration.json"; then
+        pass "API integration suite passed"
+    else
+        fail "API integration suite failed"
+    fi
+}
+
+run_browser_gate() {
+    h "PHASE 6 — Browser Gate"
+    cd "$QA_DIR"
+    local browser_base="https://127.0.0.1:${PORT}"
+
+    if run_logged "$RESULTS_DIR/phase-6-flush-auth-throttles.log" docker compose exec -T api python manage.py shell -c "c=__import__('django.core.cache',fromlist=['cache']).cache; r=c._cache.get_client(); [r.delete(k) for k in r.keys('*throttle*')+r.keys('*login*')]"; then
+        pass "Cleared auth throttle state before browser QA"
+    else
+        fail "Could not clear auth throttle state before browser QA"
+    fi
+
+    if run_logged "$RESULTS_DIR/phase-6-js-regression.log" env WG_BASE="$browser_base" WG_FAIL_ON_SKIP=1 PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" npm run test:js-regression; then
+        pass "Browser JS regression suite passed"
+    else
+        fail "Browser JS regression suite failed"
+    fi
+
+    if run_logged "$RESULTS_DIR/phase-6-xss-regression.log" env WG_BASE="$browser_base" WG_FAIL_ON_SKIP=1 PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" npm run test:xss-regression; then
+        pass "Browser XSS regression suite passed"
+    else
+        fail "Browser XSS regression suite failed"
+    fi
+
+    if run_logged "$RESULTS_DIR/phase-6-portal-e2e.log" env WG_BASE="$browser_base" WG_FAIL_ON_SKIP=1 PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" npm run test:portal-e2e; then
+        pass "Portal E2E suite passed"
+    else
+        fail "Portal E2E suite failed"
+    fi
+}
+
+run_security_gate() {
+    h "PHASE 7 — Security Gate"
+    cd "$QA_DIR"
+
+    if run_logged "$RESULTS_DIR/phase-7-security.log" "$QA_PY" scripts/qa_security.py --base "https://localhost:${PORT}" --results "$RESULTS_DIR/phase-7-security.json"; then
+        pass "Security regression suite passed"
+    else
+        fail "Security regression suite failed"
+    fi
+}
+
+summarize() {
+    h "SUMMARY"
+    printf "
+${CYAN}Total: %d | Passed: %d | Failed: %d | Skipped: %d${NC}
+" "$TOTAL" "$PASSED" "$FAILED" "$SKIPPED"
+    echo "Logs: $RESULTS_DIR"
+    if [[ "$FAILED" -eq 0 ]]; then
+        printf "
+${GREEN}ALL QA CHECKS PASSED${NC}
+"
+        return 0
+    fi
+    printf "
+${RED}%d QA CHECK(S) FAILED${NC}
+" "$FAILED"
+    return 1
+}
+
+prepare_workspace
+bootstrap_dependencies || { summarize; exit 1; }
+run_fast_gate
+build_stack || { summarize; exit 1; }
+verify_stack
+run_live_gate
+run_browser_gate
+run_security_gate
+summarize

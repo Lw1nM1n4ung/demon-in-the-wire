@@ -1,0 +1,44 @@
+[
+  {
+    "ip": "10.0.0.1",
+    "host": "10.0.0.1",
+    "port": "80",
+    "vulnerabilities": [
+      {
+        "id": "999990",
+        "msg": "Server leaks inodes via ETags, header found with file /",
+        "method": "GET",
+        "url": "/",
+        "references": "OSVDB-3092"
+      },
+      {
+        "id": "999991",
+        "msg": "The anti-clickjacking X-Frame-Options header is not present",
+        "method": "GET",
+        "url": "/",
+        "references": ""
+      },
+      {
+        "id": "999992",
+        "msg": "OSVDB-3268: /icons/: Directory listing found",
+        "method": "GET",
+        "url": "/icons/",
+        "references": "OSVDB-3268"
+      },
+      {
+        "id": "999993",
+        "msg": "Allowed HTTP Methods: GET, HEAD, POST, OPTIONS, TRACE",
+        "method": "OPTIONS",
+        "url": "/",
+        "references": ""
+      },
+      {
+        "id": "999994",
+        "msg": "Remote code execution via default CGI script",
+        "method": "GET",
+        "url": "/cgi-bin/test.cgi",
+        "references": "CVE-2021-41773"
+      }
+    ]
+  }
+]

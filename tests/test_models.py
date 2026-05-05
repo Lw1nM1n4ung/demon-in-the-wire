@@ -177,3 +177,90 @@ class TestScanReport:
             scan_start=datetime(2023, 11, 14, 12, 0),
         )
         assert report.total_open_ports == 3
+
+    def test_findings_by_severity(self):
+        report = ScanReport(
+            target="10.0.0.0/24",
+            findings=[
+                _make_finding("10.0.0.1", Severity.HIGH),
+                _make_finding("10.0.0.1", Severity.HIGH),
+                _make_finding("10.0.0.2", Severity.LOW),
+            ],
+            scan_start=datetime(2023, 11, 14, 12, 0),
+        )
+        by_sev = report.findings_by_severity()
+        assert len(by_sev[Severity.HIGH]) == 2
+        assert len(by_sev[Severity.LOW]) == 1
+        assert Severity.CRITICAL not in by_sev
+
+    def test_empty_findings(self):
+        report = ScanReport(
+            target="10.0.0.0/24",
+            scan_start=datetime(2023, 11, 14, 12, 0),
+        )
+        assert report.severity_stats() == {}
+        assert report.findings_by_host() == {}
+        assert report.total_open_ports == 0
+
+
+# ---------- Finding defaults ----------
+
+
+class TestFinding:
+    def test_default_fields(self):
+        f = Finding(
+            source="nuclei",
+            host="10.0.0.1",
+            port="80",
+            protocol="tcp",
+            severity=Severity.HIGH,
+            title="Test",
+            description="desc",
+        )
+        assert f.references == []
+        assert f.tags == []
+        assert f.curl_command == ""
+        assert f.cve == ""
+        assert f.cvss == ""
+        assert f.cwe == ""
+
+    def test_references_is_list(self):
+        f = Finding(
+            source="nuclei",
+            host="10.0.0.1",
+            port="80",
+            protocol="tcp",
+            severity=Severity.HIGH,
+            title="Test",
+            description="desc",
+            references=["https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-41773"],
+        )
+        assert isinstance(f.references, list)
+        assert len(f.references) == 1
+
+    def test_independent_default_lists(self):
+        f1 = Finding(
+            source="nuclei", host="a", port="80", protocol="tcp",
+            severity=Severity.INFO, title="t1", description="d",
+        )
+        f2 = Finding(
+            source="nuclei", host="b", port="80", protocol="tcp",
+            severity=Severity.INFO, title="t2", description="d",
+        )
+        f1.tags.append("added")
+        assert "added" not in f2.tags
+
+
+# ---------- Service model ----------
+
+
+class TestService:
+    def test_service_defaults(self):
+        svc = Service(name="http")
+        assert svc.product == ""
+        assert svc.version == ""
+
+    def test_service_with_product(self):
+        svc = Service(name="ssh", product="OpenSSH", version="8.9")
+        assert svc.product == "OpenSSH"
+        assert svc.version == "8.9"

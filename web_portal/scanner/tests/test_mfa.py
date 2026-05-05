@@ -1,5 +1,6 @@
 """Tests for Wire_Ghost email-based MFA."""
 import json
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -70,10 +71,14 @@ class MfaModelTest(TestCase):
 )
 class MfaLoginFlowTest(TestCase):
     def setUp(self):
+        patch('scanner.tasks.send_mfa_otp.delay').start()
         self.user = _make_user()
         _enable_mfa(self.user)
         self.c = Client()
         cache.clear()
+
+    def tearDown(self):
+        patch.stopall()
 
     def test_login_returns_mfa_required(self):
         res = self.c.post('/api/auth/login/', json.dumps({'username': 'mfauser', 'password': STRONG_PW}), content_type='application/json')
@@ -106,10 +111,14 @@ class MfaLoginFlowTest(TestCase):
 )
 class MfaVerifyTest(TestCase):
     def setUp(self):
+        patch('scanner.tasks.send_mfa_otp.delay').start()
         self.user = _make_user()
         _enable_mfa(self.user)
         self.c = Client()
         cache.clear()
+
+    def tearDown(self):
+        patch.stopall()
 
     def _login_get_token(self):
         res = self.c.post('/api/auth/login/', json.dumps({'username': 'mfauser', 'password': STRONG_PW}), content_type='application/json')
@@ -155,10 +164,14 @@ class MfaVerifyTest(TestCase):
 )
 class MfaBackupCodeLoginTest(TestCase):
     def setUp(self):
+        patch('scanner.tasks.send_mfa_otp.delay').start()
         self.user = _make_user()
         self.codes = _enable_mfa(self.user)
         self.c = Client()
         cache.clear()
+
+    def tearDown(self):
+        patch.stopall()
 
     def _login_get_token(self):
         res = self.c.post('/api/auth/login/', json.dumps({'username': 'mfauser', 'password': STRONG_PW}), content_type='application/json')
@@ -188,10 +201,14 @@ class MfaBackupCodeLoginTest(TestCase):
 )
 class MfaResendTest(TestCase):
     def setUp(self):
+        patch('scanner.tasks.send_mfa_otp.delay').start()
         self.user = _make_user()
         _enable_mfa(self.user)
         self.c = Client()
         cache.clear()
+
+    def tearDown(self):
+        patch.stopall()
 
     def _login_get_token(self):
         res = self.c.post('/api/auth/login/', json.dumps({'username': 'mfauser', 'password': STRONG_PW}), content_type='application/json')
@@ -221,10 +238,14 @@ class MfaResendTest(TestCase):
 )
 class MfaSetupTest(TestCase):
     def setUp(self):
+        patch('scanner.tasks.send_mfa_otp.delay').start()
         self.user = _make_user()
         self.c = Client()
         cache.clear()
         self.c.login(username='mfauser', password=STRONG_PW)
+
+    def tearDown(self):
+        patch.stopall()
 
     def test_setup_requires_reauth(self):
         res = self.c.post('/api/auth/mfa/setup/', content_type='application/json')

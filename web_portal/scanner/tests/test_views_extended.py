@@ -414,6 +414,7 @@ class ScheduledScanToggleRunNowTests(_BaseViewTest):
             parallelism=42, timeout=7200,
             report_formats='docx,xlsx',
             version_detect=False, os_detect=False,
+            tools={'nikto': False, 'netexec': False},
             created_by=self.engineer,
         )
         self.schedule.policy = policy
@@ -426,6 +427,8 @@ class ScheduledScanToggleRunNowTests(_BaseViewTest):
         self.assertEqual(new_scan.parallelism, 42)
         self.assertEqual(new_scan.timeout, 7200)
         self.assertFalse(new_scan.version_detect)
+        self.assertTrue(new_scan.skip_nikto)
+        self.assertTrue(new_scan.skip_netexec)
 
     def test_viewer_cannot_toggle_schedule(self):
         """Viewer lacks schedule:write — toggle requires POST (write method)."""

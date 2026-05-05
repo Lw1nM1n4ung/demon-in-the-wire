@@ -1197,7 +1197,10 @@ class GeneralSettingsTests(TestCase):
         res = self.client.get('/api/site-config/')
         self.assertEqual(res.json()['default_parallelism'], 42)
 
-    def test_scan_without_parallelism_uses_site_default(self):
+    @patch('scanner.tasks.run_scan.delay')
+    def test_scan_without_parallelism_uses_site_default(self, mock_delay):
+        from unittest.mock import MagicMock
+        mock_delay.return_value = MagicMock(id='fake-task-id')
         from scanner.models import SiteConfig, Scan
         cfg = SiteConfig.get()
         cfg.default_parallelism = 42

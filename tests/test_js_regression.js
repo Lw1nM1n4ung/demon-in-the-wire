@@ -9,12 +9,11 @@
  *   6. Host detail findings tab
  *   7. Scan queue remove
  *
- * Run: NODE_PATH=/usr/local/lib/node_modules node tests/test_js_regression.js
+ * Run: WG_BASE=https://localhost:18443 node tests/test_js_regression.js
  */
 
 const { chromium } = require('playwright');
-
-const BASE = 'https://localhost:18443';
+const { BASE, FAIL_ON_SKIP, launchBrowser } = require('./browser_test_config');
 const CREDS = { username: 'admin', password: 'QAtest2026!' };
 
 var passed = 0, failed = 0, skipped = 0;
@@ -28,14 +27,60 @@ async function assert(name, fn) {
   catch (e) { fail(name, e.message || e); }
 }
 
+async function waitForAuthenticatedApp(page, timeout) {
+  var deadline = Date.now() + (timeout || 30000);
+  var lastState = null;
+  await page.waitForLoadState('domcontentloaded', { timeout: Math.min(timeout || 15000, 15000) }).catch(() => {});
+  while (Date.now() < deadline) {
+    try {
+      lastState = await page.evaluate(async () => {
+        var wg = window.WG || {};
+        var meStatus = null;
+        try {
+          var res = await fetch('/api/auth/me/', { credentials: 'include' });
+          meStatus = res.status;
+        } catch (e) {
+          meStatus = String((e && e.message) || e);
+        }
+        return {
+          href: location.href,
+          meStatus: meStatus,
+          navigate: typeof wg.navigate,
+          escHtml: typeof wg.escHtml,
+          scanHostsTab: typeof wg._scanHostsTab,
+          hostPortsTab: typeof wg._hostPortsTab,
+          cacheType: wg._cache && typeof wg._cache,
+        };
+      });
+      if (
+        lastState.meStatus === 200
+        && lastState.navigate === 'function'
+        && lastState.escHtml === 'function'
+        && lastState.scanHostsTab === 'function'
+        && lastState.hostPortsTab === 'function'
+        && lastState.cacheType === 'object'
+      ) return;
+    } catch (e) {
+      lastState = { error: e.message || String(e) };
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('Timed out waiting for authenticated app: ' + JSON.stringify(lastState));
+}
+
 async function login(page) {
   await page.goto(BASE + '/login', { waitUntil: 'domcontentloaded', timeout: 15000 });
-  await page.waitForSelector('#loginUser', { timeout: 5000 });
+  await page.waitForSelector('#loginUser', { timeout: 15000 });
   await page.fill('#loginUser', CREDS.username);
   await page.fill('#loginPass', CREDS.password);
   await page.click('#loginBtn');
-  await page.waitForURL('**/dashboard*', { timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(1500);
+  await waitForAuthenticatedApp(page, 30000);
+  var meStatus = await page.evaluate(async () => {
+    var res = await fetch('/api/auth/me/', { credentials: 'include' });
+    return res.status;
+  });
+  if (meStatus !== 200) throw new Error('/api/auth/me/ returned ' + meStatus);
+  await page.waitForTimeout(1000);
 }
 
 function nav(page, route, params) {
@@ -77,8 +122,7 @@ async function testScanDetailTabs(page) {
   await page.waitForTimeout(2000);
 
   await assert('Hosts tab renders with table', async () => {
-    var hostsTab = await page.$('#scanTabs .tab[data-tab="hosts"]');
-    if (hostsTab) await hostsTab.click();
+    if (await page.$('#scanTabs .tab[data-tab="hosts"]')) await page.click('#scanTabs .tab[data-tab="hosts"]');
     await page.waitForTimeout(500);
     var content = await page.$eval('#scanTabContent', el => el.innerHTML);
     if (content.includes('data-table') || content.includes('panel-empty'))
@@ -87,9 +131,8 @@ async function testScanDetailTabs(page) {
   });
 
   await assert('Findings tab renders with table', async () => {
-    var tab = await page.$('#scanTabs .tab[data-tab="findings"]');
-    if (!tab) throw new Error('No findings tab found');
-    await tab.click();
+    if (!(await page.$('#scanTabs .tab[data-tab="findings"]'))) throw new Error('No findings tab found');
+    await page.click('#scanTabs .tab[data-tab="findings"]');
     await page.waitForTimeout(500);
     var content = await page.$eval('#scanTabContent', el => el.innerHTML);
     if (content.includes('data-table') || content.includes('panel-empty'))
@@ -98,9 +141,8 @@ async function testScanDetailTabs(page) {
   });
 
   await assert('Reports tab renders with table', async () => {
-    var tab = await page.$('#scanTabs .tab[data-tab="reports"]');
-    if (!tab) throw new Error('No reports tab found');
-    await tab.click();
+    if (!(await page.$('#scanTabs .tab[data-tab="reports"]'))) throw new Error('No reports tab found');
+    await page.click('#scanTabs .tab[data-tab="reports"]');
     await page.waitForTimeout(500);
     var content = await page.$eval('#scanTabContent', el => el.innerHTML);
     if (content.includes('data-table') || content.includes('panel-empty'))
@@ -233,7 +275,13 @@ async function testScanComparison(page) {
 async function testHostDetailFindings(page) {
   console.log('\n── 6. Host Detail Findings Tab ──');
 
-  var hosts = await getCache(page, 'hosts');
+  var hosts = await page.evaluate(async function() {
+    var cached = WG._cache.hosts || [];
+    if (cached.length) return cached;
+    var data = await WG.api('/hosts/');
+    if (Array.isArray(data)) return data;
+    return (data && data.results) || [];
+  });
   var host = hosts.find(h => h.findings_count > 0) || hosts[0];
 
   if (!host) {
@@ -317,7 +365,7 @@ async function testScanQueueRemove(page) {
   console.log('║  Wire_Ghost — JS Bug Fix Regression QA   ║');
   console.log('╚══════════════════════════════════════════╝');
 
-  var browser = await chromium.launch({ headless: true, executablePath: '/usr/bin/google-chrome' });
+  var browser = await launchBrowser(chromium);
   var context = await browser.newContext({ ignoreHTTPSErrors: true });
   var page = await context.newPage();
 
@@ -344,7 +392,8 @@ async function testScanQueueRemove(page) {
     await testScanQueueRemove(page);
 
   } catch (e) {
-    console.error('\nFATAL: ' + e.message);
+    failed++;
+    console.error('\nFATAL: ' + (e && e.stack ? e.stack : e.message || e));
   } finally {
     await browser.close();
   }
@@ -353,5 +402,5 @@ async function testScanQueueRemove(page) {
   console.log('Results: ' + passed + ' pass, ' + failed + ' fail, ' + skipped + ' skip');
   console.log('══════════════════════════════════════════');
 
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit(failed > 0 || (FAIL_ON_SKIP && skipped > 0) ? 1 : 0);
 })();
