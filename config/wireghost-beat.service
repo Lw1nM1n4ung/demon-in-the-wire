@@ -1,0 +1,19 @@
+[Unit]
+Description=Wire_Ghost Celery Beat Scheduler
+After=network-online.target wireghost-worker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__PROJECT_DIR__/web_portal
+EnvironmentFile=__PROJECT_DIR__/.env
+Environment=PYTHONPATH=__PROJECT_DIR__/web_portal:__PROJECT_DIR__/src
+Environment=PATH=__VENV_DIR__/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=__VENV_DIR__/bin/celery -A wireghost_web beat -l info --schedule=__LOG_DIR__/celerybeat-schedule --logfile=__LOG_DIR__/celery-beat.log
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

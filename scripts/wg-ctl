@@ -23,16 +23,39 @@ require_env() {
     set -a; source .env; set +a
 }
 
+_is_host_mode() {
+    [ "${INSTALL_MODE:-docker}" = "host" ]
+}
+
+_compose_cmd() {
+    if _is_host_mode; then
+        docker compose -f docker-compose.yml -f docker-compose.host.yml "$@"
+    else
+        docker compose "$@"
+    fi
+}
+
 # ══════════════════════════════════════════════════════════════════════
 # status — Show service health, cert info, disk usage
 # ══════════════════════════════════════════════════════════════════════
 cmd_status() {
     require_env
 
-    printf "\n${BOLD}Wire_Ghost Service Status${NC}\n\n"
+    printf "\n${BOLD}Wire_Ghost Service Status${NC}  ${DIM}(mode: ${INSTALL_MODE:-docker})${NC}\n\n"
 
-    docker compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}\t{{.Ports}}' 2>/dev/null || \
-        docker compose ps
+    _compose_cmd ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}\t{{.Ports}}' 2>/dev/null || \
+        _compose_cmd ps
+
+    if _is_host_mode; then
+        printf "\n${BOLD}Host Services${NC}\n"
+        for unit in wireghost-worker wireghost-beat; do
+            local state
+            state=$(systemctl is-active "$unit" 2>/dev/null || echo "inactive")
+            local color="$RED"
+            [ "$state" = "active" ] && color="$GREEN"
+            printf "  %-24s ${color}%s${NC}\n" "$unit" "$state"
+        done
+    fi
 
     printf "\n${BOLD}TLS Certificate${NC}\n"
     if [ -f certs/cert.pem ]; then
@@ -48,6 +71,10 @@ cmd_status() {
         "$(docker system df --format '{{.Size}}' -v 2>/dev/null | head -1 || echo 'unknown')"
     printf "  %-20s %s\n" "Log directory:" \
         "$(du -sh "${WIREGHOST_LOG_DIR:-./logs}" 2>/dev/null | cut -f1 || echo 'unknown')"
+    if _is_host_mode && [ -d "${WIREGHOST_DATA_DIR:-./data}" ]; then
+        printf "  %-20s %s\n" "Scan data:" \
+            "$(du -sh "${WIREGHOST_DATA_DIR:-./data}" 2>/dev/null | cut -f1 || echo 'unknown')"
+    fi
 
     printf "\n${BOLD}Portal URL${NC}\n"
     PORT="${WIREGHOST_PORT:-443}"
@@ -78,7 +105,7 @@ cmd_backup() {
 
     # 1. Database dump
     info "Dumping MySQL database..."
-    docker compose exec -T db mysqldump \
+    _compose_cmd exec -T db mysqldump \
         -u"${MYSQL_USER:-wireghost}" \
         -p"${MYSQL_PASSWORD}" \
         --single-transaction \
@@ -89,25 +116,35 @@ cmd_backup() {
     DB_SIZE=$(du -sh "${BACKUP_WORK}/database.sql" | cut -f1)
     ok "Database dump: ${DB_SIZE}"
 
-    # 2. Scan output volume
-    info "Backing up scan output volume..."
-    docker run --rm \
-        -v "$(docker compose config --volumes | grep scan_output | head -1 || echo 'demon-in-the-wire_scan_output'):/source:ro" \
-        -v "$(pwd)/${BACKUP_WORK}:/backup" \
-        alpine tar czf /backup/scan_output.tar.gz -C /source . 2>/dev/null || \
-    docker run --rm \
-        -v "demon-in-the-wire_scan_output:/source:ro" \
-        -v "$(pwd)/${BACKUP_WORK}:/backup" \
-        alpine tar czf /backup/scan_output.tar.gz -C /source . 2>/dev/null || \
-        warn "Could not backup scan_output volume"
+    # 2. Scan output
+    info "Backing up scan output..."
+    if _is_host_mode && [ -d "${WIREGHOST_DATA_DIR:-./data}/output" ]; then
+        tar czf "${BACKUP_WORK}/scan_output.tar.gz" -C "${WIREGHOST_DATA_DIR}/output" . 2>/dev/null || \
+            warn "Could not backup scan output"
+    else
+        docker run --rm \
+            -v "$(docker compose config --volumes | grep scan_output | head -1 || echo 'demon-in-the-wire_scan_output'):/source:ro" \
+            -v "$(pwd)/${BACKUP_WORK}:/backup" \
+            alpine tar czf /backup/scan_output.tar.gz -C /source . 2>/dev/null || \
+        docker run --rm \
+            -v "demon-in-the-wire_scan_output:/source:ro" \
+            -v "$(pwd)/${BACKUP_WORK}:/backup" \
+            alpine tar czf /backup/scan_output.tar.gz -C /source . 2>/dev/null || \
+            warn "Could not backup scan_output volume"
+    fi
 
-    # 3. Report assets volume
-    info "Backing up report assets volume..."
-    docker run --rm \
-        -v "demon-in-the-wire_report_assets:/source:ro" \
-        -v "$(pwd)/${BACKUP_WORK}:/backup" \
-        alpine tar czf /backup/report_assets.tar.gz -C /source . 2>/dev/null || \
-        warn "Could not backup report_assets volume"
+    # 3. Report assets
+    info "Backing up report assets..."
+    if _is_host_mode && [ -d "${WIREGHOST_DATA_DIR:-./data}/assets" ]; then
+        tar czf "${BACKUP_WORK}/report_assets.tar.gz" -C "${WIREGHOST_DATA_DIR}/assets" . 2>/dev/null || \
+            warn "Could not backup report assets"
+    else
+        docker run --rm \
+            -v "demon-in-the-wire_report_assets:/source:ro" \
+            -v "$(pwd)/${BACKUP_WORK}:/backup" \
+            alpine tar czf /backup/report_assets.tar.gz -C /source . 2>/dev/null || \
+            warn "Could not backup report_assets volume"
+    fi
 
     # 4. Configuration files
     info "Backing up configuration..."
@@ -153,7 +190,10 @@ cmd_restore() {
     [ -d "$INNER_DIR" ] || die "Invalid backup format"
 
     info "Stopping Wire_Ghost stack..."
-    docker compose down
+    if _is_host_mode; then
+        systemctl stop wireghost-beat wireghost-worker 2>/dev/null || true
+    fi
+    _compose_cmd down
 
     # Restore .env
     if [ -f "${INNER_DIR}/env.bak" ]; then
@@ -179,13 +219,13 @@ cmd_restore() {
 
     # Start infrastructure to restore database
     info "Starting database..."
-    docker compose up -d db redis
+    _compose_cmd up -d db redis
     sleep 10
 
     # Wait for DB health
     TIMEOUT=60; ELAPSED=0
     while [ $ELAPSED -lt $TIMEOUT ]; do
-        if docker compose exec -T db mysqladmin ping -h localhost >/dev/null 2>&1; then
+        if _compose_cmd exec -T db mysqladmin ping -h localhost >/dev/null 2>&1; then
             break
         fi
         sleep 3; ELAPSED=$((ELAPSED + 3))
@@ -194,40 +234,54 @@ cmd_restore() {
     # Restore database
     if [ -f "${INNER_DIR}/database.sql" ]; then
         info "Restoring database..."
-        docker compose exec -T db mysql \
+        _compose_cmd exec -T db mysql \
             -u"${MYSQL_USER:-wireghost}" \
             -p"${MYSQL_PASSWORD}" \
             "${MYSQL_DATABASE:-wireghost}" < "${INNER_DIR}/database.sql"
         ok "Database restored"
     fi
 
-    # Restore scan output volume
+    # Restore scan output
     if [ -f "${INNER_DIR}/scan_output.tar.gz" ]; then
-        info "Restoring scan output volume..."
-        docker run --rm \
-            -v "demon-in-the-wire_scan_output:/target" \
-            -v "$(cd "$INNER_DIR" && pwd):/backup:ro" \
-            alpine sh -c "rm -rf /target/* && tar xzf /backup/scan_output.tar.gz -C /target"
+        info "Restoring scan output..."
+        if _is_host_mode; then
+            mkdir -p "${WIREGHOST_DATA_DIR}/output"
+            tar xzf "${INNER_DIR}/scan_output.tar.gz" -C "${WIREGHOST_DATA_DIR}/output"
+        else
+            docker run --rm \
+                -v "demon-in-the-wire_scan_output:/target" \
+                -v "$(cd "$INNER_DIR" && pwd):/backup:ro" \
+                alpine sh -c "rm -rf /target/* && tar xzf /backup/scan_output.tar.gz -C /target"
+        fi
         ok "Scan output restored"
     fi
 
-    # Restore report assets volume
+    # Restore report assets
     if [ -f "${INNER_DIR}/report_assets.tar.gz" ]; then
-        info "Restoring report assets volume..."
-        docker run --rm \
-            -v "demon-in-the-wire_report_assets:/target" \
-            -v "$(cd "$INNER_DIR" && pwd):/backup:ro" \
-            alpine sh -c "rm -rf /target/* && tar xzf /backup/report_assets.tar.gz -C /target"
+        info "Restoring report assets..."
+        if _is_host_mode; then
+            mkdir -p "${WIREGHOST_DATA_DIR}/assets"
+            tar xzf "${INNER_DIR}/report_assets.tar.gz" -C "${WIREGHOST_DATA_DIR}/assets"
+        else
+            docker run --rm \
+                -v "demon-in-the-wire_report_assets:/target" \
+                -v "$(cd "$INNER_DIR" && pwd):/backup:ro" \
+                alpine sh -c "rm -rf /target/* && tar xzf /backup/report_assets.tar.gz -C /target"
+        fi
         ok "Report assets restored"
     fi
 
     # Bring up full stack
     info "Starting Wire_Ghost stack..."
-    docker compose up -d
+    _compose_cmd up -d
+
+    if _is_host_mode; then
+        systemctl start wireghost-worker wireghost-beat
+    fi
 
     info "Running migrations..."
     sleep 5
-    docker compose exec -T api python manage.py migrate --noinput 2>/dev/null || true
+    _compose_cmd exec -T api python manage.py migrate --noinput 2>/dev/null || true
 
     printf "\n"
     ok "Restore complete — all services started"
@@ -252,23 +306,39 @@ cmd_update() {
     cmd_backup
 
     info "Pulling latest base images..."
-    docker compose pull db redis portal 2>/dev/null || true
+    _compose_cmd pull db redis portal 2>/dev/null || true
 
     info "Rebuilding application containers..."
-    docker compose build --pull
+    _compose_cmd build --pull
+
+    if _is_host_mode; then
+        info "Updating host Python dependencies..."
+        local VENV_DIR="${PROJECT_DIR}/.venv"
+        if [ -d "$VENV_DIR" ]; then
+            "$VENV_DIR/bin/pip" install --no-cache-dir -r web_portal/requirements.txt -q
+            "$VENV_DIR/bin/pip" install --no-cache-dir -e . -q
+        fi
+    fi
 
     info "Applying update..."
-    docker compose up -d
+    if _is_host_mode; then
+        systemctl stop wireghost-beat wireghost-worker 2>/dev/null || true
+    fi
+    _compose_cmd up -d
+
+    if _is_host_mode; then
+        systemctl start wireghost-worker wireghost-beat
+    fi
 
     info "Running database migrations..."
     sleep 5
-    docker compose exec -T api python manage.py migrate --noinput
+    _compose_cmd exec -T api python manage.py migrate --noinput
 
     # Write update status for the web portal
     local STATUS_DIR="${WIREGHOST_LOG_DIR:-./logs}/api"
     mkdir -p "$STATUS_DIR"
     local NEW_VER
-    NEW_VER=$(docker compose exec -T api python -c 'from wireghost import __version__; print(__version__)' 2>/dev/null || echo 'unknown')
+    NEW_VER=$(_compose_cmd exec -T api python -c 'from wireghost import __version__; print(__version__)' 2>/dev/null || echo 'unknown')
     printf '{"completed_at": "%s", "version": "%s"}\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NEW_VER" > "$STATUS_DIR/update-status.json"
     rm -f "$FLAG_FILE"
@@ -282,11 +352,18 @@ cmd_update() {
 # logs — Stream or tail service logs
 # ══════════════════════════════════════════════════════════════════════
 cmd_logs() {
+    require_env
     local SERVICE="${1:-}"
-    if [ -n "$SERVICE" ]; then
-        docker compose logs -f --tail=100 "$SERVICE"
+
+    if _is_host_mode && { [ "$SERVICE" = "worker" ] || [ "$SERVICE" = "beat" ]; }; then
+        journalctl -fu "wireghost-${SERVICE}" --no-pager -n 100
+    elif [ -n "$SERVICE" ]; then
+        _compose_cmd logs -f --tail=100 "$SERVICE"
     else
-        docker compose logs -f --tail=100
+        if _is_host_mode; then
+            info "Docker logs (api, portal, db, redis):"
+        fi
+        _compose_cmd logs -f --tail=100
     fi
 }
 
@@ -294,11 +371,12 @@ cmd_logs() {
 # reset-password — Reset a user's password
 # ══════════════════════════════════════════════════════════════════════
 cmd_reset_password() {
+    require_env
     local USERNAME="${1:-}"
     [ -n "$USERNAME" ] || die "Usage: wg-ctl reset-password <username>"
 
     info "Resetting password for user: ${USERNAME}"
-    docker compose exec api python manage.py changepassword "$USERNAME"
+    _compose_cmd exec api python manage.py changepassword "$USERNAME"
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -356,7 +434,7 @@ cmd_certs() {
             ok "New certificate generated"
 
             info "Restarting portal to load new certificate..."
-            docker compose restart portal
+            _compose_cmd restart portal
             ok "Portal restarted"
             ;;
 
@@ -369,9 +447,35 @@ cmd_certs() {
 # ══════════════════════════════════════════════════════════════════════
 # stop / start / restart
 # ══════════════════════════════════════════════════════════════════════
-cmd_stop()    { docker compose stop;    ok "Wire_Ghost stopped"; }
-cmd_start()   { docker compose start;   ok "Wire_Ghost started"; }
-cmd_restart() { docker compose restart; ok "Wire_Ghost restarted"; }
+cmd_stop() {
+    require_env
+    if _is_host_mode; then
+        systemctl stop wireghost-beat wireghost-worker 2>/dev/null || true
+        ok "Host services stopped"
+    fi
+    _compose_cmd stop
+    ok "Wire_Ghost stopped"
+}
+
+cmd_start() {
+    require_env
+    _compose_cmd start
+    if _is_host_mode; then
+        systemctl start wireghost-worker wireghost-beat
+        ok "Host services started"
+    fi
+    ok "Wire_Ghost started"
+}
+
+cmd_restart() {
+    require_env
+    if _is_host_mode; then
+        systemctl restart wireghost-worker wireghost-beat
+        ok "Host services restarted"
+    fi
+    _compose_cmd restart
+    ok "Wire_Ghost restarted"
+}
 
 # ══════════════════════════════════════════════════════════════════════
 # uninstall — Remove everything
@@ -380,6 +484,8 @@ cmd_uninstall() {
     local CONFIRM="${1:-}"
     [ "$CONFIRM" = "--confirm" ] || die "This will destroy ALL data. Add --confirm to proceed."
 
+    require_env
+
     warn "This will remove all Wire_Ghost containers, volumes, data, and configuration."
     if [ -t 0 ]; then
         printf "  Type 'DELETE' to confirm: "
@@ -387,12 +493,40 @@ cmd_uninstall() {
         [ "$ANSWER" = "DELETE" ] || die "Aborted"
     fi
 
+    if _is_host_mode; then
+        info "Stopping and removing systemd services..."
+        systemctl stop wireghost-beat wireghost-worker 2>/dev/null || true
+        systemctl disable wireghost-beat wireghost-worker 2>/dev/null || true
+        rm -f /etc/systemd/system/wireghost-worker.service
+        rm -f /etc/systemd/system/wireghost-beat.service
+        systemctl daemon-reload
+        ok "systemd units removed"
+
+        if [ -d "${PROJECT_DIR}/.venv" ]; then
+            rm -rf "${PROJECT_DIR}/.venv"
+            ok "Python venv removed"
+        fi
+    fi
+
     info "Stopping and removing containers and volumes..."
-    docker compose down -v
+    _compose_cmd down -v
 
     info "Removing local files..."
     rm -rf certs/ logs/ backups/
     rm -f .env nginx.conf
+
+    if _is_host_mode && [ -d "${PROJECT_DIR}/data" ]; then
+        if [ -t 0 ]; then
+            printf "  Remove scan data (${PROJECT_DIR}/data)? [y/N] "
+            read -r _rm_data
+            if [[ "$_rm_data" =~ ^[Yy] ]]; then
+                rm -rf "${PROJECT_DIR}/data"
+                ok "Scan data removed"
+            else
+                info "Scan data kept at ${PROJECT_DIR}/data"
+            fi
+        fi
+    fi
 
     ok "Wire_Ghost uninstalled"
     printf "  Project files (source code) remain intact.\n"
@@ -403,7 +537,8 @@ cmd_uninstall() {
 # shell — Open Django shell in api container
 # ══════════════════════════════════════════════════════════════════════
 cmd_shell() {
-    docker compose exec api python manage.py shell
+    require_env
+    _compose_cmd exec api python manage.py shell
 }
 
 # ══════════════════════════════════════════════════════════════════════

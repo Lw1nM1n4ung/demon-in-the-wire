@@ -13,6 +13,7 @@
 #   • Built Docker images (wireghost api/worker/beat)
 #   • Docker network (wireghost_net)
 #   • Local files (certs/, logs/, backups/, .env, nginx.conf)
+#   • Host mode: systemd units, Python venv, scan data directory
 #   • Optionally: the entire project directory
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -77,7 +78,17 @@ cat <<'ART'
    \_/\_/  |_||_|  \___| \___||_||_|\___//__/  \__|
 ART
 printf "${NC}\n"
-printf "  ${BOLD}${RED}Docker Remover${NC}\n\n"
+printf "  ${BOLD}${RED}Complete Remover${NC}\n\n"
+
+# ── Detect install mode ─────────────────────────────────────────────
+INSTALL_MODE="docker"
+if [ -f .env ]; then
+    INSTALL_MODE=$(grep '^INSTALL_MODE=' .env 2>/dev/null | cut -d= -f2 || echo "docker")
+    WIREGHOST_DATA_DIR=$(grep '^WIREGHOST_DATA_DIR=' .env 2>/dev/null | cut -d= -f2 || echo "")
+fi
+if [ "$INSTALL_MODE" = "host" ]; then
+    info "Host mode installation detected"
+fi
 
 # ── Safety confirmation ──────────────────────────────────────────────
 if ! $FORCE; then
@@ -98,14 +109,56 @@ step() {
 }
 
 # ══════════════════════════════════════════════════════════════════════
+# Step 0: Remove host-mode services (if applicable)
+# ══════════════════════════════════════════════════════════════════════
+if [ "$INSTALL_MODE" = "host" ]; then
+    step "Removing host-mode services"
+
+    for unit in wireghost-beat wireghost-worker; do
+        if systemctl is-enabled "$unit" 2>/dev/null; then
+            systemctl stop "$unit" 2>/dev/null || true
+            systemctl disable "$unit" 2>/dev/null || true
+            rm -f "/etc/systemd/system/${unit}.service"
+            ok "Removed systemd unit: ${unit}"
+        fi
+    done
+    systemctl daemon-reload 2>/dev/null || true
+
+    if [ -d "${PROJECT_DIR}/.venv" ]; then
+        VENV_SIZE=$(du -sh "${PROJECT_DIR}/.venv" 2>/dev/null | cut -f1 || echo "?")
+        rm -rf "${PROJECT_DIR}/.venv"
+        ok "Removed Python venv (${VENV_SIZE})"
+    fi
+
+    if [ -n "$WIREGHOST_DATA_DIR" ] && [ -d "$WIREGHOST_DATA_DIR" ]; then
+        if $KEEP_DATA; then
+            warn "Keeping scan data at ${WIREGHOST_DATA_DIR} (--keep-data)"
+        else
+            DATA_SIZE=$(du -sh "$WIREGHOST_DATA_DIR" 2>/dev/null | cut -f1 || echo "?")
+            if $FORCE || confirm "Remove scan data directory (${WIREGHOST_DATA_DIR}, ${DATA_SIZE})?"; then
+                rm -rf "$WIREGHOST_DATA_DIR"
+                ok "Removed scan data (${DATA_SIZE})"
+            fi
+        fi
+    fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════
 # Step 1: Stop all containers
 # ══════════════════════════════════════════════════════════════════════
 step "Stopping Wire_Ghost containers"
 
 if [ -f docker-compose.yml ]; then
-    RUNNING=$(docker compose ps -q 2>/dev/null | wc -l || echo 0)
+    _compose_rm() {
+        if [ "$INSTALL_MODE" = "host" ] && [ -f docker-compose.host.yml ]; then
+            docker compose -f docker-compose.yml -f docker-compose.host.yml "$@"
+        else
+            docker compose "$@"
+        fi
+    }
+    RUNNING=$(_compose_rm ps -q 2>/dev/null | wc -l || echo 0)
     if [ "$RUNNING" -gt 0 ]; then
-        docker compose down --timeout 30 2>/dev/null || true
+        _compose_rm down --timeout 30 2>/dev/null || true
         ok "Compose stack stopped"
     else
         info "No running containers"
@@ -285,6 +338,10 @@ printf "  ${BOLD}What was removed:${NC}\n"
 printf "    • Docker containers, networks\n"
 $KEEP_DATA && printf "    • Docker images (volumes preserved)\n" || printf "    • Docker volumes and images\n"
 printf "    • Local config (.env, nginx.conf, certs/, logs/)\n"
+if [ "$INSTALL_MODE" = "host" ]; then
+    printf "    • systemd units (wireghost-worker, wireghost-beat)\n"
+    printf "    • Python virtual environment (.venv/)\n"
+fi
 printf "\n"
 printf "  ${BOLD}To reinstall:${NC}\n"
 

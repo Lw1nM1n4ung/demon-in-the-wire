@@ -1,0 +1,46 @@
+# Wire_Ghost — Host Mode Override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
+#
+# In host mode, scan tools (nmap, nuclei, masscan, etc.) run natively
+# and Celery worker/beat run as systemd services instead of containers.
+# Only the web portal, database, Redis, and nginx stay in Docker.
+#
+# Prerequisites:
+#   - WIREGHOST_DATA_DIR set in .env (absolute path, created by install.sh)
+#   - Host tools installed (install.sh --host handles this)
+#   - systemd units installed for wireghost-worker and wireghost-beat
+
+services:
+  # Disable worker and beat — they run as systemd services on the host
+  worker:
+    profiles: ["full"]
+
+  beat:
+    profiles: ["full"]
+
+  # Expose DB and Redis on localhost for host worker/beat
+  db:
+    ports:
+      - "127.0.0.1:3306:3306"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+# Rebind named volumes to host directories so the host worker and
+# Docker containers share the same files.  The service-level mounts
+# (scan_output:/data/output) stay unchanged — only the backing store
+# switches from Docker-managed to a host bind mount.
+volumes:
+  scan_output:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WIREGHOST_DATA_DIR:?Set WIREGHOST_DATA_DIR in .env}/output
+  report_assets:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WIREGHOST_DATA_DIR:?Set WIREGHOST_DATA_DIR in .env}/assets

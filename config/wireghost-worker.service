@@ -1,0 +1,24 @@
+[Unit]
+Description=Wire_Ghost Celery Worker
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__PROJECT_DIR__/web_portal
+EnvironmentFile=__PROJECT_DIR__/.env
+Environment=PYTHONPATH=__PROJECT_DIR__/web_portal:__PROJECT_DIR__/src
+Environment=PATH=__VENV_DIR__/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=__VENV_DIR__/bin/celery -A wireghost_web worker -l info -c 4 --prefetch-multiplier 1 -Q celery,scans,reports --logfile=__LOG_DIR__/celery-worker.log
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
