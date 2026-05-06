@@ -1,7 +1,11 @@
-"""Phase 1 -- Host discovery via nmap ping-sweep and fping.
+"""Phase 1 -- Host discovery via nmap ping-sweep, fping, and ARP scanning.
 
 Large CIDRs (/16 or bigger) are auto-partitioned into /24 subnets
 and scanned in parallel batches for faster discovery.
+
+When arp-scan and/or netdiscover are available, Layer 2 ARP scanning
+runs alongside ICMP probes to catch firewall-silent hosts and collect
+MAC address + vendor data.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ import asyncio
 import ipaddress
 import logging
 import re
+import shutil
 from typing import TYPE_CHECKING
 
 from wireghost.utils.network import is_valid_ipv4
@@ -88,15 +93,57 @@ def _partition_target(target: str) -> list[str]:
         return [target]
 
 
+async def _arp_scan_subnet(
+    subnet: str,
+    timeout: int,
+    live_ips: set[str],
+    mac_vendor: dict[str, tuple[str, str]],
+    has_arpscan: bool,
+    has_netdiscover: bool,
+) -> None:
+    """Run arp-scan and/or netdiscover on a subnet, collect MAC/vendor."""
+    from wireghost.parsers.arpscan import parse_arpscan
+    from wireghost.parsers.netdiscover import parse_netdiscover
+
+    if has_arpscan:
+        arp_result = await run_tool(
+            ["arp-scan", "--plain", subnet],
+            timeout=timeout,
+            label=f"arp-scan {subnet}",
+        )
+        if arp_result.returncode == 0:
+            for ip, mac, vendor in parse_arpscan(arp_result.stdout):
+                if is_valid_ipv4(ip):
+                    live_ips.add(ip)
+                    mac_vendor[ip] = (mac, vendor)
+
+    if has_netdiscover:
+        nd_result = await run_tool(
+            ["netdiscover", "-P", "-N", "-r", subnet, "-c", "3"],
+            timeout=timeout,
+            label=f"netdiscover -r {subnet}",
+        )
+        if nd_result.returncode == 0:
+            for ip, mac, vendor in parse_netdiscover(nd_result.stdout):
+                if is_valid_ipv4(ip):
+                    live_ips.add(ip)
+                    if ip not in mac_vendor:
+                        mac_vendor[ip] = (mac, vendor)
+
+
 async def _scan_subnet(
     subnet: str,
     timeout: int,
     live_ips: set[str],
+    mac_vendor: dict[str, tuple[str, str]],
     semaphore: asyncio.Semaphore,
     index: int,
     total: int,
+    run_arp: bool,
+    has_arpscan: bool,
+    has_netdiscover: bool,
 ) -> None:
-    """Scan a single subnet with nmap + fping, guarded by semaphore."""
+    """Scan a single subnet with nmap + fping + optional ARP tools."""
     async with semaphore:
         if total > 1:
             log.info("Scanning subnet %d/%d: %s", index, total, subnet)
@@ -123,15 +170,26 @@ async def _scan_subnet(
                 if is_valid_ipv4(ip):
                     live_ips.add(ip)
 
+        # ARP scanning (Layer 2) — supplements ICMP with MAC/vendor data
+        if run_arp and (has_arpscan or has_netdiscover):
+            await _arp_scan_subnet(
+                subnet, timeout, live_ips, mac_vendor,
+                has_arpscan, has_netdiscover,
+            )
 
-async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
-    """Run nmap -sn and fping against *config.target*, merge and return live IPs.
+
+async def discover_hosts(
+    config: ScanConfig, tree: OutputTree,
+) -> tuple[list[str], dict[str, tuple[str, str]]]:
+    """Run nmap -sn, fping, and ARP tools against *config.target*.
 
     Large CIDRs (>/24) are automatically partitioned into /24 subnets
     and scanned concurrently (limited by config.parallelism).
 
-    The merged, deduplicated, sorted list is written to
-    ``<tree.live_host_dir>/live.txt``.
+    Returns
+    -------
+    tuple[list[str], dict[str, tuple[str, str]]]
+        Sorted list of live IPs and a dict mapping ip → (mac_address, vendor).
     """
     target = config.target
     timeout = int(config.tool_timeout)
@@ -148,7 +206,25 @@ async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
             config.parallelism,
         )
 
+    # Check ARP tool availability
+    has_arpscan = shutil.which("arp-scan") is not None
+    has_netdiscover = shutil.which("netdiscover") is not None
+    run_arp = not config.skip_arp_scan and (has_arpscan or has_netdiscover)
+
+    if config.skip_arp_scan:
+        log.info("ARP scanning disabled (skip_arp_scan=True)")
+    elif not has_arpscan and not has_netdiscover:
+        log.info("ARP tools not found (arp-scan, netdiscover) — skipping Layer 2 discovery")
+    else:
+        tools = []
+        if has_arpscan:
+            tools.append("arp-scan")
+        if has_netdiscover:
+            tools.append("netdiscover")
+        log.info("ARP scanning enabled: %s", ", ".join(tools))
+
     live_ips: set[str] = set()
+    mac_vendor: dict[str, tuple[str, str]] = {}
 
     # Cap discovery parallelism for large targets — scanning 256 /24 subnets
     # with 10 concurrent nmap+fping processes overwhelms the scanner and network.
@@ -165,10 +241,16 @@ async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
 
     # Scan all subnets concurrently (semaphore-limited)
     tasks = [
-        _scan_subnet(subnet, timeout, live_ips, semaphore, i + 1, total)
+        _scan_subnet(
+            subnet, timeout, live_ips, mac_vendor, semaphore,
+            i + 1, total, run_arp, has_arpscan, has_netdiscover,
+        )
         for i, subnet in enumerate(subnets)
     ]
-    await asyncio.gather(*tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for i, result in enumerate(results):
+        if isinstance(result, BaseException):
+            log.error("Subnet scan %s failed: %s", subnets[i], result, exc_info=result)
 
     # Compute the "error / unreachable" set: every IP in the input CIDR(s)
     # that did NOT answer either nmap or fping. Only makes sense when the
@@ -196,6 +278,16 @@ async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
         ("\n".join(sorted_unreachable) + "\n") if sorted_unreachable else "",
         encoding="utf-8",
     )
+
+    # Persist ARP results for diagnostics
+    if mac_vendor:
+        arp_txt = tree.live_host_dir / "arp_results.txt"
+        lines = []
+        for ip in sorted(mac_vendor, key=_ip_sort_key):
+            mac, vendor = mac_vendor[ip]
+            lines.append(f"{ip}\t{mac}\t{vendor}")
+        arp_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        log.info("ARP discovery: %d host(s) with MAC/vendor data", len(mac_vendor))
 
     # The returned list (feeds the rest of the pipeline) depends on the
     # scan_unresponsive flag. Default behaviour is unchanged — only alive
@@ -227,4 +319,4 @@ async def discover_hosts(config: ScanConfig, tree: OutputTree) -> list[str]:
     )
 
     log.info("Discovery found %d live host(s) across %d subnet(s)", len(sorted_ips), total)
-    return sorted_ips
+    return sorted_ips, mac_vendor

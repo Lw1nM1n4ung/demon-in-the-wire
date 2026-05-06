@@ -12,11 +12,17 @@ from wireghost.models.report import ScanReport
 from wireghost.models.scan import Host
 from wireghost.pipeline.cms_scan import scan_cms
 from wireghost.pipeline.discovery import discover_hosts
+from wireghost.pipeline.ldap_enum import enumerate_ldap
+from wireghost.pipeline.msf_scan import scan_msf
+from wireghost.pipeline.nfs_enum import enumerate_nfs
 from wireghost.pipeline.portscan import scan_host
 from wireghost.pipeline.service_enum import enumerate_services
 from wireghost.pipeline.netexec_enum import enumerate_netexec
 from wireghost.pipeline.smb_enum import enumerate_smb
+from wireghost.pipeline.snmp_enum import enumerate_snmp
+from wireghost.pipeline.tls_audit import audit_tls
 from wireghost.pipeline.vulnscan import scan_host_vulns
+from wireghost.pipeline.web_crawl import crawl_host
 from wireghost.pipeline.webdetect import probe_host
 from wireghost.pipeline.webscreenshot import screenshot_host
 from wireghost.utils.fs import build_output_tree
@@ -24,6 +30,24 @@ from wireghost.utils.log import setup_logging
 from wireghost.utils.process import check_tools
 
 log = logging.getLogger("wireghost")
+
+
+def _dedup_findings(findings: list[Finding]) -> list[Finding]:
+    """Remove duplicate findings across tools based on host:port:vuln identity."""
+    seen: set[str] = set()
+    deduped: list[Finding] = []
+    for f in findings:
+        if f.cve:
+            key = f"{f.host}:{f.port}:{f.cve}"
+        else:
+            title_norm = f.title.lower()
+            for prefix in ("nmap: ", "msf ", "nxc: "):
+                title_norm = title_norm.removeprefix(prefix)
+            key = f"{f.host}:{f.port}:{title_norm[:60]}"
+        if key not in seen:
+            seen.add(key)
+            deduped.append(f)
+    return deduped
 
 
 async def run_pipeline(config: ScanConfig) -> ScanReport:
@@ -55,7 +79,7 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
 
     # Log availability of optional fallback scanners
     import shutil
-    for tool in ("naabu", "masscan"):
+    for tool in ("naabu", "masscan", "sslscan", "showmount", "snmpget", "snmpwalk", "katana", "ldapsearch", "msfconsole"):
         if shutil.which(tool):
             log.info("Optional scanner available: %s", tool)
         else:
@@ -63,7 +87,7 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
 
     # --- Phase 2: Discovery ---
     log.info("Phase 2: Host discovery")
-    live_ips = await discover_hosts(config, tree)
+    live_ips, mac_vendor_map = await discover_hosts(config, tree)
 
     if not live_ips:
         log.warning("No live hosts discovered -- nothing to scan")
@@ -85,33 +109,59 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         """Run the full scan pipeline for a single host."""
         # Phase 3: Port scan (with fallback chain)
         host = await scan_host(ip, config, tree, sem)
+
+        # Enrich with ARP data from discovery phase
+        mac, vendor = mac_vendor_map.get(ip, ("", ""))
+        if mac:
+            host.mac_address = mac
+        if vendor:
+            host.vendor = vendor
+
         if not host.open_ports:
             log.info("[%s] No open ports — skipping web/vuln phases", ip)
-            return host, []
+            snmp_findings = await enumerate_snmp(host, config, tree, sem)
+            return host, snmp_findings
 
         # Phase 4: Web detection
         await probe_host(host, config, tree, sem)
 
-        # Phases 4b-5: CMS, service enum, SMB enum, vuln scan, screenshots — parallel
+        # Phase 4a: Web crawl (sequential — nuclei needs the URLs)
+        crawl_findings = await crawl_host(host, config, tree, sem)
+
+        # Phases 4b-5: All enumeration + vuln scan in parallel
         svc_task = (
             enumerate_services(host, config, tree, sem)
             if config.service_enum
             else asyncio.sleep(0, result=[])
         )
-        cms_findings, svc_findings, smb_findings, nxc_findings, findings, _ = (
-            await asyncio.gather(
-                scan_cms(host, config, tree, sem),
-                svc_task,
-                enumerate_smb(host, config, tree, sem),
-                enumerate_netexec(host, config, tree, sem),
-                scan_host_vulns(host, config, tree, sem),
-                screenshot_host(host, config, tree, sem),
-            )
+        results = await asyncio.gather(
+            scan_cms(host, config, tree, sem),
+            svc_task,
+            enumerate_smb(host, config, tree, sem),
+            enumerate_netexec(host, config, tree, sem),
+            audit_tls(host, config, tree, sem),
+            enumerate_snmp(host, config, tree, sem),
+            enumerate_nfs(host, config, tree, sem),
+            enumerate_ldap(host, config, tree, sem),
+            scan_host_vulns(host, config, tree, sem),
+            screenshot_host(host, config, tree, sem),
+            scan_msf(host, config, tree, sem),
+            return_exceptions=True,
         )
-        findings.extend(svc_findings)
-        findings.extend(cms_findings)
-        findings.extend(smb_findings)
-        findings.extend(nxc_findings)
+
+        task_names = [
+            "cms", "service_enum", "smb", "netexec", "tls",
+            "snmp", "nfs", "ldap", "vulnscan", "screenshot", "msf",
+        ]
+        findings: list[Finding] = list(crawl_findings)
+        for name, result in zip(task_names, results):
+            if isinstance(result, Exception):
+                log.error("[%s] %s scanner failed", ip, name, exc_info=result)
+                continue
+            if isinstance(result, list):
+                findings.extend(result)
+
+        findings = _dedup_findings(findings)
 
         log.info(
             "[%s] Pipeline done: %d port(s), %d endpoint(s), %d finding(s)",
@@ -126,9 +176,9 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
 
     hosts: list[Host] = []
     all_findings: list[Finding] = []
-    for r in results:
+    for i, r in enumerate(results):
         if isinstance(r, Exception):
-            log.error("Host pipeline failed: %s", r)
+            log.error("Host pipeline failed for %s", live_ips[i], exc_info=r)
             continue
         host, findings = r
         hosts.append(host)
@@ -160,11 +210,12 @@ def _generate_reports(config: ScanConfig, report: ScanReport, tree: object) -> N
     """Try to generate reports; log a warning if the report engine is unavailable."""
     try:
         from wireghost.reports import ReportEngine  # type: ignore[attr-defined]
-
-        engine = ReportEngine(config, tree)
-        engine.generate(report)
-    except (ImportError, AttributeError):
+    except ImportError:
         log.warning(
             "Report engine not available -- skipping report generation. "
             "Install report renderers to enable this feature."
         )
+        return
+
+    engine = ReportEngine(config, tree)
+    engine.generate(report)

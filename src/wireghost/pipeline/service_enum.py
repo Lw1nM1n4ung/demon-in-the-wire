@@ -331,7 +331,7 @@ async def enumerate_services(
         checked: set[int] = set()
 
         for port in host.open_ports:
-            svc = port.service.name if port.service else ""
+            svc = port.service_name
             # Skip HTTP — already covered by nuclei + httpx
             if svc in ("http", "https", "http-proxy", "http-alt"):
                 # But check well-known ports

@@ -18,18 +18,29 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("wireghost")
 
-SMB_PORTS = {139, 445}
+_SMB_SERVICE_NAMES = {"microsoft-ds", "netbios-ssn", "smb"}
+_SMB_FALLBACK_PORTS = {139, 445}
+
+
+def _has_smb(host: Host) -> bool:
+    for port in host.open_ports:
+        svc = port.service_name
+        if svc in _SMB_SERVICE_NAMES:
+            return True
+        if not svc and port.number in _SMB_FALLBACK_PORTS:
+            return True
+    return False
 
 
 async def enumerate_smb(
     host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
 ) -> list[Finding]:
-    """Run enum4linux against a host if it has SMB ports open."""
+    """Run enum4linux against a host if it has SMB services detected."""
     async with sem:
         if config.skip_enum4linux:
             return []
 
-        smb_open = any(p.number in SMB_PORTS for p in host.open_ports)
+        smb_open = _has_smb(host)
         if not smb_open:
             return []
 

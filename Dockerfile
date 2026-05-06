@@ -37,12 +37,22 @@ RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/re
     && curl -sL "$GOWITNESS_URL" -o /tools/gowitness \
     && chmod +x /tools/gowitness
 
+# katana (web crawler)
+RUN KATANA_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/katana/releases/latest \
+        | grep -o '"browser_download_url": *"[^"]*linux_amd64.zip"' \
+        | head -1 | cut -d'"' -f4) \
+    && curl -sL "$KATANA_URL" -o katana.zip \
+    && unzip -o katana.zip katana -d /tools/ \
+    && chmod +x /tools/katana && rm katana.zip
+
 # === Stage 2: Final image ===
 FROM python:3.12-slim-bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap fping masscan libpcap0.8 libsnmp40 git rsync libxml2-utils \
+    arp-scan netdiscover \
+    sslscan nfs-common snmp onesixtyone \
     chromium \
     smbclient samba-common-bin ldap-utils perl \
     libnet-ssleay-perl libio-socket-ssl-perl \
@@ -65,6 +75,15 @@ RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
     && chmod +x /usr/local/bin/nikto \
     && rm -rf /opt/nikto/.git
 
+# Install Metasploit Framework (optional, adds ~1.5GB)
+RUN curl -fsSL https://apt.metasploit.com/metasploit-framework.gpg.key \
+        | gpg --dearmor -o /usr/share/keyrings/metasploit.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/metasploit.gpg] https://apt.metasploit.com/ buster main" \
+        > /etc/apt/sources.list.d/metasploit.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends metasploit-framework \
+    && rm -rf /var/lib/apt/lists/*
+
 # Download Metasploit module metadata (exploit matching, ~50MB)
 RUN mkdir -p /opt/msf \
     && curl -sL https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json \
@@ -76,6 +95,7 @@ COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
 COPY --from=tools /tools/httpx /usr/local/bin/httpx
 COPY --from=tools /tools/naabu /usr/local/bin/naabu
 COPY --from=tools /tools/gowitness /usr/local/bin/gowitness
+COPY --from=tools /tools/katana /usr/local/bin/katana
 
 # Install wireghost
 WORKDIR /app
@@ -91,10 +111,17 @@ RUN nuclei -update-templates
 RUN echo "=== Tool verification ===" \
     && nmap --version | head -1 \
     && fping -v 2>&1 | head -1 \
+    && arp-scan --version 2>&1 | head -1 \
+    && (netdiscover -help 2>&1 | head -1 || true) \
     && nuclei -version 2>&1 | head -1 \
     && naabu -version 2>&1 | head -1 \
     && masscan --version 2>&1 | head -1 \
     && gowitness version 2>&1 | head -1 \
+    && sslscan --version 2>&1 | head -1 \
+    && (showmount --version 2>&1 | head -1 || true) \
+    && (snmpwalk -V 2>&1 | head -1 || true) \
+    && katana -version 2>&1 | head -1 \
+    && (msfconsole --version 2>&1 | head -1 || true) \
     && wireghost --version
 
 RUN find / -perm -4000 -type f -exec chmod u-s {} + 2>/dev/null; \

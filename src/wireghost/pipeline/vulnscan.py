@@ -161,7 +161,7 @@ async def _run_nuclei_batched(
         for f in findings:
             f.source = "nuclei_external"
         for f in findings:
-            key = f"{f.template_id}:{f.host_ip}:{f.port}"
+            key = f"{f.template_id}:{f.host}:{f.port}"
             if key not in seen_ids:
                 seen_ids.add(key)
                 all_findings.append(f)
@@ -180,6 +180,39 @@ async def _run_nuclei_batched(
     return all_findings
 
 
+_SERVICE_SCRIPTS: dict[str, list[str]] = {
+    "ssh":       ["ssh-auth-methods", "ssh2-enum-algos", "ssh-hostkey"],
+    "ms-sql":    ["ms-sql-info", "ms-sql-config", "ms-sql-ntlm-info"],
+    "mysql":     ["mysql-info", "mysql-enum", "mysql-databases"],
+    "rdp":       ["rdp-enum-encryption", "rdp-ntlm-info"],
+    "vnc":       ["vnc-info", "vnc-brute"],
+    "ftp":       ["ftp-anon", "ftp-syst", "ftp-bounce"],
+    "smtp":      ["smtp-commands", "smtp-enum-users", "smtp-open-relay"],
+    "dns":       ["dns-zone-transfer", "dns-brute"],
+    "rmi":       ["rmi-dumpregistry"],
+    "oracle":    ["oracle-tns-version"],
+    "memcached": ["memcached-info"],
+    "redis":     ["redis-info"],
+    "mongodb":   ["mongodb-info", "mongodb-databases"],
+    "http":      ["http-enum", "http-methods", "http-title"],
+}
+
+
+def _build_script_arg(host: Host) -> str:
+    """Build nmap --script argument with service-specific scripts added."""
+    extra: set[str] = set()
+    for port in host.open_ports:
+        svc = port.service_name.lower().replace("-", "").replace("_", "")
+        for key, scripts in _SERVICE_SCRIPTS.items():
+            if key.replace("-", "") in svc:
+                extra.update(scripts)
+
+    base = "vuln,default"
+    if extra:
+        base += "," + ",".join(sorted(extra))
+    return base
+
+
 async def run_nmap_vuln(
     host: Host,
     config: ScanConfig,
@@ -195,11 +228,12 @@ async def run_nmap_vuln(
     xml_path = vuln_dir / "nmap_vuln.xml"
 
     port_csv = ",".join(str(p.number) for p in open_ports)
+    script_arg = _build_script_arg(host)
 
     result = await run_tool(
         [
             "nmap",
-            "--script=vuln,default",
+            f"--script={script_arg}",
             "-p", port_csv,
             "-Pn",
             "-oX", str(xml_path),
@@ -319,8 +353,8 @@ async def run_searchsploit(
                 if edb and edb not in exploit_ports:
                     exploit_ports[edb] = port_str
                 combined_exploits.append(entry)
-        except (json_mod.JSONDecodeError, Exception):
-            pass
+        except json_mod.JSONDecodeError as exc:
+            log.warning("Failed to parse searchsploit output for %s: %s", software, exc)
 
     # Save ALL accumulated results as one JSON file
     if combined_exploits:
@@ -376,7 +410,7 @@ async def scan_host_vulns(
         findings: list[Finding] = []
         for result in results:
             if isinstance(result, BaseException):
-                log.error("Vuln scan error for %s: %s", host.ip, result)
+                log.error("Vuln scan error for %s: %s", host.ip, result, exc_info=result)
             else:
                 findings.extend(result)
 

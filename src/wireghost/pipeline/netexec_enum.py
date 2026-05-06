@@ -19,7 +19,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("wireghost")
 
-_PORT_PROTOS: dict[int, str] = {
+_SERVICE_PROTOS: dict[str, str] = {
+    "microsoft-ds": "smb",
+    "netbios-ssn": "smb",
+    "ftp": "ftp",
+    "ms-wbt-server": "rdp",
+    "ms-sql-s": "mssql",
+}
+
+_PORT_FALLBACK: dict[int, str] = {
     139: "smb",
     445: "smb",
     21: "ftp",
@@ -42,9 +50,12 @@ async def enumerate_netexec(
 
         protos: set[str] = set()
         for p in host.open_ports:
-            proto = _PORT_PROTOS.get(p.number)
+            svc = p.service_name
+            proto = _SERVICE_PROTOS.get(svc)
             if proto:
                 protos.add(proto)
+            elif not svc and p.number in _PORT_FALLBACK:
+                protos.add(_PORT_FALLBACK[p.number])
 
         if not protos:
             return []
