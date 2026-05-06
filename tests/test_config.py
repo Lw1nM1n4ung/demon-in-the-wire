@@ -48,6 +48,14 @@ class TestScanConfigDefaults:
         assert cfg.skip_netexec is False
         assert cfg.skip_screenshots is False
 
+    def test_default_skip_msf_scan_false(self):
+        cfg = ScanConfig()
+        assert cfg.skip_msf_scan is False
+
+    def test_default_msf_metadata_path(self):
+        cfg = ScanConfig()
+        assert cfg.msf_metadata_path == "/opt/msf/modules_metadata_base.json"
+
 
 class TestScanConfigYaml:
     def test_yaml_override(self, tmp_path):
@@ -132,6 +140,16 @@ class TestScanConfigEnv:
         monkeypatch.setenv("WIREGHOST_PARALLELISM", "not_a_number")
         cfg = ScanConfig.load()
         assert cfg.parallelism == 10
+
+    def test_env_skip_msf_scan(self, monkeypatch):
+        monkeypatch.setenv("WIREGHOST_SKIP_MSF_SCAN", "true")
+        cfg = ScanConfig.load()
+        assert cfg.skip_msf_scan is True
+
+    def test_env_msf_metadata_path(self, monkeypatch):
+        monkeypatch.setenv("WIREGHOST_MSF_METADATA_PATH", "/custom/path.json")
+        cfg = ScanConfig.load()
+        assert cfg.msf_metadata_path == "/custom/path.json"
 
 
 class TestScanConfigOverrides:

@@ -20,8 +20,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("wireghost")
 
-# Ports commonly associated with HTTP/HTTPS
-_COMMON_HTTP_PORTS = {80, 443, 8080, 8443, 8000, 8888, 9090, 3000, 5000}
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=5)
 
 

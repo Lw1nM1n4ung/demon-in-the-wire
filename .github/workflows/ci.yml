@@ -46,3 +46,31 @@ jobs:
 
       - name: Run installer tests
         run: bash tests/test_installers.sh
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build worker image
+        run: docker build -f web_portal/Dockerfile -t wireghost:worker-test .
+
+      - name: Build web image
+        run: docker build -f web_portal/Dockerfile.web -t wireghost:web-test .
+
+      - name: Trivy scan worker
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'wireghost:worker-test'
+          format: 'table'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+      - name: Trivy scan web
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'wireghost:web-test'
+          format: 'table'
+          severity: 'CRITICAL'
+          exit-code: '1'

@@ -52,3 +52,21 @@ class TokenHeaderAuth(authentication.BaseAuthentication):
 
     def authenticate_header(self, request):
         return 'Token'
+
+
+try:
+    from drf_spectacular.extensions import OpenApiAuthenticationExtension
+
+    class TokenHeaderAuthScheme(OpenApiAuthenticationExtension):
+        target_class = 'scanner.authentication.TokenHeaderAuth'
+        name = 'TokenAuth'
+
+        def get_security_definition(self, auto_schema):
+            return {
+                'type': 'apiKey',
+                'in': 'header',
+                'name': 'Authorization',
+                'description': 'Token wg_<40-char-value>',
+            }
+except ImportError:
+    pass

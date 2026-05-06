@@ -194,6 +194,8 @@ def _persist_results(scan, report):
             hostname=h.hostname or '',
             os=h.os or '',
             status=h.status or 'up',
+            mac_address=getattr(h, 'mac_address', '') or '',
+            vendor=getattr(h, 'vendor', '') or '',
             ports_count=len(h.open_ports),
             findings_count=0,  # updated below
         )

@@ -8,7 +8,10 @@ from django.utils import timezone as dj_tz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 
-from scanner.bot.auth import resolve_user, link_account, unlink_account, check_rate_limit
+from scanner.bot.auth import (
+    resolve_user, resolve_user_cached, check_perm_cached,
+    link_account, unlink_account, check_rate_limit, invalidate_user_cache,
+)
 from scanner.bot.reply_keyboards import main_reply_kb
 from scanner.bot.formatting import (
     esc, severity_emoji, severity_line, short_id,
@@ -33,7 +36,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user = update.effective_user
     if not tg_user:
         return
-    user = await sync_to_async(resolve_user)(tg_user.id)
+    user = await sync_to_async(resolve_user_cached)(tg_user.id)
     if user is None:
         await update.message.reply_text(
             '\U0001f512 <b>Authorized Users Only</b>\n\n'
@@ -71,8 +74,9 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f'❌ {esc(msg)}', parse_mode=HTML)
 
     if ok and update.effective_chat.type in ('group', 'supergroup'):
+        invalidate_user_cache(tg_user.id)
         cfg = await sync_to_async(SiteConfig.get)()
-        user = await sync_to_async(resolve_user)(tg_user.id)
+        user = await sync_to_async(resolve_user_cached)(tg_user.id)
         if not cfg.telegram_shared_chat_id and user and user.role == 'owner':
             await update.message.reply_text(
                 '📢 Use this group for Wire_Ghost notifications?\n'
@@ -100,7 +104,7 @@ async def cmd_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_rate_limit(UNLOCK_RATE_PREFIX, str(tg_user.id), UNLOCK_RATE_MAX, UNLOCK_RATE_TTL):
         await update.message.reply_text('Rate limit reached. Try again in a few minutes.')
         return
-    user = await sync_to_async(resolve_user)(tg_user.id)
+    user = await sync_to_async(resolve_user_cached)(tg_user.id)
     if user is None:
         await update.message.reply_text(
             'Your Telegram is not linked to any Wire_Ghost account.\n'
@@ -483,7 +487,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     if user:
-        has_write = await sync_to_async(user.has_permission)('scan:write')
+        has_write = await sync_to_async(check_perm_cached)(user, 'scan:write')
         if has_write:
             lines.extend([
                 '',
@@ -969,25 +973,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user = context.user_data.get('wg_user')
 
-    if not user:
-        tg_user = update.effective_user
-        if tg_user:
-            user = await sync_to_async(resolve_user)(tg_user.id)
-            if user:
-                context.user_data['wg_user'] = user
-
     entry = BUTTON_MAP.get(text)
     if entry:
         func_name, perm = entry
-        if perm and not user:
-            await update.message.reply_text(
-                'Not linked. Use <code>/link &lt;code&gt;</code> first.',
-                parse_mode=HTML,
-            )
-            return
-        if perm and user:
-            has_perm = await sync_to_async(user.has_permission)(perm)
-            if not has_perm:
+        if not user or perm:
+            tg_user = update.effective_user
+            if tg_user:
+                def _auth():
+                    from scanner.bot.auth import resolve_and_check
+                    return resolve_and_check(tg_user.id, perm)
+                user, has_perm = await sync_to_async(_auth)()
+                if user:
+                    context.user_data['wg_user'] = user
+            if not user and perm:
+                await update.message.reply_text(
+                    'Not linked. Use <code>/link &lt;code&gt;</code> first.',
+                    parse_mode=HTML,
+                )
+                return
+            if perm and not has_perm:
                 await update.message.reply_text(
                     f'Permission denied (requires <code>{perm}</code>).',
                     parse_mode=HTML,

@@ -51,6 +51,14 @@ class ScanConfig:
     skip_enum4linux: bool = False
     skip_nikto: bool = False
     skip_netexec: bool = False
+    skip_arp_scan: bool = False
+    skip_tls_audit: bool = False
+    skip_snmp_enum: bool = False
+    skip_nfs_enum: bool = False
+    skip_ldap_enum: bool = False
+    skip_web_crawl: bool = False
+    skip_msf_scan: bool = False
+    msf_metadata_path: str = "/opt/msf/modules_metadata_base.json"
 
     @classmethod
     def load(
@@ -140,6 +148,14 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "skip_enum4linux": "skip_enum4linux",
         "skip_nikto": "skip_nikto",
         "skip_netexec": "skip_netexec",
+        "skip_arp_scan": "skip_arp_scan",
+        "skip_tls_audit": "skip_tls_audit",
+        "skip_snmp_enum": "skip_snmp_enum",
+        "skip_nfs_enum": "skip_nfs_enum",
+        "skip_ldap_enum": "skip_ldap_enum",
+        "skip_web_crawl": "skip_web_crawl",
+        "skip_msf_scan": "skip_msf_scan",
+        "msf_metadata_path": "msf_metadata_path",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -173,6 +189,14 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_SKIP_ENUM4LINUX": ("skip_enum4linux", bool),
         "WIREGHOST_SKIP_NIKTO": ("skip_nikto", bool),
         "WIREGHOST_SKIP_NETEXEC": ("skip_netexec", bool),
+        "WIREGHOST_SKIP_ARP_SCAN": ("skip_arp_scan", bool),
+        "WIREGHOST_SKIP_TLS_AUDIT": ("skip_tls_audit", bool),
+        "WIREGHOST_SKIP_SNMP_ENUM": ("skip_snmp_enum", bool),
+        "WIREGHOST_SKIP_NFS_ENUM": ("skip_nfs_enum", bool),
+        "WIREGHOST_SKIP_LDAP_ENUM": ("skip_ldap_enum", bool),
+        "WIREGHOST_SKIP_WEB_CRAWL": ("skip_web_crawl", bool),
+        "WIREGHOST_SKIP_MSF_SCAN": ("skip_msf_scan", bool),
+        "WIREGHOST_MSF_METADATA_PATH": ("msf_metadata_path", str),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

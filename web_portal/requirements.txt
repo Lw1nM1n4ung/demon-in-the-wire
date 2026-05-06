@@ -3,7 +3,8 @@ djangorestframework>=3.15
 django-cors-headers>=4.3
 mysqlclient>=2.2
 pymysql>=1.1
-cryptography>=42.0
+cryptography>=44.0
+pyopenssl>=25.0.0
 gunicorn>=22.0
 celery[redis]>=5.4
 uuid_utils>=0.9
@@ -16,6 +17,7 @@ requests>=2.31
 beautifulsoup4>=4.12
 lxml>=5.1
 pyyaml>=6.0
+drf-spectacular>=0.29
 # Runtime deps of the wireghost scanner package — Celery worker imports
 # scanner.tasks → wireghost.pipeline → rich / aiohttp / defusedxml. These
 # are declared in pyproject.toml but we don't `pip install -e .` the

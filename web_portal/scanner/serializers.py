@@ -81,7 +81,7 @@ class HostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Host
-        fields = ['id', 'ip', 'hostname', 'os', 'status', 'ports_count', 'findings_count', 'ports', 'technologies', 'screenshots']
+        fields = ['id', 'ip', 'hostname', 'os', 'status', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'ports', 'technologies', 'screenshots']
 
 
 class HostListSerializer(serializers.ModelSerializer):
@@ -90,7 +90,7 @@ class HostListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Host
-        fields = ['id', 'ip', 'hostname', 'os', 'ports_count', 'findings_count', 'scan', 'screenshot_count', 'thumbnail_url']
+        fields = ['id', 'ip', 'hostname', 'os', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'scan', 'screenshot_count', 'thumbnail_url']
 
     def get_thumbnail_url(self, obj):
         first = next(iter(obj.screenshots.all()), None)
@@ -147,6 +147,11 @@ class ScanCreateSerializer(serializers.Serializer):
     enum4linux = serializers.BooleanField(required=False, default=True)
     skip_nikto = serializers.BooleanField(required=False, default=False)
     skip_netexec = serializers.BooleanField(required=False, default=False)
+    skip_tls_audit = serializers.BooleanField(required=False, default=False)
+    skip_snmp_enum = serializers.BooleanField(required=False, default=False)
+    skip_nfs_enum = serializers.BooleanField(required=False, default=False)
+    skip_ldap_enum = serializers.BooleanField(required=False, default=False)
+    skip_web_crawl = serializers.BooleanField(required=False, default=False)
 
     def validate_target(self, value):
         """Block SSRF targets: localhost, link-local, cloud metadata, non-routable."""
