@@ -90,19 +90,19 @@ RUN mkdir -p /opt/msf \
        -o /opt/msf/modules_metadata_base.json \
     && echo "MSF metadata: $(python3 -c "import json; print(len(json.load(open('/opt/msf/modules_metadata_base.json'))))" 2>/dev/null || echo 'download failed') modules"
 
-# Copy pre-built tool binaries
-COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
-COPY --from=tools /tools/httpx /usr/local/bin/httpx
-COPY --from=tools /tools/naabu /usr/local/bin/naabu
-COPY --from=tools /tools/gowitness /usr/local/bin/gowitness
-COPY --from=tools /tools/katana /usr/local/bin/katana
-
-# Install wireghost
+# Install wireghost (before Go binaries — pip httpx overwrites /usr/local/bin/httpx)
 WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 COPY wireghost.example.yml .
 RUN pip install --no-cache-dir . netexec
+
+# Copy pre-built Go binaries (AFTER pip to avoid overwrite)
+COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
+COPY --from=tools /tools/httpx /usr/local/bin/httpx
+COPY --from=tools /tools/naabu /usr/local/bin/naabu
+COPY --from=tools /tools/gowitness /usr/local/bin/gowitness
+COPY --from=tools /tools/katana /usr/local/bin/katana
 
 # Download nuclei templates
 RUN nuclei -update-templates

@@ -593,6 +593,19 @@ def enforce_scan_deadlines():
     return {'cancelled': cancelled}
 
 
+@shared_task(soft_time_limit=30, time_limit=45)
+def probe_tools_on_worker():
+    """Probe scan tools on the worker where they're actually installed.
+
+    Writes results directly to cache so the API can serve them immediately.
+    """
+    from django.core.cache import cache as django_cache
+    from scanner.tools_health import probe_all_local, CACHE_KEY, CACHE_TTL
+    results = probe_all_local()
+    django_cache.set(CACHE_KEY, results, CACHE_TTL)
+    return results
+
+
 @shared_task(bind=True, max_retries=2, soft_time_limit=30)
 def send_mfa_otp(self, chat_id, otp_code, username):
     from scanner.models import SiteConfig

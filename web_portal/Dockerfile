@@ -32,12 +32,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjson-perl libxml-writer-perl libxml-libxml-perl \
     && rm -rf /var/lib/apt/lists/*
 
-# ProjectDiscovery binaries + gowitness
-COPY --from=pd-tools /tools/nuclei    /usr/local/bin/nuclei
-COPY --from=pd-tools /tools/httpx     /usr/local/bin/httpx
-COPY --from=pd-tools /tools/naabu     /usr/local/bin/naabu
-COPY --from=pd-tools /tools/gowitness /usr/local/bin/gowitness
-
 # searchsploit (exploitdb) — shallow clone to keep image size reasonable.
 RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb \
     && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
@@ -48,10 +42,16 @@ RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
     && chmod +x /usr/local/bin/nikto \
     && rm -rf /opt/nikto/.git
 
-# Python deps
+# Python deps (before Go binaries — pip httpx overwrites /usr/local/bin/httpx)
 COPY web_portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec@v1.5.1
+
+# ProjectDiscovery Go binaries + gowitness (AFTER pip to avoid overwrite)
+COPY --from=pd-tools /tools/nuclei    /usr/local/bin/nuclei
+COPY --from=pd-tools /tools/httpx     /usr/local/bin/httpx
+COPY --from=pd-tools /tools/naabu     /usr/local/bin/naabu
+COPY --from=pd-tools /tools/gowitness /usr/local/bin/gowitness
 
 # App code
 COPY web_portal/ .
