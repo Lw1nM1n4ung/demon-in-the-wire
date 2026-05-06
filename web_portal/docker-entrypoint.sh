@@ -17,7 +17,7 @@ if [ -d "$ARCHIVE_DIR" ]; then
     for f in "$ARCHIVE_DIR"/*.tar.gz; do
         [ -f "$f" ] || continue
         echo "[entrypoint] Extracting nuclei templates: $(basename "$f")"
-        tar xzf "$f" -C "$TEMPLATE_DIR"
+        tar xzf "$f" --no-same-owner --no-same-permissions -C "$TEMPLATE_DIR" 2>/dev/null || true
     done
     count=$(find "$TEMPLATE_DIR" -name '*.yaml' -o -name '*.yml' | wc -l)
     echo "[entrypoint] Nuclei external templates: $count template(s) in $TEMPLATE_DIR"
