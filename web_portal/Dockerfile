@@ -51,7 +51,7 @@ RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
 # Python deps
 COPY web_portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir netexec
+RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec@v1.5.1
 
 # App code
 COPY web_portal/ .
