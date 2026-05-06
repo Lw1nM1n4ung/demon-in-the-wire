@@ -309,7 +309,11 @@ cmd_update() {
     _compose_cmd pull db redis portal 2>/dev/null || true
 
     info "Rebuilding application containers..."
-    _compose_cmd build --pull
+    if _is_host_mode; then
+        _compose_cmd build --pull api portal
+    else
+        _compose_cmd build --pull
+    fi
 
     if _is_host_mode; then
         info "Updating host Python dependencies..."
@@ -470,10 +474,13 @@ cmd_start() {
 cmd_restart() {
     require_env
     if _is_host_mode; then
-        systemctl restart wireghost-worker wireghost-beat
-        ok "Host services restarted"
+        systemctl stop wireghost-beat wireghost-worker 2>/dev/null || true
     fi
     _compose_cmd restart
+    if _is_host_mode; then
+        systemctl start wireghost-worker wireghost-beat
+        ok "Host services restarted"
+    fi
     ok "Wire_Ghost restarted"
 }
 

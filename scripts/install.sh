@@ -580,14 +580,12 @@ install_host_tools() {
             tools_fail=$((tools_fail + 1))
         fi
     done
-    for cmd in nxc; do
-        if "$VENV_DIR/bin/python" -c "import shutil; exit(0 if shutil.which('nxc') or shutil.which('netexec') else 1)" 2>/dev/null; then
-            tools_ok=$((tools_ok + 1))
-        else
-            warn "  netexec — not in venv PATH"
-            tools_fail=$((tools_fail + 1))
-        fi
-    done
+    if [ -x "$VENV_DIR/bin/nxc" ] || [ -x "$VENV_DIR/bin/netexec" ]; then
+        tools_ok=$((tools_ok + 1))
+    else
+        warn "  netexec — not in venv"
+        tools_fail=$((tools_fail + 1))
+    fi
     ok "Tools: ${tools_ok} available, ${tools_fail} missing"
 }
 
@@ -803,7 +801,6 @@ create_dirs() {
 harden_docker_daemon() {
     local DAEMON_JSON="/etc/docker/daemon.json"
     if [ ! -f "$DAEMON_JSON" ]; then
-        step "Hardening Docker daemon"
         cat > "$DAEMON_JSON" <<'DAEMONJSON'
 {
   "log-driver": "json-file",
@@ -1006,7 +1003,7 @@ detect_wsl
 select_install_mode
 
 if [ "$INSTALL_MODE" = "host" ]; then
-    _TOTAL=10
+    _TOTAL=9
 else
     _TOTAL=7
 fi
