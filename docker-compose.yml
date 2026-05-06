@@ -189,7 +189,7 @@ services:
       retries: 3
       start_period: 30s
     cap_drop: [ALL]
-    cap_add: [NET_RAW, NET_ADMIN, CHOWN, SETGID, SETUID]
+    cap_add: [NET_RAW, NET_ADMIN, DAC_OVERRIDE, CHOWN, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     deploy:
       resources:
