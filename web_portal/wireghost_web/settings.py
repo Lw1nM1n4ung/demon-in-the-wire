@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'drf_spectacular',
     'corsheaders',
     'django_celery_beat',
     'scanner',
@@ -245,6 +246,7 @@ MFA_HOURLY_EMAIL_CAP = 10
 
 # REST Framework
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -271,6 +273,18 @@ REST_FRAMEWORK = {
         'user': '120/min',
         'anon': '30/min',
     },
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Wire_Ghost API',
+    'DESCRIPTION': 'Vulnerability scanning platform REST API',
+    'VERSION': '2.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SCHEMA': None,
+    'SERVERS': [
+        {'url': f'{_PORTAL_PROTO}://{_PORTAL_HOST}:{_PORTAL_PORT}',
+         'description': 'Wire_Ghost instance'},
+    ],
 }
 
 # Logging — RotatingFileHandler writes to /app/logs which is bind-mounted
