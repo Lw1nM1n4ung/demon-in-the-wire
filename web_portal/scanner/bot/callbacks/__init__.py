@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from scanner.bot.auth import resolve_user
+from scanner.bot.auth import resolve_and_check
 
 log = logging.getLogger('scanner.bot')
 
@@ -76,28 +76,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == 'noop':
         return
 
-    tg_user_id = query.from_user.id
-    user = await sync_to_async(resolve_user)(tg_user_id)
-    if not user:
-        await query.edit_message_text(
-            'Not linked. Use <code>/link &lt;code&gt;</code> first.',
-            parse_mode=HTML,
-        )
-        return
-
     parts = query.data.split(':')
     entity = parts[0]
     rest = [p for p in parts[1:] if p]
 
     perm = PERMS.get(entity)
-    if perm is not None:
-        has_perm = await sync_to_async(user.has_permission)(perm)
-        if not has_perm:
+
+    tg_user_id = query.from_user.id
+    user = context.user_data.get('wg_user')
+    if user is not None and perm is None:
+        pass
+    else:
+        user, has_perm = await sync_to_async(resolve_and_check)(tg_user_id, perm)
+        if not user:
+            await query.edit_message_text(
+                'Not linked. Use <code>/link &lt;code&gt;</code> first.',
+                parse_mode=HTML,
+            )
+            return
+        if perm is not None and not has_perm:
             await query.edit_message_text(
                 f'Permission denied (requires <code>{perm}</code>).',
                 parse_mode=HTML,
             )
             return
+        context.user_data['wg_user'] = user
 
     handler = ROUTES.get(entity)
     if handler:

@@ -28,6 +28,12 @@ UNLOCK_RATE_PREFIX = 'tg:unlock:'
 UNLOCK_RATE_MAX = 3
 UNLOCK_RATE_TTL = 900
 
+USER_CACHE_PREFIX = 'tg:user:'
+USER_CACHE_TTL = 60
+
+PERM_CACHE_PREFIX = 'tg:perm:'
+PERM_CACHE_TTL = 120
+
 
 def resolve_user(tg_user_id: int) -> Optional[User]:
     try:
@@ -39,6 +45,44 @@ def resolve_user(tg_user_id: int) -> Optional[User]:
     if not prefs.user.is_active:
         return None
     return prefs.user
+
+
+def resolve_user_cached(tg_user_id: int) -> Optional[User]:
+    cache_key = f'{USER_CACHE_PREFIX}{tg_user_id}'
+    uid = cache.get(cache_key)
+    if uid is not None:
+        if uid == '':
+            return None
+        try:
+            return User.objects.get(pk=uid, is_active=True)
+        except User.DoesNotExist:
+            cache.delete(cache_key)
+    user = resolve_user(tg_user_id)
+    cache.set(cache_key, str(user.pk) if user else '', USER_CACHE_TTL)
+    return user
+
+
+def check_perm_cached(user: User, perm_code: str) -> bool:
+    cache_key = f'{PERM_CACHE_PREFIX}{user.pk}:{perm_code}'
+    result = cache.get(cache_key)
+    if result is not None:
+        return result
+    has_perm = user.has_permission(perm_code)
+    cache.set(cache_key, has_perm, PERM_CACHE_TTL)
+    return has_perm
+
+
+def resolve_and_check(tg_user_id: int, perm_code: str | None) -> tuple[Optional[User], bool]:
+    user = resolve_user_cached(tg_user_id)
+    if user is None:
+        return None, False
+    if perm_code is None:
+        return user, True
+    return user, check_perm_cached(user, perm_code)
+
+
+def invalidate_user_cache(tg_user_id: int):
+    cache.delete(f'{USER_CACHE_PREFIX}{tg_user_id}')
 
 
 def link_account(*, tg_user_id: int, tg_chat_id: int, code: str) -> tuple[bool, str]:
@@ -76,6 +120,7 @@ def link_account(*, tg_user_id: int, tg_chat_id: int, code: str) -> tuple[bool, 
     cache.delete(reverse_key)
     cache.delete(fail_key)
 
+    invalidate_user_cache(tg_user_id)
     AuditLog.log(user.username, 'telegram.link', f'Telegram user {tg_user_id} linked', 'config')
     return True, f'Linked to {user.username} (role: {user.role})'
 
@@ -94,6 +139,7 @@ def unlink_account(tg_user_id: int) -> tuple[bool, str]:
     prefs.telegram_enabled = False
     prefs.save(update_fields=['telegram_user_id', 'telegram_chat_id', 'telegram_enabled'])
 
+    invalidate_user_cache(tg_user_id)
     AuditLog.log(username, 'telegram.unlink', f'Telegram user {tg_user_id} unlinked', 'config')
     return True, f'Unlinked from {username}.'
 
@@ -130,7 +176,14 @@ def require_permission(perm_code: str):
                 await update.message.reply_text('Rate limit exceeded. Slow down.')
                 return
 
-            user = await sync_to_async(resolve_user)(tg_user.id)
+            def _auth():
+                user, ok = resolve_and_check(tg_user.id, perm_code)
+                if user:
+                    AuditLog.log(user.username, 'telegram.cmd',
+                                 update.message.text or '', 'telegram')
+                return user, ok
+
+            user, has_perm = await sync_to_async(_auth)()
 
             if user is None:
                 await update.message.reply_text(
@@ -140,20 +193,12 @@ def require_permission(perm_code: str):
                 )
                 return
 
-            has_perm = await sync_to_async(user.has_permission)(perm_code)
             if not has_perm:
                 await update.message.reply_text(
                     f'Permission denied (requires <code>{perm_code}</code>)',
                     parse_mode='HTML',
                 )
                 return
-
-            await sync_to_async(AuditLog.log)(
-                user.username,
-                'telegram.cmd',
-                update.message.text or '',
-                'telegram',
-            )
 
             context.user_data['wg_user'] = user
             return await func(update, context)

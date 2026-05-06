@@ -79,6 +79,7 @@ async def _dashboard(query, user):
 
 async def handle_help(query, user, rest, context):
     from asgiref.sync import sync_to_async
+    from scanner.bot.auth import check_perm_cached
 
     lines = [
         '🛡 <b>Wire_Ghost Bot</b>',
@@ -96,7 +97,7 @@ async def handle_help(query, user, rest, context):
     ]
 
     if user:
-        has_write = await sync_to_async(user.has_permission)('scan:write')
+        has_write = await sync_to_async(check_perm_cached)(user, 'scan:write')
         if has_write:
             lines.extend([
                 '',
