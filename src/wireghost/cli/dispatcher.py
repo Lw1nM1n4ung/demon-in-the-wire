@@ -1,8 +1,9 @@
 """Wire_Ghost CLI — thin dispatcher that mounts domain apps."""
 from __future__ import annotations
 
-import asyncio
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -30,107 +31,6 @@ def main(
     if version:
         typer.echo(f"wireghost {__version__}")
         raise typer.Exit()
-
-
-# ── Local scan pipeline (the core command) ────────────────────────────
-
-
-@app.command()
-def scan(
-    target: str = typer.Argument(..., help="Target IP, CIDR range, or hostname"),
-    output_dir: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Output directory (default: ./output)"
-    ),
-    parallelism: int = typer.Option(
-        10, "--parallelism", "-j", help="Max concurrent host scans"
-    ),
-    skip_nuclei: bool = typer.Option(
-        False, "--skip-nuclei", help="Skip nuclei web scanning"
-    ),
-    skip_vuln: bool = typer.Option(
-        False, "--skip-vuln", help="Skip nmap vuln scanning"
-    ),
-    timeout: float = typer.Option(
-        3600.0, "--timeout", "-t", help="Per-tool timeout in seconds"
-    ),
-    report_formats: Optional[str] = typer.Option(
-        None,
-        "--formats",
-        "-f",
-        help="Comma-separated report formats (html,docx,xlsx)",
-    ),
-    title: Optional[str] = typer.Option(
-        None, "--title", help="Report title"
-    ),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable debug logging"
-    ),
-    nuclei_templates: Optional[str] = typer.Option(
-        None, "--nuclei-templates", help="Path to external nuclei template directory"
-    ),
-    nuclei_default_templates: bool = typer.Option(
-        True, "--nuclei-default-templates/--no-nuclei-default-templates",
-        help="Include default nuclei templates (disable to run external only)"
-    ),
-    skip_screenshots: bool = typer.Option(
-        False, "--skip-screenshots", help="Skip web endpoint screenshots"
-    ),
-    skip_enum4linux: bool = typer.Option(
-        False, "--skip-enum4linux", help="Skip SMB/NetBIOS enumeration via enum4linux"
-    ),
-    skip_nikto: bool = typer.Option(
-        False, "--skip-nikto", help="Skip Nikto web server scanning"
-    ),
-    skip_netexec: bool = typer.Option(
-        False, "--skip-netexec", help="Skip NetExec network enumeration"
-    ),
-    config_file: Optional[Path] = typer.Option(
-        None, "--config", "-c", help="Path to wireghost.yml config"
-    ),
-) -> None:
-    """Run a full security scan against TARGET."""
-    from wireghost.config import ScanConfig
-    from wireghost.pipeline.orchestrator import run_pipeline
-
-    overrides: dict[str, object] = {
-        "output_dir": output_dir,
-        "parallelism": parallelism,
-        "skip_nuclei": skip_nuclei,
-        "skip_vuln": skip_vuln,
-        "tool_timeout": timeout,
-        "verbose": verbose,
-        "nuclei_templates": nuclei_templates,
-        "nuclei_default_templates": nuclei_default_templates,
-        "skip_screenshots": skip_screenshots,
-        "skip_enum4linux": skip_enum4linux,
-        "skip_nikto": skip_nikto,
-        "skip_netexec": skip_netexec,
-    }
-    if report_formats is not None:
-        overrides["report_formats"] = [
-            f.strip() for f in report_formats.split(",") if f.strip()
-        ]
-    if title is not None:
-        overrides["report_title"] = title
-
-    cfg = ScanConfig.load(
-        target=target,
-        config_path=config_file,
-        **overrides,
-    )
-
-    cfg.output_dir = cfg.output_dir.resolve()
-    console.print(f"[bold green]Wire_Ghost v{__version__}[/]")
-    console.print(f"Target: [bold]{cfg.target}[/]")
-    console.print(f"Output: {cfg.output_dir}")
-
-    report = asyncio.run(run_pipeline(cfg))
-
-    console.print()
-    console.print("[bold green]Scan complete![/]")
-    console.print(f"  Hosts:    {len(report.hosts)}")
-    console.print(f"  Ports:    {report.total_open_ports}")
-    console.print(f"  Findings: {len(report.findings)}")
 
 
 # ── Config commands ───────────────────────────────────────────────────
@@ -222,10 +122,37 @@ def _config_show() -> None:
     console.print(table)
 
 
+# ── Deprecation stubs (old commands, now under domain apps) ──────
+
+
+@app.command("report", hidden=True)
+def report_deprecated(
+    scan_dir: str = typer.Argument(..., help="Scan directory"),
+) -> None:
+    """[DEPRECATED] Use 'wireghost report generate' instead."""
+    console.print(
+        "[bold yellow]Deprecated:[/] 'wireghost report' → use "
+        "'wireghost report generate <scan-dir>'"
+    )
+    subprocess.run([sys.executable, "-m", "wireghost", "report", "generate", scan_dir])
+
+
+@app.command("update", hidden=True)
+def update_deprecated() -> None:
+    """[DEPRECATED] Use 'wireghost system update' instead."""
+    console.print(
+        "[bold yellow]Deprecated:[/] 'wireghost update' → use "
+        "'wireghost system update'"
+    )
+
+
 # ── Mount domain apps ─────────────────────────────────────────────────
 
 from wireghost.cli.auth import app as auth_app
 app.add_typer(auth_app, name="auth", help="Authentication")
+
+from wireghost.cli.scan import app as scan_app
+app.add_typer(scan_app, name="scan", help="Run a local scan pipeline")
 
 from wireghost.cli.scans import app as scans_app
 app.add_typer(scans_app, name="scans", help="Manage portal scans")
