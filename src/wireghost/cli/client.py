@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,7 @@ class WireGhostClient:
         self._token = token or os.environ.get("WIREGHOST_TOKEN")
         if not self._token:
             self._token = self._read_cached_token()
+        _ensure_config_dir()
         self._cookies: dict[str, str] = self._read_cached_session()
 
     # ── token cache ──────────────────────────────────────────────
@@ -77,8 +78,6 @@ class WireGhostClient:
         if p.exists():
             try:
                 data = json.loads(p.read_text())
-                import time
-
                 if data.get("expires_at", 0) > time.time():
                     return data.get("cookies", {})
             except (json.JSONDecodeError, OSError):
@@ -151,8 +150,6 @@ class WireGhostClient:
         result = login_resp.json()
 
         # Cache session cookies
-        import time
-
         session_cookies = dict(login_resp.cookies)
         self._write_cached_session(
             session_cookies,

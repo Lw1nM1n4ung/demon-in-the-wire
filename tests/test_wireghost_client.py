@@ -2,15 +2,12 @@
 """Tests for WireGhostClient."""
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from wireghost.cli.client import WireGhostClient, _config_dir, get_client
+from wireghost.cli.client import WireGhostClient, _config_dir
 
 
 class TestConfigDir:
