@@ -32,7 +32,7 @@ def _has_tmux() -> bool:
 
 @app.callback(invoke_without_command=True)
 def scan(
-    target: str = typer.Argument(..., help="Target IP, CIDR range, or hostname"),
+    target: str = typer.Option(..., "--target", help="Target IP, CIDR range, or hostname"),
     output_dir: Optional[Path] = typer.Option(
         None, "--output", "-o", help="Output directory (default: ./output)"
     ),
@@ -46,6 +46,10 @@ def scan(
     skip_nikto: bool = typer.Option(False, "--skip-nikto"),
     skip_netexec: bool = typer.Option(False, "--skip-netexec"),
     skip_msf: bool = typer.Option(False, "--skip-msf"),
+    skip_brute_force: bool = typer.Option(
+        False, "--skip-brute-force",
+        help="Exclude brute-force scripts (nmap vnc-brute, dns-brute, etc.)",
+    ),
     timeout: float = typer.Option(3600.0, "--timeout", "-t", help="Per-tool timeout"),
     report_formats: Optional[str] = typer.Option(
         None, "--formats", "-f", help="Comma-separated report formats"
@@ -103,6 +107,7 @@ def scan(
         "skip_nikto": skip_nikto,
         "skip_netexec": skip_netexec,
         "skip_msf_scan": skip_msf,
+        "skip_brute_force": skip_brute_force,
         "tool_timeout": timeout,
         "verbose": verbose,
         "nuclei_templates": nuclei_templates,
@@ -142,6 +147,8 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
         cmd_parts.append("--skip-nuclei")
     if cfg.skip_vuln:
         cmd_parts.append("--skip-vuln")
+    if cfg.skip_brute_force:
+        cmd_parts.append("--skip-brute-force")
     if cfg.verbose:
         cmd_parts.append("--verbose")
 

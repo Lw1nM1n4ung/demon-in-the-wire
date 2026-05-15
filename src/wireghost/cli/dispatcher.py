@@ -86,6 +86,7 @@ def _config_init() -> None:
             "service_enum: true\n"
             "skip_nuclei: false\n"
             "skip_vuln: false\n"
+            "skip_brute_force: false\n"
             "tool_timeout: 3600\n"
             "report_formats:\n"
             "  - html\n"
@@ -195,3 +196,6 @@ app.add_typer(dashboard_app, name="dashboard", help="Dashboard stats and screens
 
 from wireghost.cli.support import app as support_app
 app.add_typer(support_app, name="support-bundle", help="Generate support diagnostic bundle")
+
+from wireghost.cli.deploy import app as deploy_app
+app.add_typer(deploy_app, name="deploy", help="Deploy to a remote host via SSH")

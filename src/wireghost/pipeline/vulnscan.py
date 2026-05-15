@@ -198,14 +198,26 @@ _SERVICE_SCRIPTS: dict[str, list[str]] = {
 }
 
 
-def _build_script_arg(host: Host) -> str:
-    """Build nmap --script argument with service-specific scripts added."""
+_BRUTE_SCRIPTS: set[str] = {"vnc-brute", "dns-brute", "http-brute", "ftp-brute",
+                           "smtp-brute", "pop3-brute", "imap-brute",
+                           "telnet-brute", "ssh-brute"}
+
+
+def _build_script_arg(host: Host, config: ScanConfig | None = None) -> str:
+    """Build nmap --script argument with service-specific scripts added.
+
+    When *config.skip_brute_force* is True, brute-force scripts are excluded.
+    """
+    skip_brute = config.skip_brute_force if config else False
     extra: set[str] = set()
     for port in host.open_ports:
         svc = port.service_name.lower().replace("-", "").replace("_", "")
         for key, scripts in _SERVICE_SCRIPTS.items():
             if key.replace("-", "") in svc:
-                extra.update(scripts)
+                for script in scripts:
+                    if skip_brute and script in _BRUTE_SCRIPTS:
+                        continue
+                    extra.add(script)
 
     base = "vuln,default"
     if extra:
@@ -228,7 +240,7 @@ async def run_nmap_vuln(
     xml_path = vuln_dir / "nmap_vuln.xml"
 
     port_csv = ",".join(str(p.number) for p in open_ports)
-    script_arg = _build_script_arg(host)
+    script_arg = _build_script_arg(host, config)
 
     result = await run_tool(
         [

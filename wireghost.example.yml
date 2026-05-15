@@ -1,0 +1,21 @@
+# Wire_Ghost configuration
+# target: "192.168.1.0/24"
+output_dir: "./output"
+parallelism: 10
+version_detect: true
+os_detect: true
+service_enum: true
+skip_nuclei: false
+skip_vuln: false
+skip_msf_scan: false
+skip_brute_force: false
+tool_timeout: 3600
+msf_metadata_path: "/opt/msf/modules_metadata_base.json"
+nuclei_templates: "/opt/nuclei-external-templates"
+nuclei_default_templates: true
+report_formats:
+  - html
+  - docx
+  - xlsx
+report_title: "Security Assessment Summary Report"
+verbose: false
