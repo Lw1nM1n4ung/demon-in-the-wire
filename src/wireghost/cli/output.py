@@ -46,6 +46,11 @@ def echo_keyvalue(pairs: list[tuple[str, Any]]) -> None:
         console.print(f"{key:<{max_key + 2}}{val}")
 
 
-def check_json_flag() -> bool:
-    """Check if --json was passed by inspecting sys.argv."""
-    return "--json" in sys.argv
+def check_json_flag(json_output: bool = False) -> bool:
+    """Return True if --json output mode is active.
+
+    Prefer the explicit *json_output* parameter (wired from an @app.callback()
+    --json option).  Falls back to inspecting sys.argv so modules that haven't
+    been updated yet still work.
+    """
+    return json_output or "--json" in sys.argv

@@ -14,6 +14,8 @@ from wireghost.cli.output import (
 
 app = typer.Typer(name="scans", help="Manage portal scans")
 
+_json_mode: bool = False
+
 
 @app.callback()
 def scans_callback(
@@ -21,7 +23,8 @@ def scans_callback(
         False, "--json", help="Machine-readable JSON output"
     ),
 ) -> None:
-    del json_output  # handled by check_json_flag() via sys.argv
+    global _json_mode
+    _json_mode = json_output
 
 
 @app.command("list")
@@ -42,7 +45,7 @@ def list_scans(
         resp.raise_for_status()
         data = resp.json()
         results = data if isinstance(data, list) else data.get("results", data)
-        if check_json_flag():
+        if check_json_flag(json_output=_json_mode):
             echo_json(results)
             return
         echo_table(
@@ -66,7 +69,7 @@ def show_scan(
         resp = client.get(f"/scans/{scan_id}/")
         resp.raise_for_status()
         data = resp.json()
-        if check_json_flag():
+        if check_json_flag(json_output=_json_mode):
             echo_json(data)
             return
         echo_keyvalue([
@@ -108,7 +111,7 @@ def scan_findings(
         resp.raise_for_status()
         data = resp.json()
         results = data if isinstance(data, list) else data.get("results", data)
-        if check_json_flag():
+        if check_json_flag(json_output=_json_mode):
             echo_json(results)
             return
         echo_table(
@@ -133,7 +136,7 @@ def scan_hosts(
         resp.raise_for_status()
         data = resp.json()
         results = data if isinstance(data, list) else data.get("results", data)
-        if check_json_flag():
+        if check_json_flag(json_output=_json_mode):
             echo_json(results)
             return
         echo_table(
@@ -157,7 +160,7 @@ def scan_topology(
         resp = client.get(f"/scans/{scan_id}/topology/")
         resp.raise_for_status()
         data = resp.json()
-        if check_json_flag():
+        if check_json_flag(json_output=_json_mode):
             echo_json(data)
             return
         console.print(f"[bold]Topology for {scan_id[:8]}...[/]")

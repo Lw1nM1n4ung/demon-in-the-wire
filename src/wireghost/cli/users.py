@@ -1,8 +1,6 @@
 """wireghost users — user management."""
 from __future__ import annotations
 
-import sys
-
 import typer
 
 from wireghost.cli.client import get_client
@@ -73,23 +71,14 @@ def create_user(
     username: str = typer.Option(..., "--username", help="Username"),
     role: str = typer.Option(..., "--role", help="owner, engineer, or viewer"),
     email: str = typer.Option("", "--email", help="Email address"),
-    password: str = typer.Option("", "--password", help="Password (warning: shell history)"),
     password_prompt: bool = typer.Option(
         False, "--password-prompt", help="Interactive password input"
     ),
 ) -> None:
     """Create a new user."""
     client = get_client()
-
-    if password_prompt or (not password):
-        import getpass
-        password = getpass.getpass("Password: ")
-    elif password:
-        console.print(
-            "[bold yellow]Warning:[/] passing passwords on the command line may "
-            "expose them in shell history. Use --password-prompt for interactive input.",
-            file=sys.stderr,
-        )
+    import getpass
+    password = getpass.getpass("Password: ")
 
     try:
         resp = client.post("/auth/users/create/", json={
