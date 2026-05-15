@@ -168,3 +168,78 @@ def scan_topology(
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
+
+
+@app.command("create")
+def create_scan(
+    target: str = typer.Argument(..., help="Target IP, CIDR, or hostname"),
+    policy: str = typer.Option("", "--policy", help="Policy name"),
+    title: str = typer.Option("", "--title", help="Scan title"),
+) -> None:
+    """Create and queue a new portal-managed scan."""
+    client = get_client()
+    body: dict = {"target": target}
+    if policy:
+        body["policy"] = policy
+    if title:
+        body["title"] = title
+    try:
+        resp = client.post("/scans/", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        console.print(f"[bold green]Scan created:[/] {data.get('id', '?')}")
+        console.print(f"  Target: {target}")
+        console.print(f"  Status: {data.get('status', '?')}")
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command("cancel")
+def cancel_scan(
+    scan_id: str = typer.Argument(..., help="Scan UUID"),
+) -> None:
+    """Cancel a running or queued scan."""
+    client = get_client()
+    try:
+        resp = client.post(f"/scans/{scan_id}/cancel/")
+        resp.raise_for_status()
+        console.print(f"[bold green]Scan cancelled:[/] {scan_id[:8]}...")
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command("clone")
+def clone_scan(
+    scan_id: str = typer.Argument(..., help="Scan UUID to clone"),
+    target: str = typer.Option("", "--target", help="New target"),
+) -> None:
+    """Clone a scan (optionally with a new target)."""
+    client = get_client()
+    body: dict = {}
+    if target:
+        body["target"] = target
+    try:
+        resp = client.post(f"/scans/{scan_id}/clone/", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        console.print(f"[bold green]Scan cloned:[/] {data.get('id', '?')}")
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command("run")
+def run_scan(
+    scan_id: str = typer.Argument(..., help="Scan UUID"),
+) -> None:
+    """Run a queued scan immediately."""
+    client = get_client()
+    try:
+        resp = client.post(f"/scans/{scan_id}/run/")
+        resp.raise_for_status()
+        console.print(f"[bold green]Scan started:[/] {scan_id[:8]}...")
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(code=1)
