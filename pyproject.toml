@@ -8,8 +8,8 @@ version = "2.0.0"
 description = "Wire_Ghost - automated security scanning toolkit"
 requires-python = ">=3.11"
 dependencies = [
-    "typer[all]>=0.9",
-    "rich>=13.0",
+    "typer[all]>=0.9,<0.24",
+    "rich>=13.0,<14.0",
     "python-docx>=1.1",
     "openpyxl>=3.1",
     "jinja2>=3.1",

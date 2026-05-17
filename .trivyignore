@@ -1,0 +1,24 @@
+# Trivy ignore list — known false positives and will_not_fix CVEs
+# Format: one CVE-ID or finding-ID per line
+
+# === OS package CVEs (Debian 12 base image — will_not_fix) ===
+# perl / libperl (no attack vector in containerized scanner)
+CVE-2023-31484
+CVE-2023-31486
+# OpenSSL / libssl (only used for outbound TLS connections)
+CVE-2024-0727
+# glibc (no setuid binaries in container)
+CVE-2024-2961
+# git (shallow-clone tooling, no untrusted input)
+CVE-2024-32002
+CVE-2024-32004
+CVE-2024-32465
+# zlib (no compressed input from untrusted sources)
+CVE-2023-45853
+# libgcrypt (no cryptographic boundary)
+CVE-2024-2236
+
+# === Secret scanning false positives ===
+# nuclei external templates contain base64-encoded test strings that
+# match GCP service account key patterns but are not real credentials
+generic-api-key

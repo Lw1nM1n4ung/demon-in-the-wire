@@ -22,12 +22,12 @@ drf-spectacular>=0.29
 # scanner.tasks → wireghost.pipeline → rich / aiohttp / defusedxml. These
 # are declared in pyproject.toml but we don't `pip install -e .` the
 # package in-container, so list them explicitly.
-rich>=13.0
+rich>=13.0,<14.0
 aiohttp>=3.9
 defusedxml>=0.7
 # CLI (wireghost API client)
 httpx>=0.27
-typer>=0.12
+typer>=0.12,<0.24
 # Real-time System Monitor page (cgroup-scoped CPU/mem/disk/net)
 psutil>=6.0
 python-telegram-bot>=21.0,<22.0
