@@ -421,7 +421,7 @@ class TestReports:
         with p:
             result = runner.invoke(reports_app, ["config"])
         assert result.exit_code == 0
-        assert "Acme Corp" in result.stdout
+        assert "Acme Corp" in result.stderr
 
     def test_logo(self, tmp_path):
         logo_file = tmp_path / "logo.png"
@@ -712,7 +712,7 @@ class TestDispatcher:
         with patch("wireghost.cli.dispatcher.Path.exists", return_value=True):
             result = runner.invoke(dispatcher.app, ["config", "init"])
         assert result.exit_code == 1  # already exists
-        assert "already exists" in result.stdout
+        assert "already exists" in result.stderr
 
     def test_config_show(self):
         mock_cfg = MagicMock()
