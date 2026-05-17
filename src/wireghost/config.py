@@ -58,8 +58,10 @@ class ScanConfig:
     skip_ldap_enum: bool = False
     skip_web_crawl: bool = False
     skip_msf_scan: bool = False
+    skip_getsploit: bool = False
     skip_brute_force: bool = False
     msf_metadata_path: str = "/opt/msf/modules_metadata_base.json"
+    vulners_api_key: str = ""
 
     @classmethod
     def load(
@@ -156,8 +158,10 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "skip_ldap_enum": "skip_ldap_enum",
         "skip_web_crawl": "skip_web_crawl",
         "skip_msf_scan": "skip_msf_scan",
+        "skip_getsploit": "skip_getsploit",
         "skip_brute_force": "skip_brute_force",
         "msf_metadata_path": "msf_metadata_path",
+        "vulners_api_key": "vulners_api_key",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -198,8 +202,10 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_SKIP_LDAP_ENUM": ("skip_ldap_enum", bool),
         "WIREGHOST_SKIP_WEB_CRAWL": ("skip_web_crawl", bool),
         "WIREGHOST_SKIP_MSF_SCAN": ("skip_msf_scan", bool),
+        "WIREGHOST_SKIP_GETSPLOIT": ("skip_getsploit", bool),
         "WIREGHOST_SKIP_BRUTE_FORCE": ("skip_brute_force", bool),
         "WIREGHOST_MSF_METADATA_PATH": ("msf_metadata_path", str),
+        "WIREGHOST_VULNERS_API_KEY": ("vulners_api_key", str),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

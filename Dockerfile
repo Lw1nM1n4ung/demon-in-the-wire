@@ -97,6 +97,9 @@ COPY src/ src/
 COPY wireghost.example.yml .
 RUN pip install --no-cache-dir .
 
+# Install getsploit (Vulners API exploit search)
+RUN pip install --no-cache-dir getsploit
+
 # Install NetExec (nxc) from GitHub — not on PyPI
 RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec.git 2>/dev/null || \
     echo "NetExec install skipped (optional — pipeline will skip nxc if unavailable)"

@@ -46,6 +46,7 @@ def scan(
     skip_nikto: bool = typer.Option(False, "--skip-nikto"),
     skip_netexec: bool = typer.Option(False, "--skip-netexec"),
     skip_msf: bool = typer.Option(False, "--skip-msf"),
+    skip_getsploit: bool = typer.Option(False, "--skip-getsploit"),
     skip_brute_force: bool = typer.Option(
         False, "--skip-brute-force",
         help="Exclude brute-force scripts (nmap vnc-brute, dns-brute, etc.)",
@@ -107,6 +108,7 @@ def scan(
         "skip_nikto": skip_nikto,
         "skip_netexec": skip_netexec,
         "skip_msf_scan": skip_msf,
+        "skip_getsploit": skip_getsploit,
         "skip_brute_force": skip_brute_force,
         "tool_timeout": timeout,
         "verbose": verbose,
@@ -138,7 +140,7 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
     """Launch a detached tmux session with scan pipeline."""
     python = sys.executable
     cmd_parts = [
-        python, "-m", "wireghost", "scan", target,
+        python, "-m", "wireghost", "scan", "--target", target,
         "--no-tmux",
         "-o", str(cfg.output_dir),
         "-j", str(cfg.parallelism),
@@ -147,8 +149,30 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
         cmd_parts.append("--skip-nuclei")
     if cfg.skip_vuln:
         cmd_parts.append("--skip-vuln")
+    if cfg.skip_screenshots:
+        cmd_parts.append("--skip-screenshots")
+    if cfg.skip_enum4linux:
+        cmd_parts.append("--skip-enum4linux")
+    if cfg.skip_nikto:
+        cmd_parts.append("--skip-nikto")
+    if cfg.skip_netexec:
+        cmd_parts.append("--skip-netexec")
+    if cfg.skip_msf_scan:
+        cmd_parts.append("--skip-msf")
+    if cfg.skip_getsploit:
+        cmd_parts.append("--skip-getsploit")
     if cfg.skip_brute_force:
         cmd_parts.append("--skip-brute-force")
+    if cfg.tool_timeout != 3600.0:
+        cmd_parts.extend(["-t", str(cfg.tool_timeout)])
+    if cfg.nuclei_templates:
+        cmd_parts.extend(["--nuclei-templates", cfg.nuclei_templates])
+    if not cfg.nuclei_default_templates:
+        cmd_parts.append("--no-nuclei-default-templates")
+    if cfg.report_formats:
+        cmd_parts.extend(["-f", ",".join(cfg.report_formats)])
+    if cfg.report_title != "Security Assessment Summary Report":
+        cmd_parts.extend(["--title", cfg.report_title])
     if cfg.verbose:
         cmd_parts.append("--verbose")
 

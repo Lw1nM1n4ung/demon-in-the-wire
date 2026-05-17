@@ -20,7 +20,7 @@ from wireghost.deploy.engine import (
     deploy,
 )
 
-runner = CliRunner(mix_stderr=False)
+runner = CliRunner()
 
 
 # ── Dataclass tests ──────────────────────────────────────────────────────
@@ -556,7 +556,7 @@ class TestDeployCli:
     @patch("getpass.getpass", return_value="testpw")
     def test_check_mode_success(self, mock_getpass, mock_check):
         mock_check.return_value = True
-        result = runner.invoke(deploy_app, ["--check", "10.0.0.1"])
+        result = runner.invoke(deploy_app, ["--check", "--target", "10.0.0.1"])
         assert result.exit_code == 0
         mock_check.assert_called_once()
 
@@ -564,19 +564,19 @@ class TestDeployCli:
     @patch("getpass.getpass", return_value="testpw")
     def test_check_mode_failure(self, mock_getpass, mock_check):
         mock_check.return_value = False
-        result = runner.invoke(deploy_app, ["--check", "10.0.0.1"])
+        result = runner.invoke(deploy_app, ["--check", "--target", "10.0.0.1"])
         assert result.exit_code == 1
         mock_check.assert_called_once()
 
     def test_invalid_mode(self):
         result = runner.invoke(deploy_app, [
-            "--mode", "kubernetes", "--check", "10.0.0.1",
+            "--mode", "kubernetes", "--check", "--target", "10.0.0.1",
         ])
         assert result.exit_code == 1
 
     def test_no_build_without_bundle(self):
         result = runner.invoke(deploy_app, [
-            "--no-build", "--check", "10.0.0.1",
+            "--no-build", "--check", "--target", "10.0.0.1",
         ])
         assert result.exit_code == 1
 
@@ -590,7 +590,7 @@ class TestDeployCli:
                 "-i", "/home/user/.ssh/id_ed25519",
                 "--web-host", "scan.example.com",
                 "--web-port", "8080",
-                "10.0.0.1",
+                "--target", "10.0.0.1",
             ])
             assert result.exit_code == 0
 
@@ -613,7 +613,7 @@ class TestDeployCli:
                 "--mode", "host",
                 "--with-msf",
                 "--skip-health",
-                "10.0.0.1",
+                "--target", "10.0.0.1",
             ])
 
         assert result.exit_code == 0
@@ -636,7 +636,7 @@ class TestDeployCli:
             output="Permission denied (publickey)",
         )
 
-        result = runner.invoke(deploy_app, ["10.0.0.1"])
+        result = runner.invoke(deploy_app, ["--target", "10.0.0.1"])
 
         assert result.exit_code == 0  # CLI succeeds even when deploy fails
         mock_deploy.assert_called_once()
@@ -657,7 +657,7 @@ class TestDeployCli:
             result = runner.invoke(deploy_app, [
                 "--bundle", "/tmp/my-bundle.tar.gz",
                 "--skip-health",
-                "10.0.0.1",
+                "--target", "10.0.0.1",
             ])
 
         assert result.exit_code == 0
@@ -677,7 +677,7 @@ class TestDeployCli:
 
         with patch("getpass.getpass", return_value="testpw"):
             result = runner.invoke(deploy_app, [
-                "--skip-compress", "--skip-health", "10.0.0.1",
+                "--skip-compress", "--skip-health", "--target", "10.0.0.1",
             ])
         assert result.exit_code == 0
         cfg = mock_deploy.call_args[0][0]
@@ -700,4 +700,4 @@ class TestDispatcherDeploy:
         from wireghost.cli import dispatcher as disp
         result = runner.invoke(disp.app, ["deploy", "--help"])
         assert result.exit_code == 0
-        assert "TARGET" in result.stdout
+        assert "--target" in result.stdout
