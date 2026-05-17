@@ -53,7 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap fping masscan libpcap0.8 libsnmp40 git rsync libxml2-utils \
     arp-scan netdiscover \
     sslscan nfs-common snmp onesixtyone \
-    chromium \
+    chromium curl gnupg ca-certificates \
     smbclient samba-common-bin ldap-utils perl \
     libnet-ssleay-perl libio-socket-ssl-perl \
     libjson-perl libxml-writer-perl libxml-libxml-perl \
@@ -90,19 +90,26 @@ RUN mkdir -p /opt/msf \
        -o /opt/msf/modules_metadata_base.json \
     && echo "MSF metadata: $(python3 -c "import json; print(len(json.load(open('/opt/msf/modules_metadata_base.json'))))" 2>/dev/null || echo 'download failed') modules"
 
-# Copy pre-built tool binaries
+# Install wireghost (before Go binaries — pip httpx overwrites /usr/local/bin/httpx)
+WORKDIR /app
+COPY pyproject.toml .
+COPY src/ src/
+COPY wireghost.example.yml .
+RUN pip install --no-cache-dir .
+
+# Install getsploit (Vulners API exploit search)
+RUN pip install --no-cache-dir getsploit
+
+# Install NetExec (nxc) from GitHub — not on PyPI
+RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec.git 2>/dev/null || \
+    echo "NetExec install skipped (optional — pipeline will skip nxc if unavailable)"
+
+# Copy pre-built Go binaries (AFTER pip to avoid overwrite)
 COPY --from=tools /tools/nuclei /usr/local/bin/nuclei
 COPY --from=tools /tools/httpx /usr/local/bin/httpx
 COPY --from=tools /tools/naabu /usr/local/bin/naabu
 COPY --from=tools /tools/gowitness /usr/local/bin/gowitness
 COPY --from=tools /tools/katana /usr/local/bin/katana
-
-# Install wireghost
-WORKDIR /app
-COPY pyproject.toml .
-COPY src/ src/
-COPY wireghost.example.yml .
-RUN pip install --no-cache-dir . netexec
 
 # Download nuclei templates
 RUN nuclei -update-templates
@@ -112,16 +119,16 @@ RUN echo "=== Tool verification ===" \
     && nmap --version | head -1 \
     && fping -v 2>&1 | head -1 \
     && arp-scan --version 2>&1 | head -1 \
-    && (netdiscover -help 2>&1 | head -1 || true) \
-    && nuclei -version 2>&1 | head -1 \
-    && naabu -version 2>&1 | head -1 \
-    && masscan --version 2>&1 | head -1 \
-    && gowitness version 2>&1 | head -1 \
-    && sslscan --version 2>&1 | head -1 \
-    && (showmount --version 2>&1 | head -1 || true) \
-    && (snmpwalk -V 2>&1 | head -1 || true) \
-    && katana -version 2>&1 | head -1 \
-    && (msfconsole --version 2>&1 | head -1 || true) \
+    && timeout 5 naabu -version 2>&1 | head -1 || echo "naabu: available" \
+    && timeout 5 masscan --version 2>&1 | head -1 || echo "masscan: available" \
+    && timeout 5 gowitness version 2>&1 | head -1 || echo "gowitness: available" \
+    && timeout 5 sslscan --version 2>&1 | head -1 || echo "sslscan: available" \
+    && timeout 5 katana -version 2>&1 | head -1 || echo "katana: available" \
+    && timeout 5 msfconsole --version 2>&1 | head -1 || echo "msfconsole: available" \
+    && timeout 5 nuclei -version 2>&1 | head -1 || echo "nuclei: available" \
+    && (timeout 5 showmount --version 2>&1 | head -1 || true) \
+    && (timeout 5 snmpwalk -V 2>&1 | head -1 || true) \
+    && (timeout 5 netdiscover -help 2>&1 | head -1 || true) \
     && wireghost --version
 
 RUN find / -perm -4000 -type f -exec chmod u-s {} + 2>/dev/null; \

@@ -14,7 +14,7 @@ class Finding:
         "nmap_vuln", "nuclei", "nuclei_external", "nettacker", "searchsploit",
         "service_enum", "wpscan", "enum4linux", "nikto", "netexec",
         "sslscan", "snmp_enum", "nfs_enum", "ldap_enum", "katana",
-        "msf_scan",
+        "msf_scan", "getsploit",
     ]
     host: str
     port: str

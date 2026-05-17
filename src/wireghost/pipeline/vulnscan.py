@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from wireghost.models.finding import Finding
 from wireghost.models.scan import Host
+from wireghost.parsers.getsploit import parse_getsploit_json
 from wireghost.parsers.nmap import parse_nmap_vuln_xml
 from wireghost.parsers.nuclei import parse_nuclei_json
 from wireghost.parsers.searchsploit import parse_searchsploit_json
@@ -198,14 +199,26 @@ _SERVICE_SCRIPTS: dict[str, list[str]] = {
 }
 
 
-def _build_script_arg(host: Host) -> str:
-    """Build nmap --script argument with service-specific scripts added."""
+_BRUTE_SCRIPTS: set[str] = {"vnc-brute", "dns-brute", "http-brute", "ftp-brute",
+                           "smtp-brute", "pop3-brute", "imap-brute",
+                           "telnet-brute", "ssh-brute"}
+
+
+def _build_script_arg(host: Host, config: ScanConfig | None = None) -> str:
+    """Build nmap --script argument with service-specific scripts added.
+
+    When *config.skip_brute_force* is True, brute-force scripts are excluded.
+    """
+    skip_brute = config.skip_brute_force if config else False
     extra: set[str] = set()
     for port in host.open_ports:
         svc = port.service_name.lower().replace("-", "").replace("_", "")
         for key, scripts in _SERVICE_SCRIPTS.items():
             if key.replace("-", "") in svc:
-                extra.update(scripts)
+                for script in scripts:
+                    if skip_brute and script in _BRUTE_SCRIPTS:
+                        continue
+                    extra.add(script)
 
     base = "vuln,default"
     if extra:
@@ -228,7 +241,7 @@ async def run_nmap_vuln(
     xml_path = vuln_dir / "nmap_vuln.xml"
 
     port_csv = ",".join(str(p.number) for p in open_ports)
-    script_arg = _build_script_arg(host)
+    script_arg = _build_script_arg(host, config)
 
     result = await run_tool(
         [
@@ -376,6 +389,74 @@ async def run_searchsploit(
     return all_findings
 
 
+async def run_getsploit(
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+) -> list[Finding]:
+    """Run getsploit (Vulners API) exploit search for detected services.
+
+    Queries Vulners across Exploit-DB, Metasploit, Packetstorm, and more.
+    Requires either ``vulners_api_key`` in config or ``VULNERS_API_KEY`` env var.
+    """
+    if config.skip_getsploit:
+        return []
+    if not shutil.which("getsploit"):
+        log.info("getsploit not found — skipping Vulners exploit search")
+        return []
+
+    import os
+
+    api_key = config.vulners_api_key or os.environ.get("VULNERS_API_KEY", "")
+    if not api_key:
+        log.warning("VULNERS_API_KEY not set — skipping getsploit")
+        return []
+
+    vuln_dir = tree.host_vuln_dir(host.ip)
+    all_findings: list[Finding] = []
+    seen_ids: set[str] = set()
+
+    version_tuples = _collect_versions(host)
+
+    for software, port_str in version_tuples:
+        cmd = ["getsploit", "-j", "-c", "5", software, "-k", api_key]
+
+        result = await run_tool(
+            cmd,
+            timeout=30,
+            label=f"getsploit:{software}",
+        )
+        output = result.stdout.strip()
+        if not output:
+            continue
+
+        findings = parse_getsploit_json(output, host_ip=host.ip)
+        for f in findings:
+            if port_str:
+                f.port = port_str
+            if f.template_id not in seen_ids:
+                seen_ids.add(f.template_id)
+                all_findings.append(f)
+
+    # Save combined results as JSON for traceability
+    import json as json_mod
+    if all_findings:
+        combined: list[dict] = []
+        for f in all_findings:
+            combined.append({
+                "id": f.template_id,
+                "title": f.title,
+                "port": f.port,
+                "severity": f.severity.value,
+                "references": f.references,
+            })
+        json_path = vuln_dir / "getsploit_all.json"
+        json_path.write_text(json_mod.dumps(combined, indent=2), encoding="utf-8")
+
+    log.info("Getsploit %s: %d exploit(s) from %d version(s)", host.ip, len(all_findings), len(version_tuples))
+    return all_findings
+
+
 async def scan_host_vulns(
     host: Host,
     config: ScanConfig,
@@ -397,6 +478,10 @@ async def scan_host_vulns(
 
         # Searchsploit: auto-find exploits for detected services (if installed)
         tasks.append(asyncio.create_task(run_searchsploit(host, config, tree)))
+
+        # Getsploit: Vulners API exploit search (Exploit-DB + Metasploit + Packetstorm + more)
+        if not config.skip_getsploit:
+            tasks.append(asyncio.create_task(run_getsploit(host, config, tree)))
 
         # Nikto: web server misconfiguration scanner (if enabled and web endpoints exist)
         if not config.skip_nikto and host.web_endpoints:

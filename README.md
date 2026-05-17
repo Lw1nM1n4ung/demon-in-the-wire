@@ -13,6 +13,7 @@ Automated vulnerability scanner and attack surface management platform. Chains *
 - [Quick Start — Docker Compose](#quick-start--docker-compose)
 - [Quick Start — CLI](#quick-start--cli)
 - [Quick Start — Docker Hub](#quick-start--docker-hub)
+- [Offline / Air-Gapped Installation](#offline--air-gapped-installation)
 - [CLI Reference](#cli-reference)
 - [Web Portal](#web-portal)
 - [Telegram Bot](#telegram-bot)
@@ -225,6 +226,121 @@ Run a single scan without cloning the repo:
 docker pull callmedemon/wireghost
 docker run --net=host -v $(pwd)/output:/data/output callmedemon/wireghost scan 192.168.1.0/24
 ```
+
+---
+
+## Offline / Air-Gapped Installation
+
+Wire\_Ghost supports fully offline deployment — build a self-contained bundle on an internet-connected machine, transfer it to the air-gapped target, and install without any network access.
+
+### Step 1: Create the Bundle (internet-connected machine)
+
+Run the export script on a machine with Docker and internet access:
+
+```bash
+git clone https://github.com/Lw1nM1n4ung/demon-in-the-wire.git
+cd demon-in-the-wire
+sudo bash scripts/offline-export.sh
+```
+
+The script builds custom images, pulls upstream images, saves everything to a single tar archive, and bundles project files + installer into a distributable directory.
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| *(none)* | Build all images from source, export to `wireghost-offline-YYYYMMDD-HHMMSS/`, create `.tar.gz` |
+| `--skip-compress` | Leave the bundle as a directory (skip `.tar.gz` compression) |
+| `--with-msf` | Also build and include the standalone CLI image (adds ~2 GB for Metasploit) |
+| `--pull-only` | Pull pre-built images from Docker Hub instead of building locally |
+| `--help` / `-h` | Show usage summary |
+| `<output_dir>` | Custom output path (default: `./wireghost-offline-<timestamp>/`) |
+
+#### What the export includes
+
+Six core images (always):
+
+| Image | Role |
+|-------|------|
+| `callmedemon/wireghost:web` | Django API, Celery beat, Telegram bot (~180 MB) |
+| `callmedemon/wireghost:worker` | Celery worker with all scan tools (~700 MB) |
+| `mysql:8.0` | Database |
+| `redis:7-alpine` | Celery broker + cache |
+| `nginx:alpine` | Reverse proxy + SPA frontend |
+| `tecnativa/docker-socket-proxy:latest` | Secure Docker API proxy |
+
+Plus one optional with `--with-msf`:
+
+| Image | Role |
+|-------|------|
+| `callmedemon/wireghost:latest` | Standalone CLI scanner with Metasploit (~2 GB) |
+
+#### Bundle structure
+
+```
+wireghost-offline-YYYYMMDD-HHMMSS/
+├── install.sh                  # Self-contained offline installer
+├── wireghost-images.tar        # All Docker images (single tar)
+├── MANIFEST.txt                # Bundle contents manifest
+└── project/
+    ├── docker-compose.yml      # Stripped compose file (no build: blocks)
+    ├── config/
+    │   ├── .env.example
+    │   ├── nginx.conf.tpl
+    │   └── wireghost.example.yml
+    ├── web/                    # SPA frontend
+    ├── web_portal/             # Django API + worker code
+    ├── src/                    # Pipeline library
+    └── scripts/                # wg-ctl, remove, etc.
+```
+
+### Step 2: Transfer to Air-Gapped Machine
+
+```bash
+# On the internet-connected machine — compress for transfer
+sudo bash scripts/offline-export.sh
+# Produces: wireghost-offline-YYYYMMDD-HHMMSS.tar.gz (~1.5 GB with --skip-msf, ~3.5 GB with --with-msf)
+
+# Transfer via USB, SSH, or any offline medium
+scp wireghost-offline-*.tar.gz user@airgapped-host:/opt/
+
+# On the air-gapped machine
+cd /opt
+tar xzf wireghost-offline-*.tar.gz
+cd wireghost-offline-*/
+```
+
+### Step 3: Install (air-gapped machine)
+
+```bash
+cd /opt/wireghost-offline-*/
+sudo bash install.sh
+```
+
+The installer detects it's inside a bundle (finds `wireghost-images.tar` next to the script), loads all images via `docker load`, then runs the same interactive configuration flow as the online installer:
+
+1. **Prerequisite checks** — Docker, Compose, disk space, RAM
+2. **Image loading** — `docker load < wireghost-images.tar` (~2–5 minutes)
+3. **Interactive config** — Portal Access (hostname, port, protocol), MySQL credentials, Redis password, Django secret key, logging
+4. **TLS certificate** — auto-generated self-signed 10-year RSA 2048 cert, or provide your own
+5. **nginx.conf rendering** — from template with configured values
+6. **.env writing** — all secrets with `chmod 600`
+7. **Service startup** — `docker compose up -d` (no network required — all images are pre-loaded)
+8. **Health checks** — DB, Redis, Django API
+
+Portal is live at `https://<hostname>:<port>/setup`.
+
+### Running Without a Bundle (Dev Mode)
+
+The installer also works standalone inside a cloned repo for development:
+
+```bash
+git clone https://github.com/Lw1nM1n4ung/demon-in-the-wire.git
+cd demon-in-the-wire
+sudo bash scripts/offline-install.sh
+```
+
+Without a `wireghost-images.tar` detected, it falls back to `docker compose build` and `docker compose up -d` — same interactive config flow, but images are built locally instead of loaded from the bundle.
 
 ---
 
@@ -859,6 +975,8 @@ Browser/live QA always runs against disposable local Docker stacks, never the sh
 scripts/
     install.sh                  # Interactive on-premises installer
     install-wireghost.sh        # One-line remote installer (curl | bash)
+    offline-export.sh           # Builds distributable offline bundle (images + installer)
+    offline-install.sh          # Self-contained offline/air-gapped installer
     remove-wireghost.sh         # Complete Docker teardown
     wg-ctl                      # Management CLI (status, backup, restore, update, certs)
 

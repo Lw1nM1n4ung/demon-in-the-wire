@@ -355,8 +355,8 @@ WG._toggleNotif = function(key) {
 };
 
 /* ── Tools ──
- * Live probe of external scan tools on the api container's PATH.
- * Server caches results for 30s; the Refresh button passes ?refresh=1. */
+ * Live probe of scan tools — dispatched to the Celery worker.
+ * Server caches results for 60s; the Refresh button passes ?refresh=1. */
 WG._settingsTools = function() {
   var esc = WG.escHtml;
   var tools = WG._cache['tools_health'] || [];
