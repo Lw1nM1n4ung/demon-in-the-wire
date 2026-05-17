@@ -100,4 +100,12 @@ def probe_all(*, refresh: bool = False) -> List[dict]:
         except Exception as exc:
             log.warning('Failed to dispatch worker probe: %s', exc)
 
-    return cached if cached is not None else []
+    if cached is not None:
+        return cached
+    # Celery unavailable — return all tools as unknown (ok=False) so the
+    # API shape is consistent. The test suite and environments without a
+    # worker both rely on this fallback.
+    return [
+        {'name': n, 'binary': b, 'path': '', 'version': '', 'ok': False}
+        for n, b, _ in TOOLS
+    ]
