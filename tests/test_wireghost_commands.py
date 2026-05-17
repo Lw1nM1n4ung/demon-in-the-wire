@@ -346,7 +346,7 @@ class TestUsersWrite:
                 "reset-password", "alice",
             ])
         assert result.exit_code == 1
-        assert "do not match" in result.stdout
+        assert "do not match" in result.stderr
 
 
 # ── Tokens — create & revoke ──────────────────────────────────────────────
@@ -360,7 +360,7 @@ class TestTokensWrite:
         with p:
             result = runner.invoke(tokens_app, ["create", "--name", "CLI token"])
         assert result.exit_code == 0
-        assert "wg_secret_abc123" in result.stdout
+        assert "wg_secret_abc123" in result.stderr
 
     def test_revoke(self):
         p, mc = _mock_client("wireghost.cli.tokens.get_client")

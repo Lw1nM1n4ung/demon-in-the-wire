@@ -545,8 +545,11 @@ class TestDeployCli:
     def test_help(self):
         result = runner.invoke(deploy_app, ["--help"])
         assert result.exit_code == 0
-        assert "Deploy Wire_Ghost" in result.stdout
-        assert "--check" in result.stdout
+        # Typer 0.23.2+ may emit Rich ANSI codes in CliRunner output
+        import re
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
+        assert "Deploy Wire_Ghost" in clean
+        assert "--check" in clean
 
     def test_missing_target_shows_help(self):
         result = runner.invoke(deploy_app, [])
@@ -700,4 +703,6 @@ class TestDispatcherDeploy:
         from wireghost.cli import dispatcher as disp
         result = runner.invoke(disp.app, ["deploy", "--help"])
         assert result.exit_code == 0
-        assert "--target" in result.stdout
+        import re
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
+        assert "--target" in clean

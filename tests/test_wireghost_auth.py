@@ -22,8 +22,8 @@ class TestWhoami:
         with patch("wireghost.cli.auth.get_client", return_value=mock_client):
             result = runner.invoke(app, ["whoami"])
             assert result.exit_code == 0
-            assert "admin" in result.stdout
-            assert "owner" in result.stdout
+            assert "admin" in result.stderr
+            assert "owner" in result.stderr
 
     def test_whoami_unauthorized(self):
         mock_client = MagicMock()
@@ -49,8 +49,8 @@ class TestLogin:
                 "--password", "hunter2",
             ])
         assert result.exit_code == 0
-        assert "admin" in result.stdout
-        assert "owner" in result.stdout
+        assert "admin" in result.stderr
+        assert "owner" in result.stderr
         mock_client.login.assert_called_once_with("admin", "hunter2", None)
 
     def test_login_failure_exits_1(self):
@@ -66,7 +66,7 @@ class TestLogin:
                 "--password", "wrong",
             ])
         assert result.exit_code == 1
-        assert "Login failed" in result.stdout
+        assert "Login failed" in result.stderr
 
     def test_login_prompts_for_missing_values(self):
         """When flags omitted, prompts for URL, username, and password."""
@@ -97,4 +97,4 @@ class TestLogout:
         with patch("wireghost.cli.auth.get_client", return_value=mock_client):
             result = runner.invoke(app, ["logout"])
         assert result.exit_code == 0  # non-fatal
-        assert "Warning" in result.stdout
+        assert "Warning" in result.stderr
