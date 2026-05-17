@@ -49,7 +49,7 @@ class TestCallbackRouter(TestCase):
         update.callback_query = None
         run_async(handle_callback(update, MagicMock()))
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_unlinked_user_rejected(self, mock_resolve):
         mock_resolve.return_value = None
         update, query = _make_update(99999, 'sl:0')
@@ -57,7 +57,7 @@ class TestCallbackRouter(TestCase):
         query.edit_message_text.assert_called()
         self.assertIn('Not linked', query.edit_message_text.call_args[0][0])
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_permission_denied_for_scan_write(self, mock_resolve):
         mock_user = MagicMock()
         mock_user.has_permission.return_value = False
@@ -67,7 +67,7 @@ class TestCallbackRouter(TestCase):
         query.edit_message_text.assert_called()
         self.assertIn('Permission denied', query.edit_message_text.call_args[0][0])
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_permission_denied_for_site_config(self, mock_resolve):
         mock_user = MagicMock()
         mock_user.has_permission.return_value = False
@@ -78,7 +78,7 @@ class TestCallbackRouter(TestCase):
         self.assertIn('Permission denied', query.edit_message_text.call_args[0][0])
         self.assertIn('site:config', query.edit_message_text.call_args[0][0])
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_unknown_entity_no_crash(self, mock_resolve):
         mock_user = MagicMock()
         mock_resolve.return_value = mock_user
@@ -86,7 +86,7 @@ class TestCallbackRouter(TestCase):
         run_async(handle_callback(update, MagicMock()))
         query.edit_message_text.assert_not_called()
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_menu_no_permission_required(self, mock_resolve):
         mock_user = MagicMock()
         mock_resolve.return_value = mock_user
@@ -118,7 +118,7 @@ class TestPermsRoutesConsistency(TestCase):
 
 class TestCallbackDataParsing(TestCase):
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_parses_entity_and_rest(self, mock_resolve):
         mock_user = MagicMock()
         mock_user.has_permission.return_value = True
@@ -148,7 +148,7 @@ class TestCallbackDataParsing(TestCase):
 
 class TestMessageNotModified(TestCase):
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_message_not_modified_silently_ignored(self, mock_resolve):
         mock_user = MagicMock()
         mock_user.has_permission.return_value = True
@@ -174,7 +174,7 @@ class TestMessageNotModified(TestCase):
         finally:
             cb_mod.ROUTES = original
 
-    @patch('scanner.bot.callbacks.resolve_user')
+    @patch('scanner.bot.auth.resolve_user')
     def test_other_bad_request_still_shows_error(self, mock_resolve):
         mock_user = MagicMock()
         mock_user.has_permission.return_value = True
