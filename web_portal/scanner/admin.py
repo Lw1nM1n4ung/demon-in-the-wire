@@ -49,3 +49,43 @@ class ScanPolicyAdmin(admin.ModelAdmin):
 class ScheduledScanAdmin(admin.ModelAdmin):
     list_display = ['name', 'target', 'frequency', 'enabled', 'next_run']
     list_filter = ['frequency', 'enabled']
+
+
+# ── AD Recon ──
+from scanner.models.ad_recon import (
+    CredentialProfile, ADReconSession, ADUser, ADGroup, ADComputer,
+)
+
+
+@admin.register(CredentialProfile)
+class CredentialProfileAdmin(admin.ModelAdmin):
+    list_display = ['name', 'domain', 'username', 'owner', 'created_at']
+    search_fields = ['name', 'domain', 'username', 'owner__username']
+
+
+@admin.register(ADReconSession)
+class ADReconSessionAdmin(admin.ModelAdmin):
+    list_display = ['id', 'domain', 'scope', 'status', 'dc_ip', 'created_at']
+    list_filter = ['scope', 'status']
+    search_fields = ['domain', 'dc_ip']
+    readonly_fields = ['tool_status', 'error']
+
+
+@admin.register(ADUser)
+class ADUserAdmin(admin.ModelAdmin):
+    list_display = ['sam_account_name', 'display_name', 'enabled', 'admin_count']
+    list_filter = ['enabled', 'admin_count']
+    search_fields = ['sam_account_name', 'display_name']
+
+
+@admin.register(ADGroup)
+class ADGroupAdmin(admin.ModelAdmin):
+    list_display = ['name', 'sam_account_name', 'member_count', 'admin_count']
+    search_fields = ['name', 'sam_account_name']
+
+
+@admin.register(ADComputer)
+class ADComputerAdmin(admin.ModelAdmin):
+    list_display = ['name', 'dns_hostname', 'os', 'enabled']
+    list_filter = ['enabled', 'os']
+    search_fields = ['name', 'dns_hostname']

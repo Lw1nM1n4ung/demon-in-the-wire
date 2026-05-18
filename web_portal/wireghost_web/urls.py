@@ -7,6 +7,7 @@ from scanner.views import (
     dashboard_stats, download_report, report_config, upload_logo,
     support_bundle, screenshot_image, dashboard_screenshots,
 )
+from scanner.views.ad_recon import CredentialProfileViewSet, ADReconSessionViewSet
 from scanner.auth_views import (
     auth_login, auth_logout, auth_csrf, auth_me, auth_check, auth_users,
     auth_user_create, auth_user_update, auth_user_delete,
@@ -29,6 +30,8 @@ router.register(r'assets', AssetViewSet)
 router.register(r'policies', ScanPolicyViewSet)
 router.register(r'schedules', ScheduledScanViewSet)
 router.register(r'exploits', ExploitMatchViewSet)
+router.register(r'ad-recon/profiles', CredentialProfileViewSet, basename='ad-recon-profile')
+router.register(r'ad-recon/sessions', ADReconSessionViewSet, basename='ad-recon-session')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
