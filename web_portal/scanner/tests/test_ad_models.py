@@ -54,6 +54,14 @@ class TestCredentialProfile(TestCase):
                 username='admin', password='', nt_hash='',
             )
 
+    def test_decrypt_password_empty_when_only_nt_hash_set(self):
+        profile = CredentialProfile.objects.create(
+            owner=self.user, name='Hash Only', domain='lab.local',
+            username='admin', password='', nt_hash='aad3b435b51404eeaad3b435b51404ee',
+        )
+        self.assertEqual(profile.decrypt_password(), '')
+        self.assertEqual(profile.decrypt_nt_hash(), 'aad3b435b51404eeaad3b435b51404ee')
+
     def test_nt_hash_encryption(self):
         profile = CredentialProfile.objects.create(
             owner=self.user, name='Hash Lab', domain='lab.local',

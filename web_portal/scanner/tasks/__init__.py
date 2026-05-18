@@ -12,6 +12,9 @@ from scanner.policy_tools import normalize_policy_tools
 
 logger = logging.getLogger(__name__)
 
+# Register AD recon task with Celery autodiscover
+from .ad_recon import ad_recon_task  # noqa: E402, F401
+
 
 @shared_task(bind=True, max_retries=0, time_limit=7200, soft_time_limit=7000)
 def run_scan(self, scan_id):

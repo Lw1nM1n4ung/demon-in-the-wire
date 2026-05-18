@@ -4,8 +4,8 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from .models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology, Screenshot as DBScreenshot, ExploitMatch
-from .policy_tools import normalize_policy_tools
+from ..models import Scan, Host, Finding, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Technology, Screenshot as DBScreenshot, ExploitMatch
+from ..policy_tools import normalize_policy_tools
 
 
 def HasPerm(code):
@@ -58,7 +58,7 @@ class IsCreatorOrOwnerForWrite(IsAuthenticated):
         if getattr(request.user, 'role', '') == 'owner':
             return True
         return getattr(obj, 'created_by_id', None) == request.user.id
-from .serializers import (
+from ..serializers import (
     ScanSerializer, ScanListSerializer, ScanCreateSerializer,
     HostSerializer, HostListSerializer,
     FindingSerializer, FindingDetailSerializer, FindingListSerializer,

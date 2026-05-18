@@ -54,6 +54,8 @@ class CredentialProfile(models.Model):
         super().save(*args, **kwargs)
 
     def decrypt_password(self):
+        if not self.password:
+            return ''
         f = _fernet()
         return f.decrypt(self.password.encode()).decode()
 

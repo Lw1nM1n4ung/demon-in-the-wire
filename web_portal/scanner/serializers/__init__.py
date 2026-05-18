@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from .models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Screenshot, ExploitMatch
-from .policy_tools import normalize_policy_tools
+from ..models import Scan, Host, Port, Finding, Technology, Report, ReportConfig, ScanPolicy, ScheduledScan, Asset, Screenshot, ExploitMatch
+from ..policy_tools import normalize_policy_tools
 
 
 class AssetListSerializer(serializers.ModelSerializer):
