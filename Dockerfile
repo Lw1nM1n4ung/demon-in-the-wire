@@ -45,6 +45,13 @@ RUN KATANA_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/katana/r
     && unzip -o katana.zip katana -d /tools/ \
     && chmod +x /tools/katana && rm katana.zip
 
+# kerbrute (Kerberos user enumeration & brute-force)
+RUN KERBRUTE_URL=$(curl -sL https://api.github.com/repos/ropnop/kerbrute/releases/latest \
+        | grep -o '"browser_download_url": *"[^"]*linux_amd64[^"]*"' \
+        | head -1 | cut -d'"' -f4) \
+    && curl -sL "$KERBRUTE_URL" -o /tools/kerbrute \
+    && chmod +x /tools/kerbrute
+
 # === Stage 2: Final image ===
 FROM python:3.12-slim-bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -100,6 +107,9 @@ RUN pip install --no-cache-dir .
 # Install getsploit (Vulners API exploit search)
 RUN pip install --no-cache-dir getsploit
 
+# AD recon tools (impacket, BloodHound, LDAP enumeration)
+RUN pip install --no-cache-dir impacket ldapdomaindump bloodhound-python
+
 # Install NetExec (nxc) from GitHub — not on PyPI
 RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec.git 2>/dev/null || \
     echo "NetExec install skipped (optional — pipeline will skip nxc if unavailable)"
@@ -110,6 +120,7 @@ COPY --from=tools /tools/httpx /usr/local/bin/httpx
 COPY --from=tools /tools/naabu /usr/local/bin/naabu
 COPY --from=tools /tools/gowitness /usr/local/bin/gowitness
 COPY --from=tools /tools/katana /usr/local/bin/katana
+COPY --from=tools /tools/kerbrute /usr/local/bin/kerbrute
 
 # Download nuclei templates
 RUN nuclei -update-templates
@@ -129,6 +140,10 @@ RUN echo "=== Tool verification ===" \
     && (timeout 5 showmount --version 2>&1 | head -1 || true) \
     && (timeout 5 snmpwalk -V 2>&1 | head -1 || true) \
     && (timeout 5 netdiscover -help 2>&1 | head -1 || true) \
+    && (timeout 5 impacket-GetNPUsers -h 2>&1 | head -1 || echo "impacket: available") \
+    && (timeout 5 ldapdomaindump --help 2>&1 | head -1 || echo "ldapdomaindump: available") \
+    && (timeout 5 bloodhound-python --help 2>&1 | head -1 || echo "bloodhound: available") \
+    && (timeout 5 kerbrute --help 2>&1 | head -1 || echo "kerbrute: available") \
     && wireghost --version
 
 RUN find / -perm -4000 -type f -exec chmod u-s {} + 2>/dev/null; \
