@@ -1,4 +1,18 @@
-"""Phase 3 -- Web service detection via HTTP/HTTPS probing."""
+"""Phase 3 -- Web service detection via HTTP/HTTPS probing.
+
+Port filtering is verification-driven: port numbers and nmap labels are NEVER
+trusted as positive indicators of a web service.  Anyone can run SSH on 8080
+or nginx on 2222.  The only reliable test is an actual HTTP request.
+
+Nmap IS trusted for one narrow thing: confidently identifying protocols that
+are NOT HTTP (SSH, MySQL, SMTP, SMB, etc.).  These are protocol-level
+fingerprints that nmap gets right reliably.  If nmap says a port is ssh,
+we skip it -- not because "ssh isn't web" but because nmap's ssh fingerprint
+is definitive.
+
+Everything else -- unknown services, uncertain detections, ports nmap couldn't
+identify -- gets probed.  The HTTP HEAD request IS the verification.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-from wireghost.models.scan import Host, WebTech
+from wireghost.models.scan import Host, Port, WebTech
 from wireghost.utils.process import run_tool
 
 if TYPE_CHECKING:
@@ -21,6 +35,42 @@ if TYPE_CHECKING:
 log = logging.getLogger("wireghost")
 
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=5)
+
+# ── Web candidate filter ────────────────────────────────────────────────────
+
+# Protocols nmap fingerprints with high confidence.  If nmap says a port is
+# one of these, it almost certainly is -- so we skip HTTP probing.  Every
+# other port (uncertain, unknown, or even tagged "http" by nmap) gets probed
+# because port numbers and service labels are NOT trusted as positive signals.
+# The HTTP HEAD request IS the verification.
+_NON_WEB_PROTOCOLS: frozenset[str] = frozenset({
+    "ssh", "smtp", "domain", "snmp", "ldap", "ldaps", "smb",
+    "netbios-ssn", "microsoft-ds", "mysql", "postgresql", "redis",
+    "mongodb", "ftp", "ftp-data", "telnet", "ms-sql-s", "ms-sql-m",
+    "oracle-tns", "oracle", "rdp", "ms-wbt-server", "vnc", "nfs",
+    "nfs-oracle", "rpcbind", "mountd", "nlockmgr", "pop3", "pop3s",
+    "imap", "imaps", "ntp", "dhcp", "dhcpv6", "tftp", "sip", "sips",
+    "rtsp", "rsync", "ipp", "ipp-ssl", "cups", "jetdirect",
+    "docker", "docker-tls", "kubernetes", "kubelet",
+})
+
+
+def _should_probe(port: Port) -> tuple[bool, str]:
+    """Return (should_probe, reason) for a port.
+
+    Only ONE rule: if nmap confidently identifies a non-web protocol, skip it.
+    Everything else -- including ports nmap calls "http", common web ports,
+    and ports nmap couldn't identify at all -- gets probed.  The HTTP request
+    itself is the only verification that matters.
+    """
+    svc = port.service_name.lower() if port.service_name else ""
+
+    if svc in _NON_WEB_PROTOCOLS:
+        return False, f"non-web protocol {svc}"
+
+    if svc:
+        return True, f"service={svc} (probe to verify)"
+    return True, "unknown service (probe to verify)"
 
 
 async def _try_url(session: aiohttp.ClientSession, url: str) -> bool:
@@ -98,16 +148,37 @@ async def probe_host(
     tree: OutputTree,
     sem: asyncio.Semaphore,
 ) -> None:
-    """Probe each open port on *host* for HTTP and HTTPS endpoints.
+    """Probe open ports on *host* for HTTP and HTTPS endpoints.
 
-    Discovered URLs are appended to ``host.web_endpoints`` and written
-    to disk under the host web directory and the global web directory.
+    Ports are filtered through ``_should_probe`` which skips only ports
+    where nmap has confidently identified a non-web protocol.  Everything
+    else gets probed — the HTTP request itself is the verification.
+
+    Discovered URLs are appended to ``host.web_endpoints`` and written to
+    disk under the host web directory and the global web directory.
     """
     async with sem:
-        endpoints: list[str] = []
+        # ── Filter ports to web candidates ──
+        candidates: list[Port] = []
+        skipped: list[str] = []
+        for port in host.open_ports:
+            ok, reason = _should_probe(port)
+            if ok:
+                candidates.append(port)
+            else:
+                skipped.append(f"{port.number}/{port.protocol} ({reason})")
 
-        # Build candidate ports from open ports
-        candidate_ports = [p.number for p in host.open_ports]
+        if skipped:
+            log.info(
+                "Web detect %s: skipping %d non-web port(s) -- %s",
+                host.ip, len(skipped), "; ".join(skipped[:5]),
+            )
+
+        if not candidates:
+            log.info("Web detect %s: no web candidates among %d open port(s)", host.ip, len(host.open_ports))
+            return
+
+        endpoints: list[str] = []
 
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
@@ -115,22 +186,22 @@ async def probe_host(
 
         connector = aiohttp.TCPConnector(ssl=ssl_ctx)
         async with aiohttp.ClientSession(connector=connector) as session:
-            for port_num in candidate_ports:
+            for port in candidates:
                 # Try HTTP first
-                http_url = f"http://{host.ip}:{port_num}"
+                http_url = f"http://{host.ip}:{port.number}"
                 if await _try_url(session, http_url):
                     endpoints.append(http_url)
                     continue
 
                 # Then HTTPS
-                https_url = f"https://{host.ip}:{port_num}"
+                https_url = f"https://{host.ip}:{port.number}"
                 if await _try_url(session, https_url):
                     endpoints.append(https_url)
 
         host.web_endpoints = endpoints
 
         if endpoints:
-            log.info("Web detect %s: %d endpoint(s)", host.ip, len(endpoints))
+            log.info("Web detect %s: %d endpoint(s) from %d candidate(s)", host.ip, len(endpoints), len(candidates))
 
             # Write per-host file
             web_file = tree.host_web_dir(host.ip) / "endpoints.txt"
@@ -144,7 +215,7 @@ async def probe_host(
                 for url in endpoints:
                     fh.write(url + "\n")
         else:
-            log.info("Web detect %s: no web endpoints", host.ip)
+            log.info("Web detect %s: no web endpoints responded among %d candidate(s)", host.ip, len(candidates))
 
         # Run httpx tech detection on discovered endpoints
         await _detect_technologies(host, tree, config.tool_timeout)
