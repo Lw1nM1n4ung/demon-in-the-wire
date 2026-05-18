@@ -98,6 +98,9 @@ class ADDomain(models.Model):
     functional_level = models.CharField(max_length=64, blank=True)
     forest = models.CharField(max_length=256, blank=True)
 
+    class Meta:
+        ordering = ['name']
+
 
 class ADUser(models.Model):
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
@@ -113,6 +116,9 @@ class ADUser(models.Model):
     pwd_last_set = models.DateTimeField(null=True, blank=True)
     spn_count = models.IntegerField(default=0)
 
+    class Meta:
+        ordering = ['sam_account_name']
+
 
 class ADGroup(models.Model):
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
@@ -123,6 +129,9 @@ class ADGroup(models.Model):
     members = models.JSONField(default=list)
     member_count = models.IntegerField(default=0)
     admin_count = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['name']
 
 
 class ADComputer(models.Model):
@@ -136,6 +145,9 @@ class ADComputer(models.Model):
     last_logon = models.DateTimeField(null=True, blank=True)
     member_of = models.JSONField(default=list)
 
+    class Meta:
+        ordering = ['name']
+
 
 class ADTrust(models.Model):
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
@@ -145,6 +157,9 @@ class ADTrust(models.Model):
     direction = models.CharField(max_length=32)
     trust_type = models.CharField(max_length=64)
     transitive = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['source_domain', 'target_domain']
 
 
 class ADSPN(models.Model):
@@ -156,6 +171,9 @@ class ADSPN(models.Model):
     port = models.IntegerField(null=True, blank=True)
     category = models.CharField(max_length=64, blank=True)
 
+    class Meta:
+        ordering = ['service_name']
+
 
 class ADACL(models.Model):
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
@@ -166,6 +184,9 @@ class ADACL(models.Model):
     access_control_type = models.CharField(max_length=64)
     interesting_rights = models.JSONField(default=list)
 
+    class Meta:
+        ordering = ['object_dn']
+
 
 class ADShare(models.Model):
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
@@ -175,6 +196,9 @@ class ADShare(models.Model):
     description = models.TextField(blank=True)
     access = models.CharField(max_length=256, blank=True)
 
+    class Meta:
+        ordering = ['name']
+
 
 class ADCertService(models.Model):
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
@@ -183,3 +207,6 @@ class ADCertService(models.Model):
     host = models.CharField(max_length=256, blank=True)
     templates = models.JSONField(default=list)
     vulnerable_template = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['ca_name']
