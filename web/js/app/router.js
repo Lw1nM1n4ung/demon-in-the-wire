@@ -53,6 +53,7 @@ WG._ROUTES = [
   { page: 'settings',       path: '/settings' },
   { page: 'users',          path: '/users' },
   { page: 'system',         path: '/system' },
+  { page: 'ad-recon',       path: '/ad-recon' },
 ];
 
 WG._routeToPath = function(page, params) {
@@ -181,6 +182,7 @@ WG.render = function() {
     settings:         WG.renderSettings,
     users:            WG.renderUsers,
     system:           WG.renderSystem,
+    'ad-recon':       WG.renderADRecon,
   };
 
   var renderFn = pages[route.page] || WG.renderDashboard;
