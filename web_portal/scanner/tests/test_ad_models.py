@@ -46,6 +46,14 @@ class TestCredentialProfile(TestCase):
                 username='user', password='Pass456',
             )
 
+    def test_both_password_and_nt_hash_empty_raises(self):
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            CredentialProfile.objects.create(
+                owner=self.user, name='Empty', domain='lab.local',
+                username='admin', password='', nt_hash='',
+            )
+
     def test_nt_hash_encryption(self):
         profile = CredentialProfile.objects.create(
             owner=self.user, name='Hash Lab', domain='lab.local',

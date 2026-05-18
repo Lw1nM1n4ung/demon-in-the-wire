@@ -39,7 +39,13 @@ class CredentialProfile(models.Model):
     def __repr__(self):
         return f"<CredentialProfile {self.id} name={self.name!r}>"
 
+    def clean(self):
+        if not self.password and not self.nt_hash:
+            from django.core.exceptions import ValidationError
+            raise ValidationError('At least one of password or nt_hash must be set')
+
     def save(self, *args, **kwargs):
+        self.clean()
         f = _fernet()
         if self.password and not self.password.startswith('gAAAAA'):
             self.password = f.encrypt(self.password.encode()).decode()
