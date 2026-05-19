@@ -31,6 +31,9 @@ server {
     ssl_session_timeout 1d;
     ssl_session_tickets off;
 
+    # Use Docker's embedded DNS — avoids stale resolution from host search domains
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
     root /usr/share/nginx/html;
     absolute_redirect off;
     autoindex off;
