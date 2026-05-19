@@ -202,9 +202,19 @@ docker_update() {
     info "Pulling external images..."
     docker compose "${compose_files[@]}" pull db redis portal 2>&1 | tail -3 || true
 
-    # Build app images from Dockerfiles (--pull refreshes base images like python:3.12-slim)
+    # Build app images with retry (transient CDN errors are common)
     info "Building app images..."
-    docker compose "${compose_files[@]}" build --pull 2>&1 | tail -5
+    local build_ok=false
+    for attempt in 1 2 3; do
+        if docker compose "${compose_files[@]}" build --pull 2>&1 | tail -5; then
+            build_ok=true; break
+        fi
+        warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
+        sleep 5
+    done
+    if [ "$build_ok" = false ]; then
+        warn "Build failed after 3 attempts — images may be stale"
+    fi
 
     # Recreate containers with new images
     info "Recreating containers..."
