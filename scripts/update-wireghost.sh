@@ -78,53 +78,45 @@ self_update() {
     fi
     ok "Code updated ($(git rev-parse --short HEAD))"
 
-    # ── Find pip with Python >= 3.11 ──
-    local pip py
-    _find_pip() {
-        pip=""; py=""
-        # Venv pip first
-        if [ -x "${PROJECT_DIR}/.venv/bin/pip" ]; then
-            py=$("${PROJECT_DIR}/.venv/bin/python3" -V 2>/dev/null || "${PROJECT_DIR}/.venv/bin/python" -V 2>/dev/null) || true
-            if echo "$py" | grep -qP '3\.(1[1-9]|[2-9]\d)'; then
-                pip="${PROJECT_DIR}/.venv/bin/pip"; return
-            fi
+    # ── Find a pip backed by Python >= 3.11 ──
+    _py_ok() {
+        # Parse Python version from "pip -V" output, check >= 3.11 with integers
+        local ver
+        ver=$("$1" -V 2>/dev/null | grep -oE 'python [0-9]+\.[0-9]+' | head -1 | cut -d' ' -f2)
+        [ -z "$ver" ] && return 1
+        local major minor
+        major=$(echo "$ver" | cut -d. -f1)
+        minor=$(echo "$ver" | cut -d. -f2)
+        [ "$major" -ge 3 ] 2>/dev/null && [ "$minor" -ge 11 ] 2>/dev/null && return 0
+        return 1
+    }
+
+    local pip="" py_ver=""
+    for candidate in "${PROJECT_DIR}/.venv/bin/pip" "pip3" "pip"; do
+        command -v "$candidate" >/dev/null 2>&1 || continue
+        py_ver=$("$candidate" -V 2>/dev/null | grep -oE 'python [0-9]+\.[0-9]+' | head -1 | cut -d' ' -f2)
+        if _py_ok "$candidate"; then
+            pip="$candidate"
+            break
         fi
-        # System pip3
-        if command -v pip3 >/dev/null 2>&1; then
-            py=$(pip3 --version 2>/dev/null | grep -oP 'python \K[\d.]+' || python3 -V 2>/dev/null) || true
-            if echo "$py" | grep -qP '3\.(1[1-9]|[2-9]\d)'; then
-                pip="pip3"; return
-            fi
-            local _old_py="$py"
-        fi
-        # System pip
-        if command -v pip >/dev/null 2>&1; then
-            py=$(pip --version 2>/dev/null | grep -oP 'python \K[\d.]+' || python -V 2>/dev/null) || true
-            if echo "$py" | grep -qP '3\.(1[1-9]|[2-9]\d)'; then
-                pip="pip"; return
-            fi
-        fi
-        # Nothing suitable
-        if command -v pip3 >/dev/null 2>&1; then
-            warn "Python $([ -n "${_old_py:-}" ] && echo "${_old_py}" || echo "3.10") too old — need 3.11+; skipping pip install"
+    done
+
+    if [ -z "$pip" ]; then
+        if [ -n "$py_ver" ]; then
+            warn "Python ${py_ver} too old — need 3.11+; skipping pip install"
         else
             warn "pip not found — skipping Python package update"
         fi
-    }
-    _find_pip
-    [ -z "$pip" ] && return
+        return
+    fi
 
-    info "Installing packages... ($py)"
+    info "Installing packages... (Python ${py_ver})"
+    set +e
     "$pip" install --no-cache-dir -e "${PROJECT_DIR}" -q 2>&1 | tail -2
-
     if [ -f "${PROJECT_DIR}/web_portal/requirements.txt" ]; then
         "$pip" install --no-cache-dir -r "${PROJECT_DIR}/web_portal/requirements.txt" -q 2>&1 | tail -2
     fi
-
-    # ── Show version ──
-    local ver
-    ver=$("$pip" show wireghost 2>/dev/null | awk '/^Version:/{print $2}') || true
-    [ -n "$ver" ] && ok "wireghost ${ver}" || ok "wireghost installed"
+    set -e
 }
 
 ###########################################################################
