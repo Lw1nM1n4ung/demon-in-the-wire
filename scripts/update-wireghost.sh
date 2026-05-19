@@ -6,9 +6,13 @@
 #   curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/update-wireghost.sh | sudo bash
 #
 #   sudo bash scripts/update-wireghost.sh              # full update (self + tools + feeds)
+#   sudo bash scripts/update-wireghost.sh --docker     # full update + Docker stack
 #   sudo bash scripts/update-wireghost.sh --self       # self-update only
 #   sudo bash scripts/update-wireghost.sh --tools      # tools only
 #   sudo bash scripts/update-wireghost.sh --feeds      # feeds only
+#
+#   # Pass --docker via curl:
+#   curl -fsSL <url> | sudo bash -s -- --docker
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -33,24 +37,26 @@ find_root() {
     fi
 }
 
-WITH_TOOLS=true; WITH_FEEDS=true; WITH_SELF=true
+WITH_TOOLS=true; WITH_FEEDS=true; WITH_SELF=true; WITH_DOCKER=false
 for arg in "$@"; do
     case "$arg" in
-        --self)  WITH_TOOLS=false; WITH_FEEDS=false ;;
-        --tools) WITH_SELF=false; WITH_FEEDS=false ;;
-        --feeds) WITH_SELF=false; WITH_TOOLS=false ;;
+        --self)   WITH_TOOLS=false; WITH_FEEDS=false ;;
+        --tools)  WITH_SELF=false; WITH_FEEDS=false ;;
+        --feeds)  WITH_SELF=false; WITH_TOOLS=false ;;
+        --docker) WITH_DOCKER=true ;;
         --help|-h)
-            echo "Usage: sudo bash update-wireghost.sh [--self] [--tools] [--feeds]"
+            echo "Usage: sudo bash update-wireghost.sh [--self] [--tools] [--feeds] [--docker]"
             echo "  (no flags)  Full update: self + tools + feeds"
             echo "  --self      Self-update only (git pull + pip install)"
             echo "  --tools     Tools only (nuclei, httpx, naabu, apt)"
             echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
+            echo "  --docker    Also update Docker Compose stack (pull, recreate, migrate)"
             exit 0 ;;
     esac
 done
 
 # ── Progress ───────────────────────────────────────────────────────────
-_TOTAL=0; [ "$WITH_SELF" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_TOOLS" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_FEEDS" = true ] && _TOTAL=$((_TOTAL + 1)); _STEP=0
+_TOTAL=0; [ "$WITH_SELF" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_TOOLS" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_FEEDS" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_DOCKER" = true ] && _TOTAL=$((_TOTAL + 1)); _STEP=0
 step() {
     _STEP=$((_STEP + 1))
     printf "\n${BOLD}${CYAN}[%d/%d]${NC} %s\n\n" "$_STEP" "$_TOTAL" "$1"
@@ -177,6 +183,43 @@ feeds_update() {
 }
 
 ###########################################################################
+# 4. Docker stack
+###########################################################################
+docker_update() {
+    step "Updating Docker Compose stack"
+
+    # Detect which compose files are in use
+    local compose_files=(-f docker-compose.yml)
+    if [ -f docker-compose.host.yml ] && docker compose -f docker-compose.yml -f docker-compose.host.yml ps 2>/dev/null | grep -q "Up"; then
+        compose_files+=(-f docker-compose.host.yml)
+        info "Detected host-mode deployment"
+    elif [ -f docker-compose.dev.yml ] && docker compose -f docker-compose.yml -f docker-compose.dev.yml ps 2>/dev/null | grep -q "Up"; then
+        compose_files+=(-f docker-compose.dev.yml)
+        info "Detected dev-mode deployment"
+    fi
+
+    # Pull latest images
+    info "Pulling images..."
+    docker compose "${compose_files[@]}" pull 2>&1 | tail -5
+
+    # Recreate containers with latest images
+    info "Recreating containers..."
+    docker compose "${compose_files[@]}" up -d --remove-orphans 2>&1 | tail -5
+
+    # Run migrations
+    info "Running Django migrations..."
+    docker compose "${compose_files[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -3 || warn "migrations may have failed — check: docker compose logs api"
+
+    # Collect static
+    info "Collecting static files..."
+    docker compose "${compose_files[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | tail -2 || true
+
+    # Prune old images
+    docker image prune -f 2>/dev/null || true
+    ok "Docker stack updated"
+}
+
+###########################################################################
 # Main
 ###########################################################################
 printf "\n${BOLD}${CYAN} Wire_Ghost — One-Line Updater${NC}\n\n"
@@ -193,6 +236,10 @@ fi
 
 if [ "$WITH_FEEDS" = true ]; then
     feeds_update
+fi
+
+if [ "$WITH_DOCKER" = true ]; then
+    docker_update
 fi
 
 printf "\n${GREEN}${BOLD}══ Update complete ═══════════════════════════════════${NC}\n\n"
