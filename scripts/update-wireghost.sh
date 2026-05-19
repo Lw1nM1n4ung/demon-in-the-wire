@@ -198,11 +198,15 @@ docker_update() {
         info "Detected dev-mode deployment"
     fi
 
-    # Pull latest images
-    info "Pulling images..."
-    docker compose "${compose_files[@]}" pull 2>&1 | tail -5
+    # Pull external base images (mysql, redis, nginx — not app images)
+    info "Pulling external images..."
+    docker compose "${compose_files[@]}" pull db redis portal 2>&1 | tail -3 || true
 
-    # Recreate containers with latest images
+    # Build app images from Dockerfiles (--pull refreshes base images like python:3.12-slim)
+    info "Building app images..."
+    docker compose "${compose_files[@]}" build --pull 2>&1 | tail -5
+
+    # Recreate containers with new images
     info "Recreating containers..."
     docker compose "${compose_files[@]}" up -d --remove-orphans 2>&1 | tail -5
 
