@@ -43,14 +43,14 @@ for arg in "$@"; do
         --self)   WITH_TOOLS=false; WITH_FEEDS=false ;;
         --tools)  WITH_SELF=false; WITH_FEEDS=false ;;
         --feeds)  WITH_SELF=false; WITH_TOOLS=false ;;
-        --docker) WITH_DOCKER=true ;;
+        --docker) WITH_DOCKER=true; WITH_TOOLS=false; WITH_FEEDS=false ;;
         --help|-h)
             echo "Usage: sudo bash update-wireghost.sh [--self] [--tools] [--feeds] [--docker]"
             echo "  (no flags)  Full update: self + tools + feeds"
             echo "  --self      Self-update only (git pull + pip install)"
             echo "  --tools     Tools only (nuclei, httpx, naabu, apt)"
             echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
-            echo "  --docker    Also update Docker Compose stack (pull, recreate, migrate)"
+            echo "  --docker    Docker stack update: self + build + up + migrate"
             exit 0 ;;
     esac
 done
