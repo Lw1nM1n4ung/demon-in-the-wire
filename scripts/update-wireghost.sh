@@ -78,20 +78,43 @@ self_update() {
     fi
     ok "Code updated ($(git rev-parse --short HEAD))"
 
-    # ── Pip install ──
-    local pip
-    if [ -x "${PROJECT_DIR}/.venv/bin/pip" ]; then
-        pip="${PROJECT_DIR}/.venv/bin/pip"
-    elif command -v pip3 >/dev/null 2>&1; then
-        pip="pip3"
-    elif command -v pip >/dev/null 2>&1; then
-        pip="pip"
-    else
-        warn "pip not found — skipping Python package update"
-        return
-    fi
+    # ── Find pip with Python >= 3.11 ──
+    local pip py
+    _find_pip() {
+        pip=""; py=""
+        # Venv pip first
+        if [ -x "${PROJECT_DIR}/.venv/bin/pip" ]; then
+            py=$("${PROJECT_DIR}/.venv/bin/python3" -V 2>/dev/null || "${PROJECT_DIR}/.venv/bin/python" -V 2>/dev/null) || true
+            if echo "$py" | grep -qP '3\.(1[1-9]|[2-9]\d)'; then
+                pip="${PROJECT_DIR}/.venv/bin/pip"; return
+            fi
+        fi
+        # System pip3
+        if command -v pip3 >/dev/null 2>&1; then
+            py=$(pip3 --version 2>/dev/null | grep -oP 'python \K[\d.]+' || python3 -V 2>/dev/null) || true
+            if echo "$py" | grep -qP '3\.(1[1-9]|[2-9]\d)'; then
+                pip="pip3"; return
+            fi
+            local _old_py="$py"
+        fi
+        # System pip
+        if command -v pip >/dev/null 2>&1; then
+            py=$(pip --version 2>/dev/null | grep -oP 'python \K[\d.]+' || python -V 2>/dev/null) || true
+            if echo "$py" | grep -qP '3\.(1[1-9]|[2-9]\d)'; then
+                pip="pip"; return
+            fi
+        fi
+        # Nothing suitable
+        if command -v pip3 >/dev/null 2>&1; then
+            warn "Python $([ -n "${_old_py:-}" ] && echo "${_old_py}" || echo "3.10") too old — need 3.11+; skipping pip install"
+        else
+            warn "pip not found — skipping Python package update"
+        fi
+    }
+    _find_pip
+    [ -z "$pip" ] && return
 
-    info "Installing packages..."
+    info "Installing packages... ($py)"
     "$pip" install --no-cache-dir -e "${PROJECT_DIR}" -q 2>&1 | tail -2
 
     if [ -f "${PROJECT_DIR}/web_portal/requirements.txt" ]; then
