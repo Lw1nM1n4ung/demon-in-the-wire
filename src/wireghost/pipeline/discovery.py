@@ -1,11 +1,24 @@
 """Phase 1 -- Host discovery via nmap ping-sweep, fping, and ARP scanning.
 
-Large CIDRs (/16 or bigger) are auto-partitioned into /24 subnets
-and scanned in parallel batches for faster discovery.
+Large CIDRs (wider than /24) are auto-partitioned into /24 subnets and
+scanned concurrently (parallelism controlled by config.parallelism).
+
+Within each subnet, nmap, fping, and ARP tools run in parallel via
+asyncio.gather to minimize wall-clock time.
 
 When arp-scan and/or netdiscover are available, Layer 2 ARP scanning
 runs alongside ICMP probes to catch firewall-silent hosts and collect
 MAC address + vendor data.
+
+Enhanced discovery (enabled by default) adds:
+  - TCP SYN ping to 17 high-value ports (SSH, SMB, RDP, databases, etc.)
+    beyond nmap's default 80+443 — catches hosts that drop probes to
+    80/443 but respond on other ports.
+  - UDP ping to 5 common UDP services (DNS, NTP, NetBIOS, SNMP, IKE)
+    — catches hosts behind TCP/ICMP-filtering firewalls.
+
+Passive DNS sweep (enabled by default) runs nmap -sL -R to resolve
+PTR records across the target range without sending a single packet.
 """
 
 from __future__ import annotations
@@ -15,7 +28,7 @@ import ipaddress
 import logging
 import re
 import shutil
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from wireghost.utils.network import is_valid_ipv4
 from wireghost.utils.process import run_tool
@@ -28,8 +41,27 @@ log = logging.getLogger("wireghost")
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
+# fping stderr: "ICMP Host Unreachable from <gateway> for ICMP Echo sent to <target>"
+# These are hosts that exist (the gateway knows about them) but are firewalled
+# against ICMP — they may still have open TCP ports.  Always include them.
+_FPING_UNREACHABLE_RE = re.compile(
+    r"ICMP Host Unreachable from [\d.]+ for ICMP Echo sent to (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
+)
+
 # Subnets with more than 512 IPs (prefix < /24) get partitioned
 _PARTITION_THRESHOLD = 23
+
+# TCP ports probed during enhanced discovery (nmap -PS<ports>).
+# These are high-value ports whose mere presence indicates a live host —
+# SSH, SMB, RDP, databases, web alternates, WinRM.
+_TCP_DISCOVERY_PORTS = (
+    "22,25,53,111,135,139,445,1433,3306,3389,5432,5985,6379,8080,8443,9090,9200"
+)
+
+# UDP ports probed during enhanced discovery (nmap -PU<ports>).
+# UDP ping bypasses firewalls that drop TCP SYN and ICMP but allow UDP
+# (common in enterprise environments for DNS, NTP, SNMP).
+_UDP_DISCOVERY_PORTS = "53,123,137,161,500"
 
 
 def _range_to_cidrs(target: str) -> list[ipaddress.IPv4Network] | None:
@@ -136,52 +168,110 @@ async def _scan_subnet(
     timeout: int,
     live_ips: set[str],
     mac_vendor: dict[str, tuple[str, str]],
+    fping_unreachable: set[str],
     semaphore: asyncio.Semaphore,
     index: int,
     total: int,
     run_arp: bool,
     has_arpscan: bool,
     has_netdiscover: bool,
+    enhanced: bool = True,
 ) -> None:
-    """Scan a single subnet with nmap + fping + optional ARP tools."""
+    """Scan a single subnet — nmap, fping, and ARP tools run in parallel."""
     async with semaphore:
         if total > 1:
             log.info("Scanning subnet %d/%d: %s", index, total, subnet)
 
-        # nmap ping sweep
-        nmap_result = await run_tool(
-            ["nmap", "-sn", subnet],
-            timeout=timeout,
-            label=f"nmap -sn {subnet}",
-        )
-        if nmap_result.returncode == 0:
-            for ip in _IPV4_RE.findall(nmap_result.stdout):
-                if is_valid_ipv4(ip):
-                    live_ips.add(ip)
+        async def _run_nmap() -> None:
+            if enhanced:
+                nmap_args = [
+                    "nmap", "-sn",
+                    "-PS" + _TCP_DISCOVERY_PORTS,
+                    "-PU" + _UDP_DISCOVERY_PORTS,
+                    subnet,
+                ]
+            else:
+                nmap_args = ["nmap", "-sn", subnet]
 
-        # fping
-        fping_result = await run_tool(
-            ["fping", "-a", "-g", subnet],
-            timeout=timeout,
-            label=f"fping -a -g {subnet}",
-        )
-        if fping_result.returncode in (0, 1):
-            for ip in _IPV4_RE.findall(fping_result.stdout):
-                if is_valid_ipv4(ip):
-                    live_ips.add(ip)
+            result = await run_tool(
+                nmap_args, timeout=timeout,
+                label=f"nmap -sn {subnet}",
+            )
+            if result.returncode == 0:
+                for ip in _IPV4_RE.findall(result.stdout):
+                    if is_valid_ipv4(ip):
+                        live_ips.add(ip)
 
-        # ARP scanning (Layer 2) — supplements ICMP with MAC/vendor data
+        async def _run_fping() -> None:
+            result = await run_tool(
+                ["fping", "-a", "-g", subnet],
+                timeout=timeout,
+                label=f"fping -a -g {subnet}",
+            )
+            if result.returncode in (0, 1):
+                for ip in _IPV4_RE.findall(result.stdout):
+                    if is_valid_ipv4(ip):
+                        live_ips.add(ip)
+            # ICMP Host Unreachable → host exists but blocks ICMP (firewall/WAF).
+            # These are NOT the same as silent/unresponsive — the gateway knows
+            # about them.  Always include them in the scan.
+            if result.stderr:
+                for ip in _FPING_UNREACHABLE_RE.findall(result.stderr):
+                    if is_valid_ipv4(ip):
+                        fping_unreachable.add(ip)
+
+        tasks = [
+            _run_nmap(),
+            _run_fping(),
+        ]
         if run_arp and (has_arpscan or has_netdiscover):
-            await _arp_scan_subnet(
+            tasks.append(_arp_scan_subnet(
                 subnet, timeout, live_ips, mac_vendor,
                 has_arpscan, has_netdiscover,
-            )
+            ))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                log.error("Discovery tool failed for %s: %s", subnet, result)
+
+
+async def _dns_sweep_subnet(
+    subnet: str,
+    timeout: int,
+    semaphore: asyncio.Semaphore,
+) -> dict[str, str]:
+    """Run ``nmap -sL -R`` on a single subnet, returning ip→hostname dict.
+
+    Designed to be fanned out per /24 so DNS PTR lookups run in parallel
+    across subnets instead of sequentially across the entire target range.
+    """
+    async with semaphore:
+        result = await run_tool(
+            ["nmap", "-sL", "-R", subnet],
+            timeout=min(timeout, 120),
+            label=f"nmap -sL -R {subnet}",
+        )
+        if result.returncode != 0:
+            return {}
+
+        hostnames: dict[str, str] = {}
+        _PTR_LINE = re.compile(
+            r"^Nmap scan report for (.+?) \((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)$"
+        )
+        for line in result.stdout.splitlines():
+            m = _PTR_LINE.match(line.strip())
+            if m:
+                hostname, ip = m.group(1), m.group(2)
+                hostnames[ip] = hostname
+
+        return hostnames
 
 
 async def discover_hosts(
     config: ScanConfig, tree: OutputTree,
 ) -> tuple[list[str], dict[str, tuple[str, str]]]:
-    """Run nmap -sn, fping, and ARP tools against *config.target*.
+    """Run nmap -sn, fping, ARP tools, and passive DNS against *config.target*.
 
     Large CIDRs (>/24) are automatically partitioned into /24 subnets
     and scanned concurrently (limited by config.parallelism).
@@ -223,34 +313,64 @@ async def discover_hosts(
             tools.append("netdiscover")
         log.info("ARP scanning enabled: %s", ", ".join(tools))
 
+    enhanced = config.enhanced_discovery
+    if enhanced:
+        log.info(
+            "Enhanced discovery: TCP ports=%s UDP ports=%s",
+            _TCP_DISCOVERY_PORTS, _UDP_DISCOVERY_PORTS,
+        )
+
     live_ips: set[str] = set()
     mac_vendor: dict[str, tuple[str, str]] = {}
+    fping_unreachable: set[str] = set()
 
-    # Cap discovery parallelism for large targets — scanning 256 /24 subnets
-    # with 10 concurrent nmap+fping processes overwhelms the scanner and network.
-    discovery_parallelism = config.parallelism
-    if total >= 256:
-        discovery_parallelism = min(discovery_parallelism, 2)
-        if discovery_parallelism < config.parallelism:
-            log.info(
-                "Large target (>= /16) — capping discovery parallelism to %d",
-                discovery_parallelism,
+    semaphore = asyncio.Semaphore(config.parallelism)
+
+    # Scan all subnets concurrently (semaphore-limited).
+    # Active discovery + passive DNS sweep all fanned out per /24 subnet
+    # so DNS PTR lookups run in parallel rather than sequentially.
+    coros: list[Any] = []
+    for i, subnet in enumerate(subnets):
+        coros.append(
+            _scan_subnet(
+                subnet, timeout, live_ips, mac_vendor, fping_unreachable,
+                semaphore,
+                i + 1, total, run_arp, has_arpscan, has_netdiscover,
+                enhanced=enhanced,
             )
-
-    semaphore = asyncio.Semaphore(discovery_parallelism)
-
-    # Scan all subnets concurrently (semaphore-limited)
-    tasks = [
-        _scan_subnet(
-            subnet, timeout, live_ips, mac_vendor, semaphore,
-            i + 1, total, run_arp, has_arpscan, has_netdiscover,
         )
-        for i, subnet in enumerate(subnets)
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for i, result in enumerate(results):
-        if isinstance(result, BaseException):
-            log.error("Subnet scan %s failed: %s", subnets[i], result, exc_info=result)
+        if not config.skip_passive_dns:
+            coros.append(_dns_sweep_subnet(subnet, timeout, semaphore))
+
+    results = await asyncio.gather(*coros, return_exceptions=True)
+
+    # Collect DNS sweep results from the gather output. DNS coros are
+    # interleaved with scan coros (scan, dns, scan, dns, …) so we
+    # iterate all results and pick out the dict ones.
+    dns_hostnames: dict[str, str] = {}
+    scan_idx = 0
+    for result in results:
+        if isinstance(result, dict):
+            dns_hostnames.update(result)
+        elif isinstance(result, BaseException):
+            if scan_idx < len(subnets):
+                log.error("Subnet scan %s failed: %s", subnets[scan_idx], result, exc_info=result)
+            scan_idx += 1
+        else:
+            scan_idx += 1
+
+    # Persist merged DNS sweep results
+    if dns_hostnames:
+        dns_file = tree.live_host_dir / "dns_sweep.txt"
+        dns_file.write_text(
+            "\n".join(
+                f"{ip}\t{dns_hostnames[ip]}" for ip in sorted(dns_hostnames)
+            ) + "\n",
+            encoding="utf-8",
+        )
+        log.info("Passive DNS sweep: %d PTR record(s) found", len(dns_hostnames))
+    elif not config.skip_passive_dns:
+        log.info("Passive DNS sweep: no PTR records found")
 
     # Compute the "error / unreachable" set: every IP in the input CIDR(s)
     # that did NOT answer either nmap or fping. Only makes sense when the
@@ -265,9 +385,31 @@ async def discover_hosts(
         # /32 it yields both IPs or the single IP respectively.
         for ip in net.hosts():
             candidate_ips.add(str(ip))
-    unreachable_ips = candidate_ips - live_ips
-
     _ip_sort_key = lambda ip: tuple(int(o) for o in ip.split(".")) if ip.count(".") == 3 else (0,)
+
+    # fping ICMP Host Unreachable: hosts the gateway knows about but that
+    # drop ICMP (firewall / WAF).  These exist — always scan them.
+    if fping_unreachable:
+        # Dedup against live_ips (some may have also responded to nmap or ARP).
+        new_fpx_unreachable = fping_unreachable - live_ips
+        if new_fpx_unreachable:
+            sorted_fpx = sorted(new_fpx_unreachable, key=_ip_sort_key)
+            fpx_txt = tree.live_host_dir / "fping_unreachable.txt"
+            fpx_txt.write_text(
+                "\n".join(sorted_fpx) + "\n", encoding="utf-8",
+            )
+            log.info(
+                "fping unreachable: %d firewalled host(s) added to scan targets",
+                len(new_fpx_unreachable),
+            )
+            live_ips |= new_fpx_unreachable
+        else:
+            log.info(
+                "fping unreachable: %d IP(s) already captured by other tools",
+                len(fping_unreachable),
+            )
+
+    unreachable_ips = candidate_ips - live_ips
     sorted_unreachable = sorted(unreachable_ips, key=_ip_sort_key)
 
     # Always persist the unreachable list as a diagnostic — operators can

@@ -16,6 +16,11 @@ RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/re
         | grep -o '"browser_download_url": *"[^"]*linux-amd64[^"]*"' | head -1 | cut -d'"' -f4) \
     && curl -sL "$GOWITNESS_URL" -o /tools/gowitness && chmod +x /tools/gowitness
 
+# ── Stage 1.5: build fingerprintx from source (Go toolchain required) ──
+# Repo is archived (read-only) and publishes no pre-built binaries.
+FROM golang:1.23-bookworm AS fpx-builder
+RUN go install github.com/praetorian-inc/fingerprintx/cmd/fingerprintx@latest
+
 # ── Stage 2: final image ──
 FROM python:3.12-slim-bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -52,6 +57,9 @@ COPY --from=pd-tools /tools/nuclei    /usr/local/bin/nuclei
 COPY --from=pd-tools /tools/httpx     /usr/local/bin/httpx
 COPY --from=pd-tools /tools/naabu     /usr/local/bin/naabu
 COPY --from=pd-tools /tools/gowitness /usr/local/bin/gowitness
+
+# fingerprintx — service fingerprinting for web detection refinement
+COPY --from=fpx-builder /go/bin/fingerprintx /usr/local/bin/fingerprintx
 
 # App code
 COPY web_portal/ .

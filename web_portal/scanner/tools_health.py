@@ -35,8 +35,9 @@ TOOLS = [
     ('Searchsploit', 'searchsploit', ['-h']),
     ('WPScan',       'wpscan',       ['--version']),
     ('Nikto',         'nikto',        ['-Version']),
-    ('NetExec',       'nxc',          ['--version']),
-    ('enum4linux',   'enum4linux',   ['-h']),
+    ('NetExec',        'nxc',           ['--version']),
+    ('enum4linux',    'enum4linux',    ['-h']),
+    ('fingerprintx',  'fingerprintx',  ['-h']),
 ]
 
 

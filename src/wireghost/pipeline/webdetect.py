@@ -4,14 +4,17 @@ Port filtering is verification-driven: port numbers and nmap labels are NEVER
 trusted as positive indicators of a web service.  Anyone can run SSH on 8080
 or nginx on 2222.  The only reliable test is an actual HTTP request.
 
-Nmap IS trusted for one narrow thing: confidently identifying protocols that
-are NOT HTTP (SSH, MySQL, SMTP, SMB, etc.).  These are protocol-level
-fingerprints that nmap gets right reliably.  If nmap says a port is ssh,
-we skip it -- not because "ssh isn't web" but because nmap's ssh fingerprint
-is definitive.
+Two-layer filter:
 
-Everything else -- unknown services, uncertain detections, ports nmap couldn't
-identify -- gets probed.  The HTTP HEAD request IS the verification.
+1. **nmap -sV + fingerprintx** — service names on ports come from the portscan
+   phase, which runs nmap -sV first, then augments uncertain ports with
+   fingerprintx.  Only ports with a confidently-identified non-web protocol
+   (SSH, MySQL, SMTP, SMB, etc.) are skipped.  Everything else passes through.
+
+2. **HTTP HEAD request** — the final verification.  Tries HTTP then HTTPS on
+   every surviving candidate.  Any HTTP response (status < 600) confirms a
+   web endpoint.  This IS the verification — no port number or label is
+   trusted on its own.
 """
 
 from __future__ import annotations
@@ -38,30 +41,37 @@ _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=5)
 
 # ── Web candidate filter ────────────────────────────────────────────────────
 
-# Protocols nmap fingerprints with high confidence.  If nmap says a port is
-# one of these, it almost certainly is -- so we skip HTTP probing.  Every
-# other port (uncertain, unknown, or even tagged "http" by nmap) gets probed
-# because port numbers and service labels are NOT trusted as positive signals.
-# The HTTP HEAD request IS the verification.
+# Protocols identified with high confidence by nmap -sV or fingerprintx.
+# Both tools run in the portscan phase — nmap first, then fingerprintx
+# augments ports nmap couldn't identify.  If either tool says a port is
+# one of these, it almost certainly is — so we skip HTTP probing.  Every
+# other port (uncertain, unknown, or even tagged "http") gets probed
+# because port numbers and service labels are NOT trusted as positive
+# signals.  The HTTP HEAD request IS the verification.
+#
+# Includes naming conventions from BOTH tools:
+#   nmap:        domain, postgresql, ms-sql-s, ms-sql-m, rpcbind
+#   fingerprintx: dns,   postgres,   mssql,              rpc
 _NON_WEB_PROTOCOLS: frozenset[str] = frozenset({
-    "ssh", "smtp", "domain", "snmp", "ldap", "ldaps", "smb",
-    "netbios-ssn", "microsoft-ds", "mysql", "postgresql", "redis",
-    "mongodb", "ftp", "ftp-data", "telnet", "ms-sql-s", "ms-sql-m",
-    "oracle-tns", "oracle", "rdp", "ms-wbt-server", "vnc", "nfs",
-    "nfs-oracle", "rpcbind", "mountd", "nlockmgr", "pop3", "pop3s",
-    "imap", "imaps", "ntp", "dhcp", "dhcpv6", "tftp", "sip", "sips",
-    "rtsp", "rsync", "ipp", "ipp-ssl", "cups", "jetdirect",
+    "ssh", "smtp", "domain", "dns", "snmp", "ldap", "ldaps", "smb",
+    "netbios-ssn", "microsoft-ds", "mysql", "postgresql", "postgres",
+    "redis", "mongodb", "ftp", "ftp-data", "telnet",
+    "ms-sql-s", "ms-sql-m", "mssql", "oracle-tns", "oracle",
+    "rdp", "ms-wbt-server", "vnc", "nfs", "nfs-oracle",
+    "rpcbind", "rpc", "mountd", "nlockmgr",
+    "pop3", "pop3s", "imap", "imaps", "ntp", "dhcp", "dhcpv6",
+    "tftp", "sip", "sips", "rtsp", "rsync",
+    "ipp", "ipp-ssl", "cups", "jetdirect",
     "docker", "docker-tls", "kubernetes", "kubelet",
 })
-
 
 def _should_probe(port: Port) -> tuple[bool, str]:
     """Return (should_probe, reason) for a port.
 
-    Only ONE rule: if nmap confidently identifies a non-web protocol, skip it.
-    Everything else -- including ports nmap calls "http", common web ports,
-    and ports nmap couldn't identify at all -- gets probed.  The HTTP request
-    itself is the only verification that matters.
+    Only ONE rule: if the portscan phase (nmap -sV or fingerprintx) confidently
+    identified a non-web protocol, skip it.  Everything else — including ports
+    tagged "http", common web ports, and ports neither tool could identify —
+    gets probed.  The HTTP request itself is the only verification.
     """
     svc = port.service_name.lower() if port.service_name else ""
 
@@ -127,12 +137,8 @@ async def _detect_technologies(
                     name, version = tech, ""
                 host.technologies.append(WebTech(name=name.strip(), version=version.strip(), url=url))
 
-        # Parse additional fields from httpx enrichment flags
-        status_code = item.get("status_code", 0)
         title = item.get("title", "")
         server = item.get("webserver", "")
-        favicon_hash = item.get("favicon", {}).get("hash", "") if isinstance(item.get("favicon"), dict) else ""
-        jarm = item.get("jarm", "")
 
         if server:
             host.technologies.append(WebTech(name="Server", version=server, url=url))
@@ -150,9 +156,15 @@ async def probe_host(
 ) -> None:
     """Probe open ports on *host* for HTTP and HTTPS endpoints.
 
-    Ports are filtered through ``_should_probe`` which skips only ports
-    where nmap has confidently identified a non-web protocol.  Everything
-    else gets probed — the HTTP request itself is the verification.
+    Two-layer detection:
+
+    1. Service-name filter (``_should_probe``) — skip ports where the
+       portscan phase (nmap -sV + fingerprintx) confidently identified a
+       non-web protocol.  Ports with unknown or HTTP-like services pass
+       through.
+
+    2. HTTP HEAD request — the final verification.  HTTP then HTTPS on
+       every surviving candidate.  Any HTTP response confirms a web endpoint.
 
     Discovered URLs are appended to ``host.web_endpoints`` and written to
     disk under the host web directory and the global web directory.
