@@ -23,7 +23,8 @@ WG.renderScanDetail = function(id) {
   var scanHosts = WG.getCached('scan_hosts_' + id, '/scans/' + id + '/hosts/', 'hosts').filter(function(h) { return h.scan === id || true; });
   var scanFindings = WG.getCached('scan_findings_' + id, '/scans/' + id + '/findings/', 'findings').filter(function(f) { return f.scan === id || true; });
   var scanReports = scan.reports || [];
-  var progress = scan.status === 'running' ? 65 : scan.status === 'completed' ? 100 : 0;
+  var progress = scan.status === 'running' ? WG.phaseProgress(scan) : scan.status === 'completed' ? 100 : 0;
+  var phase = scan.current_phase || 'pending';
 
   return '' +
     '<div class="breadcrumbs"><a onclick="WG.navigate(\'scans\')">Scans</a><span class="sep">/</span><span>' + esc(scan.name) + '</span></div>' +
@@ -39,11 +40,12 @@ WG.renderScanDetail = function(id) {
       '<div class="info-item"><div class="info-label">Target</div><div class="info-value"><span class="host-tag">' + esc(scan.target) + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Type</div><div class="info-value"><span class="tag">' + esc(scan.scan_type) + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Started</div><div class="info-value mono">' + WG.fmtDate(scan.started_at) + '</div></div>' +
-      '<div class="info-item"><div class="info-label">Duration</div><div class="info-value mono">' + WG.fmtDuration(scan.duration_seconds) + '</div></div>' +
+      '<div class="info-item"><div class="info-label">Duration</div><div class="info-value mono">' + (scan.status === 'running' ? '<span class="elapsed-live" data-started-at="' + (scan.started_at || '') + '">' + WG.fmtDuration(scan.elapsed_seconds || 0) + '</span>' : WG.fmtDuration(scan.duration_seconds)) + '</div></div>' +
+      '<div class="info-item"><div class="info-label">Phase</div><div class="info-value mono">' + WG.phaseLabel(phase) + (scan.hosts_scanned && scan.hosts_total ? ' (' + scan.hosts_scanned + '/' + scan.hosts_total + ')' : '') + '</div></div>' +
       '<div class="info-item"><div class="info-label">Parallelism</div><div class="info-value mono">' + scan.parallelism + '</div></div>' +
     '</div>' +
     (scan.status === 'running' ?
-      '<div style="margin-bottom:24px;"><div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span class="mono" style="font-size:0.75rem;color:var(--text-dim);">Scan progress</span><span class="mono" style="font-size:0.75rem;color:var(--accent);">' + progress + '%</span></div><div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%;"></div></div></div>' : '') +
+      '<div style="margin-bottom:24px;"><div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span class="mono" style="font-size:0.75rem;color:var(--text-dim);">Scan progress — ' + WG.phaseLabel(phase) + '</span><span class="mono" style="font-size:0.75rem;color:var(--accent);">' + progress + '%</span></div><div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%;"></div></div></div>' : '') +
     (scan.error_message ?
       '<div class="panel" style="border-color:rgba(255,59,92,0.2);margin-bottom:20px;"><div class="panel-body" style="color:var(--critical);font-family:var(--font-mono);font-size:0.82rem;">Error: ' + esc(scan.error_message) + '</div></div>' : '') +
     '<div class="stats-grid" style="margin-bottom:24px;">' +

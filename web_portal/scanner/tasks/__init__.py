@@ -59,8 +59,64 @@ def run_scan(self, scan_id):
             output_dir=str(output_dir),
         )
 
-        # Run the async pipeline
-        report = asyncio.run(run_pipeline(config))
+        # Progress updater — runs in a dedicated daemon thread so DB writes
+        # are never inside the asyncio event loop, avoiding Django's async-
+        # safety guard entirely.  The callback (called from inside the loop)
+        # only pushes a tuple onto a thread-safe queue; the thread picks it
+        # up, opens its own DB connection, and executes the UPDATE.
+        import threading as _threading
+        from queue import Queue as _Queue, Empty as _Empty
+
+        _progress_queue: _Queue = _Queue()
+        _progress_stop = _threading.Event()
+
+        def _progress_thread() -> None:
+            from django.db import connection as _conn
+            while not _progress_stop.is_set():
+                try:
+                    item = _progress_queue.get(timeout=0.5)
+                except _Empty:
+                    continue
+                if item is None:          # sentinel — shut down
+                    break
+                phase, done, total = item
+                try:
+                    with _conn.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE scanner_scan SET current_phase=%s, "
+                            "hosts_scanned=%s, hosts_total=%s "
+                            "WHERE id=%s",
+                            [phase, done, total, scan_id],
+                        )
+                except Exception:
+                    pass                  # best-effort; never fail the scan
+                finally:
+                    _progress_queue.task_done()
+            # Close the thread-local connection on exit so it isn't leaked.
+            try:
+                _conn.close()
+            except Exception:
+                pass
+
+        _thread = _threading.Thread(target=_progress_thread, daemon=True)
+        _thread.start()
+
+        def _on_progress(phase: str, done: int, total: int) -> None:
+            # Drop duplicate progress updates to keep the queue shallow.
+            # If the queue already has an item for this phase at the same
+            # count, skip enqueuing.
+            try:
+                _progress_queue.put_nowait((phase, done, total))
+            except Exception:
+                pass
+
+        try:
+            report = asyncio.run(run_pipeline(config, on_progress=_on_progress))
+        finally:
+            # Drain remaining updates then stop the thread.
+            _progress_stop.set()
+            _progress_queue.put(None)          # sentinel
+            _thread.join(timeout=5)
 
         # ── Persist results to ORM ──
         _persist_results(scan, report)

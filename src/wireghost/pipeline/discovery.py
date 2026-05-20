@@ -10,15 +10,12 @@ When arp-scan and/or netdiscover are available, Layer 2 ARP scanning
 runs alongside ICMP probes to catch firewall-silent hosts and collect
 MAC address + vendor data.
 
-Enhanced discovery (enabled by default) adds:
-  - TCP SYN ping to 17 high-value ports (SSH, SMB, RDP, databases, etc.)
-    beyond nmap's default 80+443 — catches hosts that drop probes to
-    80/443 but respond on other ports.
-  - UDP ping to 5 common UDP services (DNS, NTP, NetBIOS, SNMP, IKE)
-    — catches hosts behind TCP/ICMP-filtering firewalls.
-
 Passive DNS sweep (enabled by default) runs nmap -sL -R to resolve
 PTR records across the target range without sending a single packet.
+
+nmap uses its default host-discovery probes (ICMP echo + timestamp,
+TCP SYN to 443, TCP ACK to 80) rather than a custom port list, keeping
+discovery fast even on large CIDRs.
 """
 
 from __future__ import annotations
@@ -28,7 +25,7 @@ import ipaddress
 import logging
 import re
 import shutil
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from wireghost.utils.network import is_valid_ipv4
 from wireghost.utils.process import run_tool
@@ -50,18 +47,6 @@ _FPING_UNREACHABLE_RE = re.compile(
 
 # Subnets with more than 512 IPs (prefix < /24) get partitioned
 _PARTITION_THRESHOLD = 23
-
-# TCP ports probed during enhanced discovery (nmap -PS<ports>).
-# These are high-value ports whose mere presence indicates a live host —
-# SSH, SMB, RDP, databases, web alternates, WinRM.
-_TCP_DISCOVERY_PORTS = (
-    "22,25,53,111,135,139,445,1433,3306,3389,5432,5985,6379,8080,8443,9090,9200"
-)
-
-# UDP ports probed during enhanced discovery (nmap -PU<ports>).
-# UDP ping bypasses firewalls that drop TCP SYN and ICMP but allow UDP
-# (common in enterprise environments for DNS, NTP, SNMP).
-_UDP_DISCOVERY_PORTS = "53,123,137,161,500"
 
 
 def _range_to_cidrs(target: str) -> list[ipaddress.IPv4Network] | None:
@@ -175,7 +160,6 @@ async def _scan_subnet(
     run_arp: bool,
     has_arpscan: bool,
     has_netdiscover: bool,
-    enhanced: bool = True,
 ) -> None:
     """Scan a single subnet — nmap, fping, and ARP tools run in parallel."""
     async with semaphore:
@@ -183,18 +167,8 @@ async def _scan_subnet(
             log.info("Scanning subnet %d/%d: %s", index, total, subnet)
 
         async def _run_nmap() -> None:
-            if enhanced:
-                nmap_args = [
-                    "nmap", "-sn",
-                    "-PS" + _TCP_DISCOVERY_PORTS,
-                    "-PU" + _UDP_DISCOVERY_PORTS,
-                    subnet,
-                ]
-            else:
-                nmap_args = ["nmap", "-sn", subnet]
-
             result = await run_tool(
-                nmap_args, timeout=timeout,
+                ["nmap", "-sn", subnet], timeout=timeout,
                 label=f"nmap -sn {subnet}",
             )
             if result.returncode == 0:
@@ -270,11 +244,16 @@ async def _dns_sweep_subnet(
 
 async def discover_hosts(
     config: ScanConfig, tree: OutputTree,
+    on_progress: "Callable[[str, int, int], None] | None" = None,
 ) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Run nmap -sn, fping, ARP tools, and passive DNS against *config.target*.
 
     Large CIDRs (>/24) are automatically partitioned into /24 subnets
     and scanned concurrently (limited by config.parallelism).
+
+    If *on_progress* is provided it is called as
+    ``on_progress('discovery', subnets_done, total_subnets)``
+    after each subnet scan completes.
 
     Returns
     -------
@@ -313,13 +292,6 @@ async def discover_hosts(
             tools.append("netdiscover")
         log.info("ARP scanning enabled: %s", ", ".join(tools))
 
-    enhanced = config.enhanced_discovery
-    if enhanced:
-        log.info(
-            "Enhanced discovery: TCP ports=%s UDP ports=%s",
-            _TCP_DISCOVERY_PORTS, _UDP_DISCOVERY_PORTS,
-        )
-
     live_ips: set[str] = set()
     mac_vendor: dict[str, tuple[str, str]] = {}
     fping_unreachable: set[str] = set()
@@ -330,15 +302,21 @@ async def discover_hosts(
     # Active discovery + passive DNS sweep all fanned out per /24 subnet
     # so DNS PTR lookups run in parallel rather than sequentially.
     coros: list[Any] = []
-    for i, subnet in enumerate(subnets):
-        coros.append(
-            _scan_subnet(
-                subnet, timeout, live_ips, mac_vendor, fping_unreachable,
-                semaphore,
-                i + 1, total, run_arp, has_arpscan, has_netdiscover,
-                enhanced=enhanced,
-            )
+    subnets_done = 0
+
+    async def _tracked_scan_subnet(subnet: str, idx: int) -> None:
+        nonlocal subnets_done
+        await _scan_subnet(
+            subnet, timeout, live_ips, mac_vendor, fping_unreachable,
+            semaphore,
+            idx, total, run_arp, has_arpscan, has_netdiscover,
         )
+        subnets_done += 1
+        if on_progress:
+            on_progress("discovery", subnets_done, total)
+
+    for i, subnet in enumerate(subnets):
+        coros.append(_tracked_scan_subnet(subnet, i + 1))
         if not config.skip_passive_dns:
             coros.append(_dns_sweep_subnet(subnet, timeout, semaphore))
 

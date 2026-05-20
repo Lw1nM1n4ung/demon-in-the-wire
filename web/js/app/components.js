@@ -1,5 +1,56 @@
 /* Wire_Ghost — Shared render components */
 
+/* ── Real-time progress calculation ──
+ * Uses current_phase + hosts_scanned/hosts_total from the API to compute an
+ * actual progress percentage. Falls back to the old time-based estimate only
+ * when current_phase hasn't been reported yet (pre-discovery). */
+WG.phaseProgress = function(s) {
+  var phases = {
+    'pending':   { base: 0,  span: 5 },
+    'discovery': { base: 5,  span: 20 },
+    'portscan':  { base: 25, span: 65 },
+    'reports':   { base: 90, span: 8 },
+    'completed': { base: 100, span: 0 },
+    'failed':    { base: 100, span: 0 },
+    'cancelled': { base: 100, span: 0 }
+  };
+  var p = phases[s.current_phase] || phases['pending'];
+  if (s.hosts_scanned && s.hosts_total && s.hosts_total > 0) {
+    return Math.min(99, Math.floor(p.base + (s.hosts_scanned / s.hosts_total) * p.span));
+  }
+  return p.base;
+};
+
+/* ── Global elapsed-time ticker ──
+ * Updates every .elapsed-live element once per second. Each element carries a
+ * data-started-at ISO-8601 timestamp. The ticker runs once and uses a single
+ * setInterval for all visible pages — no per-render leak. */
+(function() {
+  var _tickerStarted = false;
+  WG._startElapsedTicker = function() {
+    if (_tickerStarted) return;
+    _tickerStarted = true;
+    setInterval(function() {
+      document.querySelectorAll('.elapsed-live').forEach(function(el) {
+        var started = el.getAttribute('data-started-at');
+        if (!started) return;
+        var secs = Math.floor((Date.now() - Date.parse(started)) / 1000);
+        if (secs < 0) secs = 0;
+        el.textContent = WG.fmtDuration(secs);
+      });
+    }, 1000);
+  };
+})();
+
+/* ── Phase label helper ── */
+WG.phaseLabel = function(phase) {
+  var labels = {
+    'pending': 'Pending', 'discovery': 'Discovery', 'portscan': 'Port Scan',
+    'reports': 'Reports', 'completed': 'Done', 'failed': 'Failed', 'cancelled': 'Cancelled'
+  };
+  return labels[phase] || phase || 'Pending';
+};
+
 WG.sevBarHtml = function(scan) {
   var total = (scan.critical_count || 0) + (scan.high_count || 0) + (scan.medium_count || 0) + (scan.low_count || 0) + (scan.info_count || 0);
   if (!total) return '<div class="sev-bar"><span class="i" style="width:100%"></span></div>';

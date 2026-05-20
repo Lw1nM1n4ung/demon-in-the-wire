@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from typing import Callable
 
 from wireghost.config import ScanConfig
 from wireghost.models.finding import Finding
@@ -50,7 +51,10 @@ def _dedup_findings(findings: list[Finding]) -> list[Finding]:
     return deduped
 
 
-async def run_pipeline(config: ScanConfig) -> ScanReport:
+async def run_pipeline(
+    config: ScanConfig,
+    on_progress: Callable[[str, int, int], None] | None = None,
+) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
 
     Phases:
@@ -60,6 +64,10 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         4. Web detection (parallel per host)
         5. Vulnerability scanning (parallel per host, nuclei + nmap concurrent)
         6. Report generation
+
+    If *on_progress* is provided it is called at phase boundaries as
+    ``on_progress(phase, done, total)`` where *phase* is one of
+    ``discovery``, ``portscan``, ``reports``.
     """
     scan_start = datetime.now()
 
@@ -87,7 +95,9 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
 
     # --- Phase 2: Discovery ---
     log.info("Phase 2: Host discovery")
-    live_ips, mac_vendor_map = await discover_hosts(config, tree)
+    if on_progress:
+        on_progress("discovery", 0, 0)
+    live_ips, mac_vendor_map = await discover_hosts(config, tree, on_progress=on_progress)
 
     if not live_ips:
         log.warning("No live hosts discovered -- nothing to scan")
@@ -103,7 +113,10 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         "Launching per-host pipelines: %d host(s), parallelism=%d",
         len(live_ips), config.parallelism,
     )
+    if on_progress:
+        on_progress("portscan", 0, len(live_ips))
     sem = asyncio.Semaphore(config.parallelism)
+    hosts_done = 0
 
     async def _host_pipeline(ip: str) -> tuple[Host, list[Finding]]:
         """Run the full scan pipeline for a single host."""
@@ -169,8 +182,16 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         )
         return host, findings
 
+    async def _host_with_progress(ip: str) -> tuple[Host, list[Finding]]:
+        nonlocal hosts_done
+        result = await _host_pipeline(ip)
+        hosts_done += 1
+        if on_progress:
+            on_progress("portscan", hosts_done, len(live_ips))
+        return result
+
     results = await asyncio.gather(
-        *[_host_pipeline(ip) for ip in live_ips],
+        *[_host_with_progress(ip) for ip in live_ips],
         return_exceptions=True,
     )
 
@@ -201,6 +222,8 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
     )
 
     # --- Phase 6: Report generation ---
+    if on_progress:
+        on_progress("reports", 0, 0)
     _generate_reports(config, report, tree)
 
     return report

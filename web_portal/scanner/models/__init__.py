@@ -153,6 +153,9 @@ class Scan(models.Model):
     target = models.CharField(max_length=500)
     scan_type = models.CharField(max_length=20, choices=SCAN_TYPE_CHOICES, default='full')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    current_phase = models.CharField(max_length=20, default='pending')
+    hosts_scanned = models.IntegerField(default=0)
+    hosts_total = models.IntegerField(default=0)
     parallelism = models.IntegerField(default=10)
     timeout = models.IntegerField(default=3600)
     report_formats = models.CharField(max_length=100, default='dashboard,html,docx,xlsx')
@@ -200,6 +203,13 @@ class Scan(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+    @property
+    def elapsed_seconds(self):
+        """Real-time elapsed time for running scans; stored duration otherwise."""
+        if self.status in ('running', 'pending') and self.started_at:
+            return int((timezone.now() - self.started_at).total_seconds())
+        return self.duration_seconds or 0
 
     def __str__(self):
         return f"{self.name} ({self.target})"

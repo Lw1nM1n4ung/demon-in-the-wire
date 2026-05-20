@@ -201,6 +201,9 @@ WG.render = function() {
   main.textContent = '';
   main.insertAdjacentHTML('beforeend', renderFn());
   main.scrollTop = 0;
+
+  /* Start the live elapsed-time ticker if any running scans are visible. */
+  if (WG._startElapsedTicker) WG._startElapsedTicker();
 };
 
 /* ── Event binding ── */

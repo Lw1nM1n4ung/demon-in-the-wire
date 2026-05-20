@@ -111,6 +111,10 @@ class ReportSerializer(serializers.ModelSerializer):
 
 class ScanSerializer(serializers.ModelSerializer):
     reports = ReportSerializer(many=True, read_only=True)
+    elapsed_seconds = serializers.IntegerField(read_only=True)
+    current_phase = serializers.CharField(read_only=True)
+    hosts_scanned = serializers.IntegerField(read_only=True)
+    hosts_total = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Scan
@@ -119,12 +123,17 @@ class ScanSerializer(serializers.ModelSerializer):
 
 class ScanListSerializer(serializers.ModelSerializer):
     reports = ReportSerializer(many=True, read_only=True)
+    elapsed_seconds = serializers.IntegerField(read_only=True)
+    current_phase = serializers.CharField(read_only=True)
+    hosts_scanned = serializers.IntegerField(read_only=True)
+    hosts_total = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Scan
         fields = ['id', 'name', 'target', 'scan_type', 'status', 'hosts_count', 'findings_count',
                   'critical_count', 'high_count', 'medium_count', 'low_count', 'info_count',
-                  'duration_seconds', 'created_at', 'reports']
+                  'duration_seconds', 'elapsed_seconds', 'current_phase', 'hosts_scanned',
+                  'hosts_total', 'created_at', 'reports']
 
 
 class ScanCreateSerializer(serializers.Serializer):
