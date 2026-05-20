@@ -26,6 +26,69 @@ WG.renderScanDetail = function(id) {
   var progress = scan.status === 'running' ? WG.phaseProgress(scan) : scan.status === 'completed' ? 100 : 0;
   var phase = scan.current_phase || 'pending';
 
+  // ── Live polling for running scans ──
+  // Every 3s, re-fetch scan detail + hosts + findings. Update cache + DOM
+  // in-place so the user sees results trickle in without page flicker.
+  WG._stopScanPolling();
+  if (scan.status === 'running') {
+    WG._startElapsedTicker();
+    WG._scanPollTimer = setInterval(function() {
+      if (WG.state.currentPage !== 'scan') { WG._stopScanPolling(); return; }
+      // Fetch all three endpoints in parallel
+      Promise.all([
+        WG.api('/scans/' + id + '/'),
+        WG.api('/scans/' + id + '/hosts/'),
+        WG.api('/scans/' + id + '/findings/')
+      ]).then(function(results) {
+        var scanData = results[0];
+        var hostsData = results[1];
+        var findingsData = results[2];
+        if (!scanData) return;
+        // Update caches
+        WG._cache['scan_' + id] = scanData;
+        WG._cacheTime['scan_' + id] = Date.now();
+        if (Array.isArray(hostsData)) {
+          WG._cache['scan_hosts_' + id] = hostsData;
+          WG._cacheTime['scan_hosts_' + id] = Date.now();
+        }
+        if (Array.isArray(findingsData)) {
+          WG._cache['scan_findings_' + id] = findingsData;
+          WG._cacheTime['scan_findings_' + id] = Date.now();
+        }
+        // Update counts in stat cards
+        var _u = function(sel, val) { var el = document.querySelector(sel); if (el) el.textContent = val; };
+        _u('#scan-hosts-count', scanData.hosts_count);
+        _u('#scan-ports-count', scanData.ports_count);
+        _u('#scan-critical-count', scanData.critical_count);
+        _u('#scan-high-count', scanData.high_count);
+        _u('#scan-medium-count', scanData.medium_count);
+        _u('#scan-findings-count', scanData.findings_count);
+        // Update host/finding tab counts
+        _u('#scanTabContent-hosts-count .count', Array.isArray(hostsData) ? hostsData.length : 0);
+        _u('#scanTabContent-findings-count .count', Array.isArray(findingsData) ? findingsData.length : 0);
+        // Update phase + progress
+        var phase = scanData.current_phase || 'pending';
+        var progress = WG.phaseProgress(scanData);
+        _u('#scan-phase-label', WG.phaseLabel(phase));
+        _u('#scan-progress-pct', progress + '%');
+        var fill = document.querySelector('.progress-fill');
+        if (fill) fill.style.width = progress + '%';
+        // Re-render the active tab content if new data arrived
+        var activeTab = document.querySelector('#scanTabs .tab.active');
+        if (activeTab) {
+          var tab = activeTab.dataset.tab;
+          var content = document.getElementById('scanTabContent');
+          if (content) {
+            if (tab === 'hosts' && Array.isArray(hostsData)) content.innerHTML = WG._scanHostsTab(hostsData);
+            else if (tab === 'findings' && Array.isArray(findingsData)) content.innerHTML = WG._scanFindingsTab(findingsData);
+          }
+        }
+        // If scan finished, stop polling
+        if (scanData.status !== 'running') WG._stopScanPolling();
+      });
+    }, 3000);
+  }
+
   return '' +
     '<div class="breadcrumbs"><a onclick="WG.navigate(\'scans\')">Scans</a><span class="sep">/</span><span>' + esc(scan.name) + '</span></div>' +
     '<div class="page-header">' +
@@ -41,23 +104,24 @@ WG.renderScanDetail = function(id) {
       '<div class="info-item"><div class="info-label">Type</div><div class="info-value"><span class="tag">' + esc(scan.scan_type) + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Started</div><div class="info-value mono">' + WG.fmtDate(scan.started_at) + '</div></div>' +
       '<div class="info-item"><div class="info-label">Duration</div><div class="info-value mono">' + (scan.status === 'running' ? '<span class="elapsed-live" data-started-at="' + (scan.started_at || '') + '">' + WG.fmtDuration(scan.elapsed_seconds || 0) + '</span>' : WG.fmtDuration(scan.duration_seconds)) + '</div></div>' +
-      '<div class="info-item"><div class="info-label">Phase</div><div class="info-value mono">' + WG.phaseLabel(phase) + (scan.hosts_scanned && scan.hosts_total ? ' (' + scan.hosts_scanned + '/' + scan.hosts_total + ')' : '') + '</div></div>' +
+      '<div class="info-item"><div class="info-label">Phase</div><div class="info-value mono" id="scan-phase-label">' + WG.phaseLabel(phase) + (scan.hosts_scanned && scan.hosts_total ? ' (' + scan.hosts_scanned + '/' + scan.hosts_total + ')' : '') + '</div></div>' +
       '<div class="info-item"><div class="info-label">Parallelism</div><div class="info-value mono">' + scan.parallelism + '</div></div>' +
     '</div>' +
     (scan.status === 'running' ?
-      '<div style="margin-bottom:24px;"><div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span class="mono" style="font-size:0.75rem;color:var(--text-dim);">Scan progress — ' + WG.phaseLabel(phase) + '</span><span class="mono" style="font-size:0.75rem;color:var(--accent);">' + progress + '%</span></div><div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%;"></div></div></div>' : '') +
+      '<div style="margin-bottom:24px;"><div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span class="mono" style="font-size:0.75rem;color:var(--text-dim);">Scan progress — <span id="scan-phase-label">' + WG.phaseLabel(phase) + '</span></span><span class="mono" style="font-size:0.75rem;color:var(--accent);" id="scan-progress-pct">' + progress + '%</span></div><div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%;"></div></div></div>' : '') +
     (scan.error_message ?
       '<div class="panel" style="border-color:rgba(255,59,92,0.2);margin-bottom:20px;"><div class="panel-body" style="color:var(--critical);font-family:var(--font-mono);font-size:0.82rem;">Error: ' + esc(scan.error_message) + '</div></div>' : '') +
     '<div class="stats-grid" style="margin-bottom:24px;">' +
-      '<div class="stat-card"><div class="stat-label">Hosts</div><div class="stat-value">' + scan.hosts_count + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Ports</div><div class="stat-value">' + scan.ports_count + '</div></div>' +
-      '<div class="stat-card critical"><div class="stat-label">Critical</div><div class="stat-value">' + scan.critical_count + '</div></div>' +
-      '<div class="stat-card high"><div class="stat-label">High</div><div class="stat-value">' + scan.high_count + '</div></div>' +
-      '<div class="stat-card medium"><div class="stat-label">Medium</div><div class="stat-value">' + scan.medium_count + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Hosts</div><div class="stat-value" id="scan-hosts-count">' + scan.hosts_count + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Ports</div><div class="stat-value" id="scan-ports-count">' + scan.ports_count + '</div></div>' +
+      '<div class="stat-card critical"><div class="stat-label">Critical</div><div class="stat-value" id="scan-critical-count">' + scan.critical_count + '</div></div>' +
+      '<div class="stat-card high"><div class="stat-label">High</div><div class="stat-value" id="scan-high-count">' + scan.high_count + '</div></div>' +
+      '<div class="stat-card medium"><div class="stat-label">Medium</div><div class="stat-value" id="scan-medium-count">' + scan.medium_count + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Findings</div><div class="stat-value" id="scan-findings-count">' + scan.findings_count + '</div></div>' +
     '</div>' +
     '<div class="tabs" id="scanTabs">' +
-      '<div class="tab active" data-tab="hosts" onclick="WG.switchScanTab(\'hosts\',\'' + id + '\')">Hosts <span class="count">' + scanHosts.length + '</span></div>' +
-      '<div class="tab" data-tab="findings" onclick="WG.switchScanTab(\'findings\',\'' + id + '\')">Findings <span class="count">' + scanFindings.length + '</span></div>' +
+      '<div class="tab active" data-tab="hosts" id="scanTabContent-hosts-count" onclick="WG.switchScanTab(\'hosts\',\'' + id + '\')">Hosts <span class="count">' + scanHosts.length + '</span></div>' +
+      '<div class="tab" data-tab="findings" id="scanTabContent-findings-count" onclick="WG.switchScanTab(\'findings\',\'' + id + '\')">Findings <span class="count">' + scanFindings.length + '</span></div>' +
       '<div class="tab" data-tab="reports" onclick="WG.switchScanTab(\'reports\',\'' + id + '\')">Reports <span class="count">' + scanReports.length + '</span></div>' +
     '</div>' +
     '<div id="scanTabContent">' + WG._scanHostsTab(scanHosts) + '</div>';
@@ -107,6 +171,10 @@ WG._scanReportsTab = function(reports) {
         '<td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();WG.downloadReport(\'' + r.id + '\')">Download</button></td></tr>';
     }).join('') +
     '</tbody></table></div>';
+};
+
+WG._stopScanPolling = function() {
+  if (WG._scanPollTimer) { clearInterval(WG._scanPollTimer); WG._scanPollTimer = null; }
 };
 
 WG.switchScanTab = function(tab, scanId) {

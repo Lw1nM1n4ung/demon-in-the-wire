@@ -66,6 +66,8 @@ def _dedup_findings(findings: list[Finding]) -> list[Finding]:
 async def run_pipeline(
     config: ScanConfig,
     on_progress: Callable[[str, int, int], None] | None = None,
+    on_discovery_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
+    on_host_complete: Callable[[Host, list[Finding]], None] | None = None,
 ) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
 
@@ -74,6 +76,12 @@ async def run_pipeline(
     keys in :data:`PHASE_ORDER` (``discovery`` → ``portscan`` →
     ``webdetect`` → ``webcrawl`` → ``enumeration`` → ``reports`` →
     ``completed``).
+
+    If *on_discovery_complete* is provided it is called right after
+    host discovery with the list of live IPs and the MAC/vendor map.
+
+    If *on_host_complete* is provided it is called after each host
+    finishes its full pipeline with the populated Host and its Findings.
     """
     scan_start = datetime.now()
 
@@ -104,6 +112,9 @@ async def run_pipeline(
     if on_progress:
         on_progress("discovery", 0, 0)
     live_ips, mac_vendor_map = await discover_hosts(config, tree, on_progress=on_progress)
+
+    if on_discovery_complete:
+        on_discovery_complete(live_ips, mac_vendor_map)
 
     if not live_ips:
         log.warning("No live hosts discovered -- nothing to scan")
@@ -227,6 +238,8 @@ async def run_pipeline(
         host, findings = r
         hosts.append(host)
         all_findings.extend(findings)
+        if on_host_complete:
+            on_host_complete(host, findings)
 
     scan_end = datetime.now()
     report = ScanReport(

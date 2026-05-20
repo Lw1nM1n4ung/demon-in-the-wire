@@ -59,11 +59,18 @@ def run_scan(self, scan_id):
             output_dir=str(output_dir),
         )
 
-        # Progress updater — runs in a dedicated daemon thread so DB writes
-        # are never inside the asyncio event loop, avoiding Django's async-
-        # safety guard entirely.  The callback (called from inside the loop)
-        # only pushes a tuple onto a thread-safe queue; the thread picks it
-        # up, opens its own DB connection, and executes the UPDATE.
+        # Progress + result persistence daemon thread.
+        # Runs in a dedicated daemon thread so DB writes are never inside the
+        # asyncio event loop, avoiding Django's async-safety guard entirely.
+        # The callbacks (called from inside the loop) only push tuples onto a
+        # thread-safe queue; the thread picks them up, opens its own DB
+        # connection, and executes the work.
+        #
+        # Queue items:
+        #   ("progress", phase, done, total)           — progress update
+        #   ("discovery", live_ips, mac_vendor_map)    — create Host records
+        #   ("host_result", host, findings)            — update Host, create Ports/Findings
+        #
         # MySQL stores UUIDs without dashes (CHAR(32)), so we strip them
         # from the string form before passing to raw SQL.
         import threading as _threading
@@ -75,6 +82,12 @@ def run_scan(self, scan_id):
 
         def _progress_thread() -> None:
             from django.db import connection as _conn
+            from django.db.models import F as _F
+            from scanner.models import (
+                Host as _DBHost, Port as _DBPort, Finding as _DBFinding,
+                Technology as _DBTech, Screenshot as _DBScreenshot,
+                Scan as _Scan,
+            )
             while not _progress_stop.is_set():
                 try:
                     item = _progress_queue.get(timeout=0.5)
@@ -82,22 +95,105 @@ def run_scan(self, scan_id):
                     continue
                 if item is None:          # sentinel — shut down
                     break
-                phase, done, total = item
                 try:
-                    with _conn.cursor() as cursor:
-                        cursor.execute(
-                            "UPDATE scanner_scan SET current_phase=%s, "
-                            "hosts_scanned=%s, hosts_total=%s "
-                            "WHERE id=%s",
-                            [phase, done, total, _scan_id_hex],
+                    action = item[0]
+                    if action == "progress":
+                        _, phase, done, total = item
+                        with _conn.cursor() as cursor:
+                            cursor.execute(
+                                "UPDATE scanner_scan SET current_phase=%s, "
+                                "hosts_scanned=%s, hosts_total=%s "
+                                "WHERE id=%s",
+                                [phase, done, total, _scan_id_hex],
+                            )
+                    elif action == "discovery":
+                        _, live_ips, mac_vendor_map = item
+                        for ip in live_ips:
+                            mac, vendor = mac_vendor_map.get(ip, ("", ""))
+                            _DBHost.objects.create(
+                                scan_id=scan_id, ip=ip,
+                                mac_address=mac or '', vendor=vendor or '',
+                                status='up', ports_count=0,
+                            )
+                        _Scan.objects.filter(id=scan_id).update(
+                            hosts_count=len(live_ips),
+                            hosts_total=len(live_ips),
                         )
-                        import logging as _logging
-                        _logging.getLogger(__name__).info(
-                            "Progress: %s %d/%d", phase, done, total
+                        logger.info("Discovery persisted: %d host(s) created", len(live_ips))
+                    elif action == "host_result":
+                        _, host, findings = item
+                        db_host = _DBHost.objects.get(scan_id=scan_id, ip=host.ip)
+                        db_host.hostname = host.hostname or ''
+                        db_host.os = host.os or ''
+                        db_host.status = host.status or 'up'
+                        db_host.mac_address = getattr(host, 'mac_address', '') or ''
+                        db_host.vendor = getattr(host, 'vendor', '') or ''
+                        db_host.ports_count = len(host.open_ports)
+                        db_host.save()
+                        # Replace ports / tech / screenshots for this host
+                        _DBPort.objects.filter(host=db_host).delete()
+                        _DBTech.objects.filter(host=db_host).delete()
+                        _DBScreenshot.objects.filter(host=db_host, scan_id=scan_id).delete()
+                        for p in host.ports:
+                            svc = p.service
+                            _DBPort.objects.create(
+                                host=db_host, number=p.number,
+                                protocol=p.protocol, state=p.state,
+                                service_name=svc.name if svc else '',
+                                service_product=svc.product if svc else '',
+                                service_version=svc.version if svc else '',
+                            )
+                        for t in host.technologies:
+                            _DBTech.objects.create(
+                                host=db_host, name=t.name,
+                                version=t.version or '', url=t.url or '',
+                            )
+                        for sc in getattr(host, 'screenshots', []):
+                            _DBScreenshot.objects.create(
+                                host=db_host, scan_id=scan_id,
+                                url=sc.url, filename=sc.filename,
+                                title=sc.title or '', status_code=sc.status_code,
+                            )
+                        # Create findings + tally severity counts
+                        sev_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
+                        for f in findings:
+                            sev = f.severity.value if hasattr(f.severity, 'value') else str(f.severity).lower()
+                            _DBFinding.objects.create(
+                                scan_id=scan_id, host=db_host, source=f.source,
+                                severity=sev, title=f.title,
+                                description=f.description or '',
+                                host_ip=f.host,
+                                port=str(f.port) if f.port else '',
+                                protocol=f.protocol or 'tcp',
+                                endpoint=f.endpoint or '',
+                                full_url=f.full_url or '',
+                                template_id=f.template_id or '',
+                                cve=f.cve or '', cwe=f.cwe or '',
+                                cvss=str(f.cvss) if f.cvss else '',
+                                request=f.request or '',
+                                response=f.response or '',
+                                curl_command=f.curl_command or '',
+                                raw_output=f.raw_output or '',
+                                references=json.dumps(f.references) if f.references else '[]',
+                            )
+                            if sev in sev_counts:
+                                sev_counts[sev] += 1
+                            db_host.findings_count += 1
+                        db_host.save(update_fields=['findings_count'])
+                        # Atomic counter increments on the scan
+                        _Scan.objects.filter(id=scan_id).update(
+                            hosts_scanned=_F('hosts_scanned') + 1,
+                            ports_count=_F('ports_count') + len(host.open_ports),
+                            findings_count=_F('findings_count') + len(findings),
+                            critical_count=_F('critical_count') + sev_counts['critical'],
+                            high_count=_F('high_count') + sev_counts['high'],
+                            medium_count=_F('medium_count') + sev_counts['medium'],
+                            low_count=_F('low_count') + sev_counts['low'],
+                            info_count=_F('info_count') + sev_counts['info'],
                         )
                 except Exception as _exc:
-                    import logging as _logging, traceback as _tb
-                    _logging.getLogger(__name__).error(
+                    import traceback as _tb
+                    logger.error(
                         "Progress thread DB write failed: %s\n%s",
                         _exc, _tb.format_exc(),
                     )
@@ -113,24 +209,39 @@ def run_scan(self, scan_id):
         _thread.start()
 
         def _on_progress(phase: str, done: int, total: int) -> None:
-            # Drop duplicate progress updates to keep the queue shallow.
-            # If the queue already has an item for this phase at the same
-            # count, skip enqueuing.
             try:
-                _progress_queue.put_nowait((phase, done, total))
+                _progress_queue.put_nowait(("progress", phase, done, total))
+            except Exception:
+                pass
+
+        def _on_discovery_complete(live_ips, mac_vendor_map) -> None:
+            try:
+                _progress_queue.put_nowait(("discovery", live_ips, mac_vendor_map))
+            except Exception:
+                pass
+
+        def _on_host_complete(host, findings) -> None:
+            try:
+                _progress_queue.put_nowait(("host_result", host, findings))
             except Exception:
                 pass
 
         try:
-            report = asyncio.run(run_pipeline(config, on_progress=_on_progress))
+            report = asyncio.run(run_pipeline(
+                config,
+                on_progress=_on_progress,
+                on_discovery_complete=_on_discovery_complete,
+                on_host_complete=_on_host_complete,
+            ))
         finally:
             # Drain remaining updates then stop the thread.
             _progress_stop.set()
             _progress_queue.put(None)          # sentinel
-            _thread.join(timeout=5)
+            _thread.join(timeout=10)
 
-        # ── Persist results to ORM ──
-        _persist_results(scan, report)
+        # Results are already persisted incrementally — skip bulk _persist_results.
+        # Still need asset sync from the in-memory report.
+        _sync_assets(scan, report)
 
         # ── Match MSF exploits ──
         try:
@@ -208,6 +319,9 @@ def run_scan(self, scan_id):
             )
 
         # ── Finalize ──
+        # Refresh the scan object — counters were updated atomically in the
+        # daemon thread via F() expressions, so our in-memory copy is stale.
+        scan.refresh_from_db()
         scan.status = 'completed'
         scan.completed_at = timezone.now()
         scan.duration_seconds = int(
