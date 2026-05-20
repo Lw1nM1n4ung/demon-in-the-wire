@@ -64,9 +64,12 @@ def run_scan(self, scan_id):
         # safety guard entirely.  The callback (called from inside the loop)
         # only pushes a tuple onto a thread-safe queue; the thread picks it
         # up, opens its own DB connection, and executes the UPDATE.
+        # MySQL stores UUIDs without dashes (CHAR(32)), so we strip them
+        # from the string form before passing to raw SQL.
         import threading as _threading
         from queue import Queue as _Queue, Empty as _Empty
 
+        _scan_id_hex = str(scan_id).replace("-", "")
         _progress_queue: _Queue = _Queue()
         _progress_stop = _threading.Event()
 
@@ -86,10 +89,18 @@ def run_scan(self, scan_id):
                             "UPDATE scanner_scan SET current_phase=%s, "
                             "hosts_scanned=%s, hosts_total=%s "
                             "WHERE id=%s",
-                            [phase, done, total, scan_id],
+                            [phase, done, total, _scan_id_hex],
                         )
-                except Exception:
-                    pass                  # best-effort; never fail the scan
+                        import logging as _logging
+                        _logging.getLogger(__name__).info(
+                            "Progress: %s %d/%d", phase, done, total
+                        )
+                except Exception as _exc:
+                    import logging as _logging, traceback as _tb
+                    _logging.getLogger(__name__).error(
+                        "Progress thread DB write failed: %s\n%s",
+                        _exc, _tb.format_exc(),
+                    )
                 finally:
                     _progress_queue.task_done()
             # Close the thread-local connection on exit so it isn't leaked.
