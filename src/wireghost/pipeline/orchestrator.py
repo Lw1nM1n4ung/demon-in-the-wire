@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from datetime import datetime
 from typing import Callable
 
@@ -32,6 +33,17 @@ from wireghost.utils.process import check_tools
 
 log = logging.getLogger("wireghost")
 
+# Ordered list of pipeline phases.  The overall "current phase" is the
+# earliest phase where at least one host is still working.
+PHASE_ORDER = [
+    "discovery",
+    "portscan",
+    "webdetect",
+    "webcrawl",
+    "enumeration",
+    "reports",
+]
+
 
 def _dedup_findings(findings: list[Finding]) -> list[Finding]:
     """Remove duplicate findings across tools based on host:port:vuln identity."""
@@ -57,17 +69,11 @@ async def run_pipeline(
 ) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
 
-    Phases:
-        1. Tool verification
-        2. Host discovery (nmap + fping)
-        3. Port scanning (parallel per host)
-        4. Web detection (parallel per host)
-        5. Vulnerability scanning (parallel per host, nuclei + nmap concurrent)
-        6. Report generation
-
     If *on_progress* is provided it is called at phase boundaries as
-    ``on_progress(phase, done, total)`` where *phase* is one of
-    ``discovery``, ``portscan``, ``reports``.
+    ``on_progress(phase, done, total)`` where *phase* is one of the
+    keys in :data:`PHASE_ORDER` (``discovery`` → ``portscan`` →
+    ``webdetect`` → ``webcrawl`` → ``enumeration`` → ``reports`` →
+    ``completed``).
     """
     scan_start = datetime.now()
 
@@ -108,20 +114,39 @@ async def run_pipeline(
         )
         return report
 
+    # --- Per-host phase tracking ---
+    total_hosts = len(live_ips)
+    _phase_counts: dict[str, int] = defaultdict(int)
+    _phase_lock = asyncio.Lock()
+
+    def _get_current_phase() -> str:
+        for ph in PHASE_ORDER:
+            if _phase_counts[ph] < total_hosts:
+                return ph
+        return "completed"
+
+    async def _advance_phase(phase: str) -> None:
+        """Mark one host as having completed *phase*; update progress."""
+        async with _phase_lock:
+            _phase_counts[phase] += 1
+            current = _get_current_phase()
+            if on_progress:
+                on_progress(current, _phase_counts[current], total_hosts)
+
     # --- Per-host pipeline (1 host = 1 full pipeline, all in parallel) ---
     log.info(
         "Launching per-host pipelines: %d host(s), parallelism=%d",
-        len(live_ips), config.parallelism,
+        total_hosts, config.parallelism,
     )
     if on_progress:
-        on_progress("portscan", 0, len(live_ips))
+        on_progress("portscan", 0, total_hosts)
     sem = asyncio.Semaphore(config.parallelism)
-    hosts_done = 0
 
     async def _host_pipeline(ip: str) -> tuple[Host, list[Finding]]:
         """Run the full scan pipeline for a single host."""
-        # Phase 3: Port scan (with fallback chain)
+        # Phase 3a: Port scan (with fallback chain) + service detection
         host = await scan_host(ip, config, tree, sem)
+        await _advance_phase("portscan")
 
         # Enrich with ARP data from discovery phase
         mac, vendor = mac_vendor_map.get(ip, ("", ""))
@@ -132,16 +157,21 @@ async def run_pipeline(
 
         if not host.open_ports:
             log.info("[%s] No open ports — skipping web/vuln phases", ip)
+            # Mark all remaining phases done for this host
+            for ph in ("webdetect", "webcrawl", "enumeration"):
+                await _advance_phase(ph)
             snmp_findings = await enumerate_snmp(host, config, tree, sem)
             return host, snmp_findings
 
-        # Phase 4: Web detection
+        # Phase 3b: Web detection
         await probe_host(host, config, tree, sem)
+        await _advance_phase("webdetect")
 
-        # Phase 4a: Web crawl (sequential — nuclei needs the URLs)
+        # Phase 3c: Web crawl (sequential — nuclei needs the URLs)
         crawl_findings = await crawl_host(host, config, tree, sem)
+        await _advance_phase("webcrawl")
 
-        # Phases 4b-5: All enumeration + vuln scan in parallel
+        # Phases 3d: All enumeration + vuln scan + screenshot + MSF in parallel
         svc_task = (
             enumerate_services(host, config, tree, sem)
             if config.service_enum
@@ -161,6 +191,7 @@ async def run_pipeline(
             scan_msf(host, config, tree, sem),
             return_exceptions=True,
         )
+        await _advance_phase("enumeration")
 
         task_names = [
             "cms", "service_enum", "smb", "netexec", "tls",
@@ -182,16 +213,8 @@ async def run_pipeline(
         )
         return host, findings
 
-    async def _host_with_progress(ip: str) -> tuple[Host, list[Finding]]:
-        nonlocal hosts_done
-        result = await _host_pipeline(ip)
-        hosts_done += 1
-        if on_progress:
-            on_progress("portscan", hosts_done, len(live_ips))
-        return result
-
     results = await asyncio.gather(
-        *[_host_with_progress(ip) for ip in live_ips],
+        *[_host_pipeline(ip) for ip in live_ips],
         return_exceptions=True,
     )
 
@@ -221,7 +244,7 @@ async def run_pipeline(
         len(report.findings),
     )
 
-    # --- Phase 6: Report generation ---
+    # --- Phase 4: Report generation ---
     if on_progress:
         on_progress("reports", 0, 0)
     _generate_reports(config, report, tree)

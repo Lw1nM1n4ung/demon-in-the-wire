@@ -39,9 +39,7 @@ WG.renderScans = function() {
           running.map(function(s) {
             var phase = s.current_phase || 'discovery';
             var progress = WG.phaseProgress(s);
-            var phaseOrder = ['discovery', 'portscan', 'reports'];
-            var phaseNames = { discovery: 'Discovery', portscan: 'Port Scan', reports: 'Reports' };
-            var activeIdx = phaseOrder.indexOf(phase);
+            var activeIdx = WG.PHASE_ORDER.indexOf(phase);
             if (activeIdx < 0) activeIdx = 0;
             return '<div class="panel" style="cursor:pointer;" onclick="WG.navigate(\'scan\',{id:\'' + s.id + '\'})">' +
               '<div class="panel-body">' +
@@ -56,13 +54,13 @@ WG.renderScans = function() {
                 '</div>' +
                 '<div class="progress-bar" style="margin-bottom:12px;"><div class="progress-fill" style="width:' + progress + '%;"></div></div>' +
                 '<div style="display:flex;gap:4px;">' +
-                  phaseOrder.map(function(ph, pi) {
+                  WG.PHASE_ORDER.map(function(ph, pi) {
                     var state = pi < activeIdx ? 'done' : pi === activeIdx ? 'active' : 'pending';
                     var style = state === 'done' ? 'background:var(--success-dim);color:var(--success);'
                               : state === 'active' ? 'background:var(--accent-dim);color:var(--accent);'
                               : 'background:var(--bg-card);color:var(--text-dim);';
                     return '<div style="flex:1;text-align:center;padding:4px 0;border-radius:var(--radius-xs);font-size:0.6rem;font-family:var(--font-mono);' + style + '">'
-                      + (state === 'done' ? '&#10003; ' : '') + phaseNames[ph] + '</div>';
+                      + (state === 'done' ? '&#10003; ' : '') + WG.PHASE_LABELS[ph] + '</div>';
                   }).join('') +
                 '</div>' +
                 '<div style="display:flex;gap:12px;margin-top:10px;font-family:var(--font-mono);font-size:0.68rem;color:var(--text-dim);">' +

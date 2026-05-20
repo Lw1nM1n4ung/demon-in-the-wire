@@ -1,18 +1,30 @@
 /* Wire_Ghost — Shared render components */
 
+/* ── Shared phase ordering and labels ──
+ * Single source of truth — all pages that render phase pills or progress bars
+ * must reference WG.PHASE_ORDER and WG.PHASE_LABELS instead of hardcoding. */
+WG.PHASE_ORDER = ['discovery', 'portscan', 'webdetect', 'webcrawl', 'enumeration', 'reports'];
+WG.PHASE_LABELS = {
+  'discovery': 'Discovery', 'portscan': 'Port Scan', 'webdetect': 'Web Detect',
+  'webcrawl': 'Web Crawl', 'enumeration': 'Enumeration', 'reports': 'Reports'
+};
+
 /* ── Real-time progress calculation ──
  * Uses current_phase + hosts_scanned/hosts_total from the API to compute an
  * actual progress percentage. Falls back to the old time-based estimate only
  * when current_phase hasn't been reported yet (pre-discovery). */
 WG.phaseProgress = function(s) {
   var phases = {
-    'pending':   { base: 0,  span: 5 },
-    'discovery': { base: 5,  span: 20 },
-    'portscan':  { base: 25, span: 65 },
-    'reports':   { base: 90, span: 8 },
-    'completed': { base: 100, span: 0 },
-    'failed':    { base: 100, span: 0 },
-    'cancelled': { base: 100, span: 0 }
+    'pending':    { base: 0,   span: 3 },
+    'discovery':  { base: 3,   span: 12 },
+    'portscan':   { base: 15,  span: 25 },
+    'webdetect':  { base: 40,  span: 12 },
+    'webcrawl':   { base: 52,  span: 12 },
+    'enumeration':{ base: 64,  span: 26 },
+    'reports':    { base: 90,  span: 8 },
+    'completed':  { base: 100, span: 0 },
+    'failed':     { base: 100, span: 0 },
+    'cancelled':  { base: 100, span: 0 }
   };
   var p = phases[s.current_phase] || phases['pending'];
   if (s.hosts_scanned && s.hosts_total && s.hosts_total > 0) {
@@ -45,10 +57,9 @@ WG.phaseProgress = function(s) {
 /* ── Phase label helper ── */
 WG.phaseLabel = function(phase) {
   var labels = {
-    'pending': 'Pending', 'discovery': 'Discovery', 'portscan': 'Port Scan',
-    'reports': 'Reports', 'completed': 'Done', 'failed': 'Failed', 'cancelled': 'Cancelled'
+    'pending': 'Pending', 'completed': 'Done', 'failed': 'Failed', 'cancelled': 'Cancelled'
   };
-  return labels[phase] || phase || 'Pending';
+  return WG.PHASE_LABELS[phase] || labels[phase] || phase || 'Pending';
 };
 
 WG.sevBarHtml = function(scan) {
