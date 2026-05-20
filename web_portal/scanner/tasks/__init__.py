@@ -67,9 +67,10 @@ def run_scan(self, scan_id):
         # connection, and executes the work.
         #
         # Queue items:
-        #   ("progress", phase, done, total)           — progress update
+        #   ("progress", phase_label, progress_pct, hosts_done) — progress update
         #   ("discovery", live_ips, mac_vendor_map)    — create Host records
         #   ("host_result", host, findings)            — update Host, create Ports/Findings
+        #   ("host_phase", ip, phase)                  — update Host.current_phase
         #
         # MySQL stores UUIDs without dashes (CHAR(32)), so we strip them
         # from the string form before passing to raw SQL.
@@ -98,6 +99,10 @@ def run_scan(self, scan_id):
                 try:
                     action = item[0]
                     if action == "progress":
+                        # Semantics (per-host weighted average model):
+                        #   phase  = dominant phase label (most hosts in this phase)
+                        #   done   = weighted progress percentage (0-99)
+                        #   total  = count of hosts fully done with their pipeline
                         _, phase, done, total = item
                         with _conn.cursor() as cursor:
                             cursor.execute(
@@ -120,6 +125,11 @@ def run_scan(self, scan_id):
                             hosts_total=len(live_ips),
                         )
                         logger.info("Discovery persisted: %d host(s) created", len(live_ips))
+                    elif action == "host_phase":
+                        _, ip, phase = item
+                        _DBHost.objects.filter(scan_id=scan_id, ip=ip).update(
+                            current_phase=phase,
+                        )
                     elif action == "host_result":
                         _, host, findings = item
                         db_host = _DBHost.objects.get(scan_id=scan_id, ip=host.ip)
@@ -180,9 +190,10 @@ def run_scan(self, scan_id):
                                 sev_counts[sev] += 1
                             db_host.findings_count += 1
                         db_host.save(update_fields=['findings_count'])
-                        # Atomic counter increments on the scan
+                        # Atomic counter increments on the scan.
+                        # hosts_scanned is now the weighted progress % set
+                        # by ("progress", ...) — not incremented here.
                         _Scan.objects.filter(id=scan_id).update(
-                            hosts_scanned=_F('hosts_scanned') + 1,
                             ports_count=_F('ports_count') + len(host.open_ports),
                             findings_count=_F('findings_count') + len(findings),
                             critical_count=_F('critical_count') + sev_counts['critical'],
@@ -208,6 +219,8 @@ def run_scan(self, scan_id):
         _thread = _threading.Thread(target=_progress_thread, daemon=True)
         _thread.start()
 
+        # _on_progress now receives (phase_label, weighted_pct, hosts_fully_done)
+        # from the orchestrator's weighted per-host average model.
         def _on_progress(phase: str, done: int, total: int) -> None:
             try:
                 _progress_queue.put_nowait(("progress", phase, done, total))
@@ -226,12 +239,19 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
+        def _on_host_phase(ip: str, phase: str) -> None:
+            try:
+                _progress_queue.put_nowait(("host_phase", ip, phase))
+            except Exception:
+                pass
+
         try:
             report = asyncio.run(run_pipeline(
                 config,
                 on_progress=_on_progress,
                 on_discovery_complete=_on_discovery_complete,
                 on_host_complete=_on_host_complete,
+                on_host_phase=_on_host_phase,
             ))
         finally:
             # Drain remaining updates then stop the thread.

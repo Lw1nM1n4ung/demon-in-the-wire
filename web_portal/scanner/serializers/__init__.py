@@ -81,7 +81,7 @@ class HostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Host
-        fields = ['id', 'ip', 'hostname', 'os', 'status', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'ports', 'technologies', 'screenshots']
+        fields = ['id', 'ip', 'hostname', 'os', 'status', 'current_phase', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'ports', 'technologies', 'screenshots']
 
 
 class HostListSerializer(serializers.ModelSerializer):
@@ -90,7 +90,7 @@ class HostListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Host
-        fields = ['id', 'ip', 'hostname', 'os', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'scan', 'screenshot_count', 'thumbnail_url']
+        fields = ['id', 'ip', 'hostname', 'os', 'current_phase', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'scan', 'screenshot_count', 'thumbnail_url']
 
     def get_thumbnail_url(self, obj):
         first = next(iter(obj.screenshots.all()), None)

@@ -10,27 +10,16 @@ WG.PHASE_LABELS = {
 };
 
 /* ── Real-time progress calculation ──
- * Uses current_phase + hosts_scanned/hosts_total from the API to compute an
- * actual progress percentage. Falls back to the old time-based estimate only
- * when current_phase hasn't been reported yet (pre-discovery). */
+ * hosts_scanned is now a pre-computed weighted percentage (0-99) from the
+ * orchestrator's per-host phase tracking.  Fast hosts pull the bar forward
+ * instead of one slow host stalling it.  Terminal states return 100 or 0. */
 WG.phaseProgress = function(s) {
-  var phases = {
-    'pending':    { base: 0,   span: 3 },
-    'discovery':  { base: 3,   span: 12 },
-    'portscan':   { base: 15,  span: 25 },
-    'webdetect':  { base: 40,  span: 12 },
-    'webcrawl':   { base: 52,  span: 12 },
-    'enumeration':{ base: 64,  span: 26 },
-    'reports':    { base: 90,  span: 8 },
-    'completed':  { base: 100, span: 0 },
-    'failed':     { base: 100, span: 0 },
-    'cancelled':  { base: 100, span: 0 }
-  };
-  var p = phases[s.current_phase] || phases['pending'];
-  if (s.hosts_scanned && s.hosts_total && s.hosts_total > 0) {
-    return Math.min(99, Math.floor(p.base + (s.hosts_scanned / s.hosts_total) * p.span));
-  }
-  return p.base;
+  if (s.status === 'completed' || s.current_phase === 'completed') return 100;
+  if (s.status === 'failed' || s.current_phase === 'failed') return 100;
+  if (s.status === 'cancelled' || s.current_phase === 'cancelled') return 100;
+  if (!s.current_phase || s.current_phase === 'pending') return 0;
+  // Running scan — hosts_scanned IS the weighted progress % (0-99).
+  return Math.min(99, s.hosts_scanned || 0);
 };
 
 /* ── Global elapsed-time ticker ──

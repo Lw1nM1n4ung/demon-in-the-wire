@@ -68,20 +68,24 @@ async def run_pipeline(
     on_progress: Callable[[str, int, int], None] | None = None,
     on_discovery_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
     on_host_complete: Callable[[Host, list[Finding]], None] | None = None,
+    on_host_phase: Callable[[str, str], None] | None = None,
 ) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
 
-    If *on_progress* is provided it is called at phase boundaries as
-    ``on_progress(phase, done, total)`` where *phase* is one of the
-    keys in :data:`PHASE_ORDER` (``discovery`` → ``portscan`` →
-    ``webdetect`` → ``webcrawl`` → ``enumeration`` → ``reports`` →
-    ``completed``).
+    If *on_progress* is provided it is called with
+    ``on_progress(phase_label, weighted_pct, hosts_fully_done)`` where
+    *weighted_pct* is a per-host-weighted average (0-99) and
+    *hosts_fully_done* is the count of hosts that have finished their
+    entire pipeline.
 
     If *on_discovery_complete* is provided it is called right after
     host discovery with the list of live IPs and the MAC/vendor map.
 
     If *on_host_complete* is provided it is called after each host
     finishes its full pipeline with the populated Host and its Findings.
+
+    If *on_host_phase* is provided it is called when a host advances
+    to a new phase: ``on_host_phase(ip, phase)``.
     """
     scan_start = datetime.now()
 
@@ -126,38 +130,66 @@ async def run_pipeline(
         return report
 
     # --- Per-host phase tracking ---
+    # Each host independently advances through phases. Progress is a
+    # weighted average across all hosts so that fast hosts pull the bar
+    # forward instead of one slow host holding it back.
     total_hosts = len(live_ips)
-    _phase_counts: dict[str, int] = defaultdict(int)
+    _host_phases: dict[str, str] = {ip: "discovery" for ip in live_ips}
     _phase_lock = asyncio.Lock()
 
-    def _get_current_phase() -> str:
-        for ph in PHASE_ORDER:
-            if _phase_counts[ph] < total_hosts:
-                return ph
-        return "completed"
+    # Phase weights — midpoints of the frontend progress segments so the
+    # weighted average approximates actual work done.
+    _PHASE_WEIGHTS: dict[str, int] = {
+        "discovery": 9,    # 3-15% midpoint
+        "portscan": 27,    # 15-40% midpoint
+        "webdetect": 46,   # 40-52% midpoint
+        "webcrawl": 58,    # 52-64% midpoint
+        "enumeration": 77, # 64-90% midpoint
+        "reports": 94,     # 90-98% midpoint
+    }
 
-    async def _advance_phase(phase: str) -> None:
-        """Mark one host as having completed *phase*; update progress."""
+    def _compute_progress() -> tuple[str, int, int]:
+        """Return (phase_label, weighted_pct, hosts_fully_done)."""
+        total_weight = 0
+        completed = 0
+        phase_counts: dict[str, int] = defaultdict(int)
+        for ip in live_ips:
+            ph = _host_phases.get(ip, "discovery")
+            total_weight += _PHASE_WEIGHTS.get(ph, 0)
+            phase_counts[ph] += 1
+            if ph in ("enumeration", "reports"):
+                completed += 1
+        pct = min(99, total_weight // total_hosts)
+        # Dominant phase label — the phase with the most hosts
+        dominant = max(phase_counts, key=lambda k: phase_counts[k]) if phase_counts else "discovery"
+        return dominant, pct, completed
+
+    async def _advance_host_phase(ip: str, phase: str) -> None:
+        """Mark *ip* as having entered *phase*; recompute progress."""
         async with _phase_lock:
-            _phase_counts[phase] += 1
-            current = _get_current_phase()
+            _host_phases[ip] = phase
             if on_progress:
-                on_progress(current, _phase_counts[current], total_hosts)
+                phase_label, pct, completed = _compute_progress()
+                on_progress(phase_label, pct, completed)
+            if on_host_phase:
+                on_host_phase(ip, phase)
 
     # --- Per-host pipeline (1 host = 1 full pipeline, all in parallel) ---
     log.info(
         "Launching per-host pipelines: %d host(s), parallelism=%d",
         total_hosts, config.parallelism,
     )
+    # Initial progress: all hosts at discovery (weight 9 ≈ 9%)
     if on_progress:
-        on_progress("portscan", 0, total_hosts)
+        phase_label, pct, completed = _compute_progress()
+        on_progress(phase_label, pct, completed)
     sem = asyncio.Semaphore(config.parallelism)
 
     async def _host_pipeline(ip: str) -> tuple[Host, list[Finding]]:
         """Run the full scan pipeline for a single host."""
         # Phase 3a: Port scan (with fallback chain) + service detection
         host = await scan_host(ip, config, tree, sem)
-        await _advance_phase("portscan")
+        await _advance_host_phase(ip, "portscan")
 
         # Enrich with ARP data from discovery phase
         mac, vendor = mac_vendor_map.get(ip, ("", ""))
@@ -170,17 +202,17 @@ async def run_pipeline(
             log.info("[%s] No open ports — skipping web/vuln phases", ip)
             # Mark all remaining phases done for this host
             for ph in ("webdetect", "webcrawl", "enumeration"):
-                await _advance_phase(ph)
+                await _advance_host_phase(ip, ph)
             snmp_findings = await enumerate_snmp(host, config, tree, sem)
             return host, snmp_findings
 
         # Phase 3b: Web detection
         await probe_host(host, config, tree, sem)
-        await _advance_phase("webdetect")
+        await _advance_host_phase(ip, "webdetect")
 
         # Phase 3c: Web crawl (sequential — nuclei needs the URLs)
         crawl_findings = await crawl_host(host, config, tree, sem)
-        await _advance_phase("webcrawl")
+        await _advance_host_phase(ip, "webcrawl")
 
         # Phases 3d: All enumeration + vuln scan + screenshot + MSF in parallel
         svc_task = (
@@ -202,7 +234,7 @@ async def run_pipeline(
             scan_msf(host, config, tree, sem),
             return_exceptions=True,
         )
-        await _advance_phase("enumeration")
+        await _advance_host_phase(ip, "enumeration")
 
         task_names = [
             "cms", "service_enum", "smb", "netexec", "tls",

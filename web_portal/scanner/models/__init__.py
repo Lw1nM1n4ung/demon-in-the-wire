@@ -222,6 +222,7 @@ class Host(models.Model):
     hostname = models.CharField(max_length=255, blank=True)
     os = models.CharField(max_length=255, blank=True)
     status = models.CharField(max_length=20, default='up')
+    current_phase = models.CharField(max_length=20, default='discovery')
     mac_address = models.CharField(max_length=17, blank=True)
     vendor = models.CharField(max_length=255, blank=True)
     ports_count = models.IntegerField(default=0)
