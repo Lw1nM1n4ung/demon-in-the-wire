@@ -112,9 +112,9 @@ def run_scan(self, scan_id):
                         with _conn.cursor() as cursor:
                             cursor.execute(
                                 "UPDATE scanner_scan SET current_phase=%s, "
-                                "hosts_scanned=%s, hosts_total=%s "
+                                "hosts_scanned=%s "
                                 "WHERE id=%s",
-                                [phase, done, total, _scan_id_hex],
+                                [phase, done, _scan_id_hex],
                             )
                     elif action == "discovery":
                         _, live_ips, mac_vendor_map = item
