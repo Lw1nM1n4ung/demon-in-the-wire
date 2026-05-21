@@ -111,6 +111,18 @@ async def run_pipeline(
         else:
             log.info("Optional scanner not found: %s (fallback skipped if needed)", tool)
 
+    # --- Phase weights (shared by discovery and per-host progress) ---
+    # Midpoints of the frontend progress segments so the weighted average
+    # approximates actual work done.
+    _PHASE_WEIGHTS: dict[str, int] = {
+        "discovery": 9,    # 3-15% midpoint
+        "portscan": 27,    # 15-40% midpoint
+        "webdetect": 46,   # 40-52% midpoint
+        "webcrawl": 58,    # 52-64% midpoint
+        "enumeration": 77, # 64-90% midpoint
+        "reports": 94,     # 90-98% midpoint
+    }
+
     # --- Phase 2: Discovery ---
     log.info("Phase 2: Host discovery")
 
@@ -148,17 +160,6 @@ async def run_pipeline(
     total_hosts = len(live_ips)
     _host_phases: dict[str, str] = {ip: "discovery" for ip in live_ips}
     _phase_lock = asyncio.Lock()
-
-    # Phase weights — midpoints of the frontend progress segments so the
-    # weighted average approximates actual work done.
-    _PHASE_WEIGHTS: dict[str, int] = {
-        "discovery": 9,    # 3-15% midpoint
-        "portscan": 27,    # 15-40% midpoint
-        "webdetect": 46,   # 40-52% midpoint
-        "webcrawl": 58,    # 52-64% midpoint
-        "enumeration": 77, # 64-90% midpoint
-        "reports": 94,     # 90-98% midpoint
-    }
 
     def _compute_progress() -> tuple[str, int, int]:
         """Return (phase_label, weighted_pct, hosts_fully_done)."""
