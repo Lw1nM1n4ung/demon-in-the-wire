@@ -254,10 +254,13 @@ def run_scan(self, scan_id):
                 on_host_phase=_on_host_phase,
             ))
         finally:
-            # Drain remaining updates then stop the thread.
-            _progress_stop.set()
-            _progress_queue.put(None)          # sentinel
-            _thread.join(timeout=10)
+            # Send sentinel first so the thread drains remaining queue items
+            # gracefully.  Only force-stop if it's still alive after draining.
+            _progress_queue.put(None)          # sentinel — drain then exit
+            _thread.join(timeout=30)           # wait for drain
+            if _thread.is_alive():             # force-stop if stuck
+                _progress_stop.set()
+                _thread.join(timeout=5)
 
         # Results are already persisted incrementally — skip bulk _persist_results.
         # Still need asset sync from the in-memory report.
