@@ -160,9 +160,17 @@ async def _scan_subnet(
     run_arp: bool,
     has_arpscan: bool,
     has_netdiscover: bool,
-) -> None:
-    """Scan a single subnet — nmap, fping, and ARP tools run in parallel."""
+) -> tuple[set[str], dict[str, tuple[str, str]]]:
+    """Scan a single subnet — nmap, fping, and ARP tools run in parallel.
+
+    Returns (new_ips, new_mac) — the delta of IPs and MAC entries
+    discovered by THIS subnet scan, computed inside the semaphore so
+    concurrent subnet scans don't inflate the per-subnet delta.
+    """
     async with semaphore:
+        before_ips = set(live_ips)
+        before_mac_keys = set(mac_vendor.keys())
+
         if total > 1:
             log.info("Scanning subnet %d/%d: %s", index, total, subnet)
 
@@ -208,6 +216,18 @@ async def _scan_subnet(
         for result in results:
             if isinstance(result, BaseException):
                 log.error("Discovery tool failed for %s: %s", subnet, result)
+
+        # Compute the delta INSIDE the semaphore — concurrent subnet scans
+        # have not yet modified live_ips/mac_vendor, so each subnet only
+        # reports its own discoveries.
+        new_ips = live_ips - before_ips
+        new_mac = {
+            ip: mac_vendor[ip]
+            for ip in mac_vendor
+            if ip not in before_mac_keys
+        }
+
+    return new_ips, new_mac
 
 
 async def _dns_sweep_subnet(
@@ -312,26 +332,14 @@ async def discover_hosts(
 
     async def _tracked_scan_subnet(subnet: str, idx: int) -> None:
         nonlocal subnets_done
-        # Snapshot before scan so we can compute the delta of newly
-        # discovered IPs — enables incremental host creation in the
-        # portal instead of waiting for all subnets to finish.
-        before_ips = set(live_ips)
-        before_mac_keys = set(mac_vendor.keys())
-        await _scan_subnet(
+        new_ips, new_mac = await _scan_subnet(
             subnet, timeout, live_ips, mac_vendor, fping_unreachable,
             semaphore,
             idx, total, run_arp, has_arpscan, has_netdiscover,
         )
         subnets_done += 1
-        if on_subnet_complete:
-            new_ips = live_ips - before_ips
-            new_mac = {
-                ip: mac_vendor[ip]
-                for ip in mac_vendor
-                if ip not in before_mac_keys
-            }
-            if new_ips or new_mac:
-                on_subnet_complete(list(new_ips), new_mac)
+        if on_subnet_complete and (new_ips or new_mac):
+            on_subnet_complete(list(new_ips), new_mac)
         if on_progress:
             on_progress("discovery", subnets_done, total)
 
