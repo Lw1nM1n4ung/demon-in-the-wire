@@ -3,15 +3,28 @@
 WG.renderScanDetail = function(id) {
   var scan = WG.getCached('scans', '/scans/').find(function(s) { return s.id === id; });
 
-  // Fetch full scan detail from API (once per cache cycle)
+  // Fetch full scan detail + hosts + findings from API (once per cache cycle).
+  // Completed scans need hosts/findings fetched explicitly — the live poll
+  // only runs for running scans, so without this completed scan tabs show 0.
   if (!WG._cache['scan_' + id]) {
-    WG.api('/scans/' + id + '/').then(function(data) {
-      if (data && WG.state.currentPage === 'scan') {
-        WG._cache['scan_' + id] = data;
-        WG._cacheTime['scan_' + id] = Date.now();
-        var main = document.getElementById('mainContent');
-        if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScanDetail(id);
+    Promise.all([
+      WG.api('/scans/' + id + '/'),
+      WG.api('/scans/' + id + '/hosts/'),
+      WG.api('/scans/' + id + '/findings/')
+    ]).then(function(results) {
+      if (!results[0] || WG.state.currentPage !== 'scan') return;
+      WG._cache['scan_' + id] = results[0];
+      WG._cacheTime['scan_' + id] = Date.now();
+      if (Array.isArray(results[1])) {
+        WG._cache['scan_hosts_' + id] = results[1];
+        WG._cacheTime['scan_hosts_' + id] = Date.now();
       }
+      if (Array.isArray(results[2])) {
+        WG._cache['scan_findings_' + id] = results[2];
+        WG._cacheTime['scan_findings_' + id] = Date.now();
+      }
+      var main = document.getElementById('mainContent');
+      if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderScanDetail(id);
     });
   }
 

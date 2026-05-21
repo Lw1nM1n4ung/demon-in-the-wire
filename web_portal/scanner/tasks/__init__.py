@@ -32,10 +32,15 @@ def run_scan(self, scan_id):
         from wireghost.pipeline.orchestrator import run_pipeline
         from wireghost.config import ScanConfig
 
-        # Build config from scan record
-        output_dir = Path(
-            f"{scan.output_dir or '/data/output'}/{scan.target.replace('/', '_')}"
-        )
+        # Build config from scan record.
+        # scan.output_dir = <base>/<target>  (e.g. /data/output/192.168.1.0_28)
+        # config.output_dir = <base> only    (e.g. /data/output)
+        # build_output_tree(config.output_dir, target) creates <base>/<target>
+        # so that scan.output_dir == tree.base — screenshots + reports resolve
+        # without an extra nesting level.
+        base_output = Path(scan.output_dir or '/data/output')
+        target_normalized = scan.target.replace('/', '_')
+        output_dir = base_output / target_normalized
         output_dir.mkdir(parents=True, exist_ok=True)
         scan.output_dir = str(output_dir)
         scan.save(update_fields=['output_dir'])
@@ -56,7 +61,7 @@ def run_scan(self, scan_id):
             skip_enum4linux=not scan.enum4linux,
             skip_nikto=scan.skip_nikto,
             skip_netexec=scan.skip_netexec,
-            output_dir=str(output_dir),
+            output_dir=str(base_output),
         )
 
         # Progress + result persistence daemon thread.
