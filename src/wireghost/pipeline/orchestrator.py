@@ -113,9 +113,21 @@ async def run_pipeline(
 
     # --- Phase 2: Discovery ---
     log.info("Phase 2: Host discovery")
+
+    # Wrap *on_progress* so discovery subnet counts are normalised into the
+    # same 0-99 weighted-percentage scale that per-host phases use.
+    # discovery_weight=9 → discovery progress ranges from 0% to 9%.
+    _discovery_weight = _PHASE_WEIGHTS.get("discovery", 9)
+
+    def _discovery_progress(phase: str, subnets_done: int, total_subnets: int) -> None:
+        if on_progress is None:
+            return
+        pct = (subnets_done * _discovery_weight) // total_subnets if total_subnets else 0
+        on_progress(phase, pct, total_subnets)
+
     if on_progress:
         on_progress("discovery", 0, 0)
-    live_ips, mac_vendor_map = await discover_hosts(config, tree, on_progress=on_progress)
+    live_ips, mac_vendor_map = await discover_hosts(config, tree, on_progress=_discovery_progress)
 
     if on_discovery_complete:
         on_discovery_complete(live_ips, mac_vendor_map)
