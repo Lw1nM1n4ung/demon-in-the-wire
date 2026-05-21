@@ -150,6 +150,14 @@ Three pages consume these: `scans.js` (running scan cards), `scan-queue.js` (que
 
 The portal container serves `/web` statically, proxies `/api/` to Django, blocks `/admin` and dotfiles with 404, and sets a strict CSP. The API service is not published outside the Docker network.
 
+**nginx.conf is mounted as a volume** (`./nginx.conf:/etc/nginx/conf.d/default.conf:ro`). Changes take effect with `docker exec wireghost-portal-1 nginx -s reload` — no container recreate needed.
+
+**The host IP is hardcoded in three places** in `nginx.conf`: `server_name`, `return 301` (HTTP→HTTPS), and `return 302` (auth gate → login). When the host IP changes (DHCP), all three must be updated AND nginx reloaded. Updating only `.env`/`DJANGO_ALLOWED_HOSTS` is not enough — nginx still binds to the old IP, producing 500 errors even though Django is correctly configured.
+
+### IP reload (`ip-reload.py`)
+
+One-command tool to update the host IP across all config files: `sudo python3 ip-reload.py <NEW_IP>`. Updates `.env` (`WIREGHOST_HOST`, `CSRF_TRUSTED_ORIGINS`), `docker-compose.yml` (`DJANGO_ALLOWED_HOSTS`), and `nginx.conf` (server_name + redirect targets), then recreates the API container and reloads nginx.
+
 ### Docker images
 
 Two Dockerfiles in `web_portal/`:
@@ -208,7 +216,8 @@ Two Dockerfiles in `web_portal/`:
 | `web/js/app/pages/ad-recon.js` | AD recon SPA frontend — three-panel cockpit, session polling, credential management |
 | `docker-compose.yml` | 7 services: db, redis, api, worker, beat, bot, portal (+ wireghost tools profile) |
 | `docker-compose.dev.yml` | Dev overlay — bind mounts `./src`, debug ports, HTTP mode |
-| `nginx.conf` | Portal reverse proxy; CSP + `/admin` block |
+| `nginx.conf` | Portal reverse proxy; CSP + `/admin` block; IP hardcoded in server_name + redirects |
+| `ip-reload.py` | One-command IP update across `.env`, `docker-compose.yml`, `nginx.conf` + container reload |
 | `.github/workflows/ci.yml` | CI — pytest + Django tests + frontend JS + installer tests; Trivy security scan |
 
 ## Conventions & Gotchas
@@ -240,4 +249,5 @@ Two Dockerfiles in `web_portal/`:
 - **Threaded progress updater**: Django's `SynchronousOnlyOperation` blocks synchronous DB access inside `asyncio.run()`. The Celery task bridges this with a **daemon thread + queue** pattern. Queue items: `("progress", phase_label, pct, done)`, `("discovery", ips, mac_map)`, `("host_phase", ip, phase)`, `("host_result", host, findings)`. The `on_progress` callback runs inside the async event loop — never call the Django ORM directly from it; only enqueue tuples.
 - **Celery worker bytecode caching**: The Celery prefork pool reuses child processes. After live-patching `.py` files in a running container, child processes may still run the old bytecode. Always `docker restart` the worker container after code changes — a `docker cp` or bind-mount edit is not enough.
 - **API container read-only rootfs**: The API/portal image (`callmedemon/wireghost:web`) uses a read-only root filesystem. You cannot `docker cp` files into it or write to `/app/` at runtime. To change behavior, either set environment variables in the compose file and recreate the container, or rebuild the image.
+- **nginx.conf hardcoded IP (CRITICAL)**: `nginx.conf` has the host IP hardcoded in three places: `server_name`, `return 301` (HTTP→HTTPS redirect), and `return 302` (auth gate → login redirect). When the host IP changes (DHCP lease), all three MUST be updated. `.env`/Django changes alone are not enough — nginx will still bind to the old IP. After editing `nginx.conf`, reload with `docker exec wireghost-portal-1 nginx -s reload` (no container recreate needed — it's a volume mount). Use `sudo python3 ip-reload.py <NEW_IP>` for a one-command fix.
 - **Container Processes (docker-proxy)**: The `docker_stats.py` module queries a Docker socket proxy (`tecnativa/docker-socket-proxy`) to list containers. It filters by label `com.docker.compose.project=<COMPOSE_PROJECT>`. The compose file **explicitly sets** `COMPOSE_PROJECT` on the `api` service (which propagates to `worker`/`beat` via YAML anchor `*api-env`). The project name defaults to the directory basename (`demon-in-the-wire` for `demon-in-the-wire/`, NOT `wireghost`). If the env var is missing or mismatched, the `/api/system-processes/` endpoint returns zero containers.
