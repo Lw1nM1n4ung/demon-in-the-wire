@@ -245,6 +245,7 @@ async def _dns_sweep_subnet(
 async def discover_hosts(
     config: ScanConfig, tree: OutputTree,
     on_progress: "Callable[[str, int, int], None] | None" = None,
+    on_subnet_complete: "Callable[[list[str], dict[str, tuple[str, str]]], None] | None" = None,
 ) -> tuple[list[str], dict[str, tuple[str, str]]]:
     """Run nmap -sn, fping, ARP tools, and passive DNS against *config.target*.
 
@@ -254,6 +255,11 @@ async def discover_hosts(
     If *on_progress* is provided it is called as
     ``on_progress('discovery', subnets_done, total_subnets)``
     after each subnet scan completes.
+
+    If *on_subnet_complete* is provided it is called after each subnet
+    scan with the list of newly discovered IPs and any MAC/vendor updates,
+    so the caller can persist hosts incrementally rather than waiting for
+    every subnet to finish.
 
     Returns
     -------
@@ -306,12 +312,26 @@ async def discover_hosts(
 
     async def _tracked_scan_subnet(subnet: str, idx: int) -> None:
         nonlocal subnets_done
+        # Snapshot before scan so we can compute the delta of newly
+        # discovered IPs — enables incremental host creation in the
+        # portal instead of waiting for all subnets to finish.
+        before_ips = set(live_ips)
+        before_mac_keys = set(mac_vendor.keys())
         await _scan_subnet(
             subnet, timeout, live_ips, mac_vendor, fping_unreachable,
             semaphore,
             idx, total, run_arp, has_arpscan, has_netdiscover,
         )
         subnets_done += 1
+        if on_subnet_complete:
+            new_ips = live_ips - before_ips
+            new_mac = {
+                ip: mac_vendor[ip]
+                for ip in mac_vendor
+                if ip not in before_mac_keys
+            }
+            if new_ips or new_mac:
+                on_subnet_complete(list(new_ips), new_mac)
         if on_progress:
             on_progress("discovery", subnets_done, total)
 

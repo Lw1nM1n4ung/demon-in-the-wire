@@ -73,7 +73,8 @@ def run_scan(self, scan_id):
         #
         # Queue items:
         #   ("progress", phase_label, progress_pct, hosts_done) — progress update
-        #   ("discovery", live_ips, mac_vendor_map)    — create Host records
+        #   ("discovery", live_ips, mac_vendor_map)    — finalize Host records + counts
+        #   ("subnet_hosts", new_ips, mac_updates)     — incremental Host creation per subnet
         #   ("host_result", host, findings)            — update Host, create Ports/Findings
         #   ("host_phase", ip, phase)                  — update Host.current_phase
         #
@@ -118,18 +119,56 @@ def run_scan(self, scan_id):
                             )
                     elif action == "discovery":
                         _, live_ips, mac_vendor_map = item
+                        # Use get_or_create — some hosts may already exist
+                        # from incremental subnet_hosts creation.
                         for ip in live_ips:
                             mac, vendor = mac_vendor_map.get(ip, ("", ""))
-                            _DBHost.objects.create(
+                            _DBHost.objects.get_or_create(
                                 scan_id=scan_id, ip=ip,
-                                mac_address=mac or '', vendor=vendor or '',
-                                status='up', ports_count=0,
+                                defaults={
+                                    'mac_address': mac or '',
+                                    'vendor': vendor or '',
+                                    'status': 'up',
+                                    'ports_count': 0,
+                                },
                             )
+                        # Set final counts (atomic correction after incremental adds)
                         _Scan.objects.filter(id=scan_id).update(
                             hosts_count=len(live_ips),
                             hosts_total=len(live_ips),
                         )
-                        logger.info("Discovery persisted: %d host(s) created", len(live_ips))
+                        logger.info("Discovery finalized: %d host(s) total", len(live_ips))
+                    elif action == "subnet_hosts":
+                        _, new_ips, mac_updates = item
+                        # Create Host records for newly discovered IPs.
+                        for ip in new_ips:
+                            mac, vendor = mac_updates.get(ip, ("", ""))
+                            _DBHost.objects.get_or_create(
+                                scan_id=scan_id, ip=ip,
+                                defaults={
+                                    'mac_address': mac or '',
+                                    'vendor': vendor or '',
+                                    'status': 'up',
+                                    'ports_count': 0,
+                                },
+                            )
+                        # Apply MAC/vendor updates for IPs that just got
+                        # ARP data (may include IPs discovered by earlier
+                        # subnets via nmap/fping that only now got L2 data).
+                        if mac_updates:
+                            for ip, (mac, vendor) in mac_updates.items():
+                                _DBHost.objects.filter(
+                                    scan_id=scan_id, ip=ip,
+                                ).update(
+                                    mac_address=mac or '',
+                                    vendor=vendor or '',
+                                )
+                        # Increment hosts_count for the new hosts.
+                        # The final "discovery" action corrects the exact count.
+                        if new_ips:
+                            _Scan.objects.filter(id=scan_id).update(
+                                hosts_count=_F('hosts_count') + len(new_ips),
+                            )
                     elif action == "host_phase":
                         _, ip, phase = item
                         _DBHost.objects.filter(scan_id=scan_id, ip=ip).update(
@@ -137,14 +176,20 @@ def run_scan(self, scan_id):
                         )
                     elif action == "host_result":
                         _, host, findings = item
-                        db_host = _DBHost.objects.get(scan_id=scan_id, ip=host.ip)
-                        db_host.hostname = host.hostname or ''
-                        db_host.os = host.os or ''
-                        db_host.status = host.status or 'up'
-                        db_host.mac_address = getattr(host, 'mac_address', '') or ''
-                        db_host.vendor = getattr(host, 'vendor', '') or ''
-                        db_host.ports_count = len(host.open_ports)
-                        db_host.save()
+                        # update_or_create handles the edge case where a fast
+                        # host finishes before the discovery handler has created
+                        # its Host record (e.g. tiny scan with parallelism=1).
+                        db_host, _ = _DBHost.objects.update_or_create(
+                            scan_id=scan_id, ip=host.ip,
+                            defaults={
+                                'hostname': host.hostname or '',
+                                'os': host.os or '',
+                                'status': host.status or 'up',
+                                'mac_address': getattr(host, 'mac_address', '') or '',
+                                'vendor': getattr(host, 'vendor', '') or '',
+                                'ports_count': len(host.open_ports),
+                            },
+                        )
                         # Replace ports / tech / screenshots for this host
                         _DBPort.objects.filter(host=db_host).delete()
                         _DBTech.objects.filter(host=db_host).delete()
@@ -244,6 +289,12 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
+        def _on_subnet_complete(new_ips, mac_updates) -> None:
+            try:
+                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates))
+            except Exception:
+                pass
+
         def _on_host_phase(ip: str, phase: str) -> None:
             try:
                 _progress_queue.put_nowait(("host_phase", ip, phase))
@@ -257,6 +308,7 @@ def run_scan(self, scan_id):
                 on_discovery_complete=_on_discovery_complete,
                 on_host_complete=_on_host_complete,
                 on_host_phase=_on_host_phase,
+                on_subnet_complete=_on_subnet_complete,
             ))
         finally:
             # Send sentinel first so the thread drains remaining queue items

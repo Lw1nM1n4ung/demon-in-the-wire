@@ -81,7 +81,7 @@ Browser/live QA tests require `WG_BASE` env var (default: `https://localhost:184
 
 ### Pipeline (`src/wireghost/pipeline/`)
 
-`orchestrator.run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None)` is the single async entry point. The pipeline tracks 6 phases in `PHASE_ORDER`:
+`orchestrator.run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None, on_subnet_complete=None)` is the single async entry point. The pipeline tracks 6 phases in `PHASE_ORDER`:
 
 ```python
 PHASE_ORDER = ["discovery", "portscan", "webdetect", "webcrawl", "enumeration", "reports"]
@@ -92,10 +92,11 @@ PHASE_ORDER = ["discovery", "portscan", "webdetect", "webcrawl", "enumeration", 
 **Callbacks** (from orchestrator to Celery bridge):
 - `on_progress(phase_label, weighted_pct, hosts_fully_done)` — scan-level progress, called on every host phase change
 - `on_discovery_complete(live_ips, mac_vendor_map)` — called after host discovery
-- `on_host_complete(host, findings)` — called after a host finishes its FULL pipeline (ports, findings, screenshots populated)
+- `on_subnet_complete(new_ips, mac_updates)` — called after each subnet scan with newly discovered IPs + MAC data, enabling incremental Host creation during discovery
+- `on_host_complete(host, findings)` — called immediately when each host finishes its pipeline (no longer waits for gather)
 - `on_host_phase(ip, phase)` — per-host phase change, writes `Host.current_phase` in the DB
 
-**Important: `asyncio.gather` barrier** — `on_host_complete` fires for ALL hosts only after `asyncio.gather` returns, meaning port/finding/screenshot data only appears in the DB when the ENTIRE scan completes. During a running scan, only progress counters and per-host phases are visible.
+**Real-time persistence**: `on_host_complete` fires inside `_host_pipeline` right before the host returns — each host's ports, findings, and screenshots hit the DB as soon as that host finishes, not after all hosts complete. `on_subnet_complete` fires after each subnet scan in discovery, creating Host records incrementally instead of waiting for every subnet.
 
 The web portal's Celery task uses **daemon thread + queue** to write these fields to the DB in real time. The `on_progress` callback enqueues `(phase_label, pct, done)` tuples; a dedicated thread dequeues and writes via raw SQL (bypassing Django's `SynchronousOnlyOperation` in `asyncio.run()`).
 
@@ -175,7 +176,7 @@ Two Dockerfiles in `web_portal/`:
 | `src/wireghost/cli/output.py` | Shared output formatting — `echo_table()`, `echo_json()` for consistent CLI rendering |
 | `src/wireghost/cli/deploy.py` | Cloud deployment CLI (`aws`, `aws-serverless`, `aws-sam`) |
 | `src/wireghost/config.py` | `ScanConfig` with layered loader (defaults → YAML → env → overrides). Key flags: `enhanced_discovery` (TCP+UDP multi-port ping, default False — plain `nmap -sn`), `skip_passive_dns`, `scan_unresponsive`, `skip_msf_scan`, `skip_fingerprintx` |
-| `src/wireghost/pipeline/orchestrator.py` | Async phase coordinator with `PHASE_ORDER` (6 phases) and per-host weighted progress via `_advance_host_phase()` + `_compute_progress()`; call `run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None)` |
+| `src/wireghost/pipeline/orchestrator.py` | Async phase coordinator with `PHASE_ORDER` (6 phases) and per-host weighted progress via `_advance_host_phase()` + `_compute_progress()`; call `run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None, on_subnet_complete=None)` |
 | `src/wireghost/pipeline/discovery.py` | Phase: discovery — nmap/fping/ARP/DNS sweep with per-subnet parallel tool execution, CIDR partitioning, fping ICMP Host Unreachable capture (firewalled hosts always scanned) |
 | `src/wireghost/pipeline/portscan.py` | Phase: portscan — port discovery fallback chain (nmap → naabu → masscan) + service analysis (nmap -sV -sC -O) + fingerprintx augmentation (second source of truth for unidentified ports) |
 | `src/wireghost/pipeline/webdetect.py` | Phase: webdetect — verification-driven web probing: two-layer filter (service-name skip → HTTP HEAD verify). Service names come from portscan (nmap -sV + fingerprintx) |
@@ -243,7 +244,9 @@ Two Dockerfiles in `web_portal/`:
 - **masscan rate**: No `--rate` flag — uses masscan's default (100 pps). Previously was hardcoded to 5000. At 100 pps a full 65535-port scan takes ~11 minutes per host — a major bottleneck for large scans. Hosts with no open ports still pay this full cost due to the nmap → naabu → masscan fallback chain.
 - **gowitness v3 breaking changes**: The worker image ships gowitness 3.1.1 (not v2). Flags `--resolution-x`/`--resolution-y` are renamed to `--chrome-window-x`/`--chrome-window-y`. Default screenshot format is JPEG (not PNG) — always pass `--screenshot-format png` for backward compatibility. Using the old v2 flags causes gowitness to error out; the exception is silently caught, resulting in zero screenshots.
 - **Daemon thread sentinel ordering (CRITICAL)**: In the Celery bridge's `finally` block, the sentinel `_progress_queue.put(None)` MUST come BEFORE `_progress_stop.set()`. The daemon thread exits when `_progress_stop` is set, so stopping first discards all enqueued `host_result` items — meaning ports, findings, and screenshots are lost for the entire scan. Always: sentinel → `join(30s)` → force-stop only if stuck.
-- **`asyncio.gather` persistence barrier**: `on_host_complete` fires only after ALL hosts finish their pipeline (gather returns all results at once). During a running scan, per-host ports/findings/screenshots exist on disk but are NOT yet in the DB. Only progress counters and `Host.current_phase` are visible mid-scan.
+- **Real-time host results**: `on_host_complete` fires inside `_host_pipeline` as each host finishes — ports, findings, and screenshots hit the DB immediately (not after all hosts complete). The post-gather loop still collects results for the ScanReport but no longer re-calls `on_host_complete`.
+
+- **Incremental discovery**: `on_subnet_complete` fires after each /24 subnet scan with newly discovered IPs + MAC data, enabling Host records to appear in the portal during discovery rather than after all subnets finish.
 - **Worker source code paths**: Pipeline code lives at `/app/src/wireghost/pipeline/` (installed as a package). Django task code lives at `/app/scanner/tasks/`. When `docker cp`-ing fixes into the worker, use the correct path. The worker image (`callmedemon/wireghost`) is NOT read-only — `docker cp` + `docker restart` works.
 - **UUID format for raw SQL**: `str(uuid)` produces dashed format (`019e4470-e6e2-7200-b202-9d97eb11a6c0`) but MySQL stores UUIDs without dashes as CHAR(32) (`019e4470e6e27200b2029d97eb11a6c0`). When using raw SQL (e.g., cursor.execute with `WHERE id=%s`), always do `str(uuid).replace("-", "")`. ORM queries handle this automatically — this only matters for raw SQL.
 - **Threaded progress updater**: Django's `SynchronousOnlyOperation` blocks synchronous DB access inside `asyncio.run()`. The Celery task bridges this with a **daemon thread + queue** pattern. Queue items: `("progress", phase_label, pct, done)`, `("discovery", ips, mac_map)`, `("host_phase", ip, phase)`, `("host_result", host, findings)`. The `on_progress` callback runs inside the async event loop — never call the Django ORM directly from it; only enqueue tuples.

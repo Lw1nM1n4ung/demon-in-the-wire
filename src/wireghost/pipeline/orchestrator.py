@@ -69,6 +69,7 @@ async def run_pipeline(
     on_discovery_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
     on_host_complete: Callable[[Host, list[Finding]], None] | None = None,
     on_host_phase: Callable[[str, str], None] | None = None,
+    on_subnet_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
 ) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
 
@@ -86,6 +87,10 @@ async def run_pipeline(
 
     If *on_host_phase* is provided it is called when a host advances
     to a new phase: ``on_host_phase(ip, phase)``.
+
+    If *on_subnet_complete* is provided it is called after each subnet
+    scan during discovery with the list of newly discovered IPs and
+    MAC/vendor updates, enabling incremental host creation in the DB.
     """
     scan_start = datetime.now()
 
@@ -139,7 +144,11 @@ async def run_pipeline(
 
     if on_progress:
         on_progress("discovery", 0, 0)
-    live_ips, mac_vendor_map = await discover_hosts(config, tree, on_progress=_discovery_progress)
+    live_ips, mac_vendor_map = await discover_hosts(
+        config, tree,
+        on_progress=_discovery_progress,
+        on_subnet_complete=on_subnet_complete,
+    )
 
     if on_discovery_complete:
         on_discovery_complete(live_ips, mac_vendor_map)
@@ -267,6 +276,8 @@ async def run_pipeline(
             "[%s] Pipeline done: %d port(s), %d endpoint(s), %d finding(s)",
             ip, len(host.open_ports), len(host.web_endpoints), len(findings),
         )
+        if on_host_complete:
+            on_host_complete(host, findings)
         return host, findings
 
     results = await asyncio.gather(
@@ -283,8 +294,8 @@ async def run_pipeline(
         host, findings = r
         hosts.append(host)
         all_findings.extend(findings)
-        if on_host_complete:
-            on_host_complete(host, findings)
+        # on_host_complete was already called inside _host_pipeline
+        # when the host finished — no need to call it again here.
 
     scan_end = datetime.now()
     report = ScanReport(
