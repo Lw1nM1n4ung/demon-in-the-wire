@@ -224,51 +224,66 @@ tools_update() {
     fi
 
     # ── Go tools — install via 'go install' (no GitHub API needed) ──────
-    if command -v go >/dev/null 2>&1; then
+    local go_needed=false
+    if ! command -v go >/dev/null 2>&1; then
+        go_needed=true
+    else
         local go_ver
         go_ver=$(go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | head -1 | cut -c3-)
-        local go_ok=false
         local go_major=0 go_minor=0
         go_major=$(echo "$go_ver" | cut -d. -f1 2>/dev/null || echo 0)
         go_minor=$(echo "$go_ver" | cut -d. -f2 2>/dev/null || echo 0)
-        [ "$go_major" -ge 1 ] 2>/dev/null && [ "$go_minor" -ge 21 ] 2>/dev/null && go_ok=true
-
-        if [ "$go_ok" = true ]; then
-            _go_install() {
-                local name="$1" module="$2"
-                if command -v "$name" >/dev/null 2>&1; then
-                    info "go update ${name}..."
-                else
-                    info "go install ${name}..."
-                fi
-                go install "${module}@latest" 2>&1 | tail -2 || { warn "${name} — go install failed"; return 1; }
-                # Copy from GOPATH to /usr/local/bin
-                local gopath bin_src
-                gopath=$(go env GOPATH 2>/dev/null || echo "$HOME/go")
-                bin_src="${gopath}/bin/${name}"
-                if [ -f "$bin_src" ]; then
-                    cp "$bin_src" "/usr/local/bin/${name}" 2>/dev/null || true
-                    chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
-                fi
-                local new_ver
-                new_ver=$("$name" -version 2>&1 | head -1 || echo "installed")
-                ok "${name} → ${new_ver}"
-            }
-
-            _go_install nuclei   "github.com/projectdiscovery/nuclei/v3/cmd/nuclei"
-            _go_install httpx    "github.com/projectdiscovery/httpx/cmd/httpx"
-            _go_install naabu    "github.com/projectdiscovery/naabu/v2/cmd/naabu"
-            _go_install katana   "github.com/projectdiscovery/katana/cmd/katana"
-            _go_install gowitness "github.com/sensepost/gowitness"
-            _go_install kerbrute "github.com/ropnop/kerbrute"
-            _go_install fingerprintx "github.com/praetorian-inc/fingerprintx/cmd/fingerprintx"
-        else
-            warn "Go ${go_ver} too old (need 1.21+) — skipping Go tool installs"
-            warn "Install Go 1.21+: sudo apt-get install golang-go"
+        if ! { [ "$go_major" -ge 1 ] 2>/dev/null && [ "$go_minor" -ge 21 ] 2>/dev/null; }; then
+            go_needed=true
         fi
+    fi
+
+    if [ "$go_needed" = true ]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            info "Installing Go 1.21+..."
+            apt-get update -qq 2>/dev/null || true
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go 2>&1 | tail -2 && \
+                ok "Go installed ($(go version 2>&1 | head -1))" || \
+                warn "Go install failed — try: sudo apt-get install golang-go"
+        elif command -v snap >/dev/null 2>&1; then
+            info "Installing Go via snap..."
+            snap install go --classic 2>&1 | tail -2 && ok "Go installed" || warn "Go snap install failed"
+        else
+            warn "Cannot auto-install Go — no apt or snap found"
+        fi
+    fi
+
+    if command -v go >/dev/null 2>&1; then
+        _go_install() {
+            local name="$1" module="$2"
+            if command -v "$name" >/dev/null 2>&1; then
+                info "go update ${name}..."
+            else
+                info "go install ${name}..."
+            fi
+            go install "${module}@latest" 2>&1 | tail -2 || { warn "${name} — go install failed"; return 1; }
+            # Copy from GOPATH to /usr/local/bin
+            local gopath bin_src
+            gopath=$(go env GOPATH 2>/dev/null || echo "$HOME/go")
+            bin_src="${gopath}/bin/${name}"
+            if [ -f "$bin_src" ]; then
+                cp "$bin_src" "/usr/local/bin/${name}" 2>/dev/null || true
+                chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
+            fi
+            local new_ver
+            new_ver=$("$name" -version 2>&1 | head -1 || echo "installed")
+            ok "${name} → ${new_ver}"
+        }
+
+        _go_install nuclei   "github.com/projectdiscovery/nuclei/v3/cmd/nuclei"
+        _go_install httpx    "github.com/projectdiscovery/httpx/cmd/httpx"
+        _go_install naabu    "github.com/projectdiscovery/naabu/v2/cmd/naabu"
+        _go_install katana   "github.com/projectdiscovery/katana/cmd/katana"
+        _go_install gowitness "github.com/sensepost/gowitness"
+        _go_install kerbrute "github.com/ropnop/kerbrute"
+        _go_install fingerprintx "github.com/praetorian-inc/fingerprintx/cmd/fingerprintx"
     else
-        warn "Go not installed — skipping Go tool binaries"
-        warn "Install: sudo apt-get install golang-go"
+        warn "Go tool binaries skipped (Go not available after install attempt)"
     fi
 
     # ── Git-based tools ──
