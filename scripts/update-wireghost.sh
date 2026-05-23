@@ -24,17 +24,44 @@ warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 
 # ── Find project root ──────────────────────────────────────────────────
 find_root() {
+    # 1. Explicit override via env var
     if [ -n "${WG_ROOT:-}" ] && [ -f "${WG_ROOT}/pyproject.toml" ]; then
         PROJECT_DIR="$WG_ROOT"
         return
     fi
-    PROJECT_DIR="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)"
-    if [ ! -f "${PROJECT_DIR}/pyproject.toml" ]; then
-        PROJECT_DIR="$(pwd)"
-        if [ ! -f "${PROJECT_DIR}/pyproject.toml" ]; then
-            PROJECT_DIR="/opt/wireghost"
+
+    # 2. Script-relative (works when run from local clone)
+    local script_dir
+    script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || script_dir=""
+    if [ -n "$script_dir" ] && [ "$script_dir" != "/" ] && [ "$script_dir" != "." ]; then
+        local parent
+        parent="$(cd "$script_dir/.." 2>/dev/null && pwd)" || parent=""
+        if [ -n "$parent" ] && [ -f "${parent}/pyproject.toml" ]; then
+            PROJECT_DIR="$parent"
+            return
         fi
     fi
+
+    # 3. Common install directories (searched in order)
+    for candidate in \
+        /opt/wireghost \
+        /opt/demon-in-the-wire \
+        /home/*/demon-in-the-wire \
+        /root/demon-in-the-wire; do
+        if [ -f "${candidate}/pyproject.toml" ]; then
+            PROJECT_DIR="$candidate"
+            return
+        fi
+    done
+
+    # 4. Current directory
+    if [ -f "$(pwd)/pyproject.toml" ]; then
+        PROJECT_DIR="$(pwd)"
+        return
+    fi
+
+    # 5. Last resort
+    PROJECT_DIR="/opt/wireghost"
 }
 
 WITH_TOOLS=true; WITH_FEEDS=true; WITH_SELF=true; WITH_DOCKER=false
@@ -67,10 +94,18 @@ step() {
 ###########################################################################
 self_update() {
     step "Updating Wire_Ghost"
+
+    if [ ! -d "$PROJECT_DIR" ]; then
+        warn "Project directory ${PROJECT_DIR} not found"
+        warn "Run the installer first: curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/${BRANCH:-rewrite-v2}/scripts/install-wireghost.sh | sudo bash"
+        return
+    fi
+
     cd "$PROJECT_DIR"
 
     if [ ! -d .git ]; then
         warn "Not a git repo at ${PROJECT_DIR} — skipping self-update"
+        warn "Run the installer: curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/${BRANCH:-rewrite-v2}/scripts/install-wireghost.sh | sudo bash"
         return
     fi
 
