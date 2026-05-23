@@ -224,36 +224,49 @@ tools_update() {
     fi
 
     # ── Go tools — install via 'go install' (no GitHub API needed) ──────
-    local go_needed=false
-    if ! command -v go >/dev/null 2>&1; then
-        go_needed=true
-    else
+    local go_ok=false
+    if command -v go >/dev/null 2>&1; then
         local go_ver
-        go_ver=$(go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | head -1 | cut -c3-)
+        go_ver=$(go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+\.[0-9]+' | head -1 | cut -c3- || true)
+        [ -z "$go_ver" ] && go_ver=$(go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | head -1 | cut -c3- || echo "0.0")
         local go_major=0 go_minor=0
         go_major=$(echo "$go_ver" | cut -d. -f1 2>/dev/null || echo 0)
         go_minor=$(echo "$go_ver" | cut -d. -f2 2>/dev/null || echo 0)
-        if ! { [ "$go_major" -ge 1 ] 2>/dev/null && [ "$go_minor" -ge 21 ] 2>/dev/null; }; then
-            go_needed=true
-        fi
-    fi
-
-    if [ "$go_needed" = true ]; then
-        if command -v apt-get >/dev/null 2>&1; then
-            info "Installing Go 1.21+..."
-            apt-get update -qq 2>/dev/null || true
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go 2>&1 | tail -2 && \
-                ok "Go installed ($(go version 2>&1 | head -1))" || \
-                warn "Go install failed — try: sudo apt-get install golang-go"
-        elif command -v snap >/dev/null 2>&1; then
-            info "Installing Go via snap..."
-            snap install go --classic 2>&1 | tail -2 && ok "Go installed" || warn "Go snap install failed"
+        if [ "$go_major" -ge 1 ] 2>/dev/null && [ "$go_minor" -ge 24 ] 2>/dev/null; then
+            go_ok=true
         else
-            warn "Cannot auto-install Go — no apt or snap found"
+            info "Go ${go_ver} too old (need 1.24+) — installing latest..."
         fi
     fi
 
-    if command -v go >/dev/null 2>&1; then
+    if [ "$go_ok" = false ]; then
+        local go_arch
+        case "$(uname -m)" in x86_64|amd64) go_arch="amd64" ;; aarch64|arm64) go_arch="arm64" ;; *) go_arch="amd64" ;; esac
+        info "Downloading Go 1.26 (linux-${go_arch})..."
+        local go_tar="/tmp/go_install.tar.gz"
+        if curl -fsSL "https://go.dev/dl/go1.26.0.linux-${go_arch}.tar.gz" -o "$go_tar" 2>/dev/null; then
+            # Remove old apt-installed Go to avoid version conflicts
+            apt-get remove -y -qq golang-go golang 2>/dev/null || true
+            rm -rf /usr/local/go 2>/dev/null || true
+            tar -C /usr/local -xzf "$go_tar" 2>&1 | tail -1 || true
+            rm -f "$go_tar"
+            # Symlink into system PATH (sudo resets secure_path)
+            ln -sf /usr/local/go/bin/go /usr/local/bin/go 2>/dev/null || true
+            ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt 2>/dev/null || true
+            # Ensure /usr/local/go/bin is in PATH for this session
+            export PATH="/usr/local/go/bin:${PATH}"
+            if /usr/local/go/bin/go version >/dev/null 2>&1; then
+                ok "Go 1.26 installed ($(/usr/local/go/bin/go version))"
+                go_ok=true
+            else
+                warn "Go install failed"
+            fi
+        else
+            warn "Failed to download Go 1.26 — https://go.dev/dl may be unreachable"
+        fi
+    fi
+
+    if [ "$go_ok" = true ]; then
         _go_install() {
             local name="$1" module="$2"
             if command -v "$name" >/dev/null 2>&1; then
@@ -261,10 +274,10 @@ tools_update() {
             else
                 info "go install ${name}..."
             fi
-            go install "${module}@latest" 2>&1 | tail -2 || { warn "${name} — go install failed"; return 1; }
+            /usr/local/go/bin/go install "${module}@latest" 2>&1 | tail -2 || { warn "${name} — go install failed"; return 1; }
             # Copy from GOPATH to /usr/local/bin
             local gopath bin_src
-            gopath=$(go env GOPATH 2>/dev/null || echo "$HOME/go")
+            gopath=$(/usr/local/go/bin/go env GOPATH 2>/dev/null || echo "$HOME/go")
             bin_src="${gopath}/bin/${name}"
             if [ -f "$bin_src" ]; then
                 cp "$bin_src" "/usr/local/bin/${name}" 2>/dev/null || true
