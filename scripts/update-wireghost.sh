@@ -223,66 +223,106 @@ tools_update() {
         done
     fi
 
+    # ── Shared curl helper for GitHub API ───────────────────────────────
+    _gh_api() {
+        # Fetch a GitHub API URL, optionally authenticated.
+        # Returns JSON on stdout, empty on failure.
+        local url="$1"
+        local headers=(-H "Accept: application/vnd.github+json")
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+            headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+        fi
+        curl -fsSL --retry 3 --retry-delay 2 --retry-max-time 30 "${headers[@]}" "$url" 2>/dev/null
+    }
+
     # ── Go binaries (ProjectDiscovery + others) ──
     _install_go_zip() {
-        local name="$1" repo="$2" pattern="${3:-linux_amd64.zip}"
+        local name="$1" repo="$2" asset_suffix="${3:-linux_amd64.zip}"
         local arch="amd64"
         uname -m | grep -q "aarch64\|arm64" && arch="arm64"
-        pattern="${pattern/amd64/$arch}"
+        asset_suffix="${asset_suffix/amd64/$arch}"
 
-        local tag url
-        tag=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | cut -d'"' -f4) || true
+        local release_json tag url
+        release_json=$(_gh_api "https://api.github.com/repos/${repo}/releases/latest")
+        tag=$(echo "$release_json" | grep '"tag_name"' | head -1 | cut -d'"' -f4 || true)
+
+        # Try API first, then fall back to direct download URL pattern
+        if [ -n "$release_json" ]; then
+            url=$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_suffix}\"" | head -1 | cut -d'"' -f4 || true)
+        fi
+
+        # Fallback: construct URL from tag pattern (GitHub redirects /latest/download/)
+        if [ -z "$url" ] && [ -n "$tag" ]; then
+            local asset_name
+            asset_name=$(echo "$release_json" | grep -o "\"name\": *\"[^\"]*${asset_suffix}\"" | head -1 | cut -d'"' -f4 || true)
+            if [ -n "$asset_name" ]; then
+                url="https://github.com/${repo}/releases/download/${tag}/${asset_name}"
+            fi
+        fi
+
+        if [ -z "$url" ]; then
+            if command -v "$name" >/dev/null 2>&1; then
+                ok "${name} already installed (GitHub API unavailable, skipping update)"
+            else
+                warn "${name} — GitHub API unavailable, cannot download; set GITHUB_TOKEN= to authenticate"
+            fi
+            return
+        fi
 
         if command -v "$name" >/dev/null 2>&1; then
-            local current_ver
-            current_ver=$("$name" -version 2>&1 | head -1 || echo "unknown")
-            # Check if update needed
-            if [ -n "$tag" ]; then
-                url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep -o "\"browser_download_url\": *\"[^\"]*${pattern}\"" | head -1 | cut -d'"' -f4) || true
-                if [ -n "$url" ]; then
-                    info "Updating ${name}..."
-                    local tmp="/tmp/${name}_update.zip"
-                    curl -fsSL "$url" -o "$tmp" 2>/dev/null || { warn "${name} — download failed"; return; }
-                    unzip -o "$tmp" "$name" -d /usr/local/bin/ >/dev/null 2>&1 || true
-                    chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
-                    rm -f "$tmp"
-                    ok "${name} → ${tag}"
-                fi
-            fi
+            info "Updating ${name}..."
         else
-            # Install fresh
-            [ -z "$tag" ] && { warn "${name} — could not fetch latest release"; return; }
-            url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep -o "\"browser_download_url\": *\"[^\"]*${pattern}\"" | head -1 | cut -d'"' -f4) || true
-            [ -z "$url" ] && { warn "${name} — no binary for ${pattern}"; return; }
             info "Installing ${name}..."
-            local tmp="/tmp/${name}_install.zip"
-            curl -fsSL "$url" -o "$tmp" 2>/dev/null || { warn "${name} — download failed"; return; }
-            unzip -o "$tmp" "$name" -d /usr/local/bin/ >/dev/null 2>&1 || true
-            chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
-            rm -f "$tmp"
-            ok "${name} installed (${tag})"
         fi
+
+        local tmp="/tmp/${name}_dl.zip"
+        curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$tmp" 2>/dev/null || { warn "${name} — download failed"; return; }
+        unzip -o "$tmp" "$name" -d /usr/local/bin/ >/dev/null 2>&1 || true
+        chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
+        rm -f "$tmp"
+        ok "${name} → ${tag:-latest}"
     }
 
     _install_go_binary() {
-        local name="$1" repo="$2" pattern="${3:-linux-amd64}"
+        local name="$1" repo="$2" asset_pattern="${3:-linux-amd64}"
         local arch="amd64"
         uname -m | grep -q "aarch64\|arm64" && arch="arm64"
-        pattern="${pattern/amd64/$arch}"
+        asset_pattern="${asset_pattern/amd64/$arch}"
+
+        local release_json tag url
+        release_json=$(_gh_api "https://api.github.com/repos/${repo}/releases/latest")
+        tag=$(echo "$release_json" | grep '"tag_name"' | head -1 | cut -d'"' -f4 || true)
+
+        if [ -n "$release_json" ]; then
+            url=$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_pattern}[^\"]*\"" | head -1 | cut -d'"' -f4 || true)
+        fi
+
+        # Fallback
+        if [ -z "$url" ] && [ -n "$tag" ]; then
+            local asset_name
+            asset_name=$(echo "$release_json" | grep -o "\"name\": *\"[^\"]*${asset_pattern}[^\"]*\"" | head -1 | cut -d'"' -f4 || true)
+            if [ -n "$asset_name" ]; then
+                url="https://github.com/${repo}/releases/download/${tag}/${asset_name}"
+            fi
+        fi
+
+        if [ -z "$url" ]; then
+            if command -v "$name" >/dev/null 2>&1; then
+                ok "${name} already installed (GitHub API unavailable, skipping update)"
+            else
+                warn "${name} — GitHub API unavailable, cannot download; set GITHUB_TOKEN= to authenticate"
+            fi
+            return
+        fi
 
         if command -v "$name" >/dev/null 2>&1; then
-            info "${name} already installed — updating..."
+            info "Updating ${name}..."
         else
             info "Installing ${name}..."
         fi
 
-        local url
-        url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep -o "\"browser_download_url\": *\"[^\"]*${pattern}[^\"]*\"" | head -1 | cut -d'"' -f4) || true
-        [ -z "$url" ] && { warn "${name} — no binary for ${pattern}"; return; }
-        curl -fsSL "$url" -o "/usr/local/bin/${name}" 2>/dev/null || { warn "${name} — download failed"; return; }
+        curl -fsSL --retry 3 --retry-delay 2 "$url" -o "/usr/local/bin/${name}" 2>/dev/null || { warn "${name} — download failed"; return; }
         chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
-        local tag
-        tag=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | cut -d'"' -f4) || true
         ok "${name} → ${tag:-latest}"
     }
 
