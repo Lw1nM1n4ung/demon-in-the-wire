@@ -223,118 +223,53 @@ tools_update() {
         done
     fi
 
-    # ── Shared curl helper for GitHub API ───────────────────────────────
-    _gh_api() {
-        # Fetch a GitHub API URL, optionally authenticated.
-        # Returns JSON on stdout, empty on failure.
-        local url="$1"
-        local headers=(-H "Accept: application/vnd.github+json")
-        if [ -n "${GITHUB_TOKEN:-}" ]; then
-            headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-        fi
-        curl -fsSL --retry 3 --retry-delay 2 --retry-max-time 30 "${headers[@]}" "$url" 2>/dev/null
-    }
+    # ── Go tools — install via 'go install' (no GitHub API needed) ──────
+    if command -v go >/dev/null 2>&1; then
+        local go_ver
+        go_ver=$(go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | head -1 | cut -c3-)
+        local go_ok=false
+        local go_major=0 go_minor=0
+        go_major=$(echo "$go_ver" | cut -d. -f1 2>/dev/null || echo 0)
+        go_minor=$(echo "$go_ver" | cut -d. -f2 2>/dev/null || echo 0)
+        [ "$go_major" -ge 1 ] 2>/dev/null && [ "$go_minor" -ge 21 ] 2>/dev/null && go_ok=true
 
-    # ── Go binaries (ProjectDiscovery + others) ──
-    _install_go_zip() {
-        local name="$1" repo="$2" asset_suffix="${3:-linux_amd64.zip}"
-        local arch="amd64"
-        uname -m | grep -q "aarch64\|arm64" && arch="arm64"
-        asset_suffix="${asset_suffix/amd64/$arch}"
+        if [ "$go_ok" = true ]; then
+            _go_install() {
+                local name="$1" module="$2"
+                if command -v "$name" >/dev/null 2>&1; then
+                    info "go update ${name}..."
+                else
+                    info "go install ${name}..."
+                fi
+                go install "${module}@latest" 2>&1 | tail -2 || { warn "${name} — go install failed"; return 1; }
+                # Copy from GOPATH to /usr/local/bin
+                local gopath bin_src
+                gopath=$(go env GOPATH 2>/dev/null || echo "$HOME/go")
+                bin_src="${gopath}/bin/${name}"
+                if [ -f "$bin_src" ]; then
+                    cp "$bin_src" "/usr/local/bin/${name}" 2>/dev/null || true
+                    chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
+                fi
+                local new_ver
+                new_ver=$("$name" -version 2>&1 | head -1 || echo "installed")
+                ok "${name} → ${new_ver}"
+            }
 
-        local release_json tag url
-        release_json=$(_gh_api "https://api.github.com/repos/${repo}/releases/latest")
-        tag=$(echo "$release_json" | grep '"tag_name"' | head -1 | cut -d'"' -f4 || true)
-
-        # Try API first, then fall back to direct download URL pattern
-        if [ -n "$release_json" ]; then
-            url=$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_suffix}\"" | head -1 | cut -d'"' -f4 || true)
-        fi
-
-        # Fallback: construct URL from tag pattern (GitHub redirects /latest/download/)
-        if [ -z "$url" ] && [ -n "$tag" ]; then
-            local asset_name
-            asset_name=$(echo "$release_json" | grep -o "\"name\": *\"[^\"]*${asset_suffix}\"" | head -1 | cut -d'"' -f4 || true)
-            if [ -n "$asset_name" ]; then
-                url="https://github.com/${repo}/releases/download/${tag}/${asset_name}"
-            fi
-        fi
-
-        if [ -z "$url" ]; then
-            if command -v "$name" >/dev/null 2>&1; then
-                ok "${name} already installed (GitHub API unavailable, skipping update)"
-            else
-                warn "${name} — GitHub API unavailable, cannot download; set GITHUB_TOKEN= to authenticate"
-            fi
-            return
-        fi
-
-        if command -v "$name" >/dev/null 2>&1; then
-            info "Updating ${name}..."
+            _go_install nuclei   "github.com/projectdiscovery/nuclei/v3/cmd/nuclei"
+            _go_install httpx    "github.com/projectdiscovery/httpx/cmd/httpx"
+            _go_install naabu    "github.com/projectdiscovery/naabu/v2/cmd/naabu"
+            _go_install katana   "github.com/projectdiscovery/katana/cmd/katana"
+            _go_install gowitness "github.com/sensepost/gowitness"
+            _go_install kerbrute "github.com/ropnop/kerbrute"
+            _go_install fingerprintx "github.com/praetorian-inc/fingerprintx/cmd/fingerprintx"
         else
-            info "Installing ${name}..."
+            warn "Go ${go_ver} too old (need 1.21+) — skipping Go tool installs"
+            warn "Install Go 1.21+: sudo apt-get install golang-go"
         fi
-
-        local tmp="/tmp/${name}_dl.zip"
-        curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$tmp" 2>/dev/null || { warn "${name} — download failed"; return; }
-        unzip -o "$tmp" "$name" -d /usr/local/bin/ >/dev/null 2>&1 || true
-        chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
-        rm -f "$tmp"
-        ok "${name} → ${tag:-latest}"
-    }
-
-    _install_go_binary() {
-        local name="$1" repo="$2" asset_pattern="${3:-linux-amd64}"
-        local arch="amd64"
-        uname -m | grep -q "aarch64\|arm64" && arch="arm64"
-        asset_pattern="${asset_pattern/amd64/$arch}"
-
-        local release_json tag url
-        release_json=$(_gh_api "https://api.github.com/repos/${repo}/releases/latest")
-        tag=$(echo "$release_json" | grep '"tag_name"' | head -1 | cut -d'"' -f4 || true)
-
-        if [ -n "$release_json" ]; then
-            url=$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_pattern}[^\"]*\"" | head -1 | cut -d'"' -f4 || true)
-        fi
-
-        # Fallback
-        if [ -z "$url" ] && [ -n "$tag" ]; then
-            local asset_name
-            asset_name=$(echo "$release_json" | grep -o "\"name\": *\"[^\"]*${asset_pattern}[^\"]*\"" | head -1 | cut -d'"' -f4 || true)
-            if [ -n "$asset_name" ]; then
-                url="https://github.com/${repo}/releases/download/${tag}/${asset_name}"
-            fi
-        fi
-
-        if [ -z "$url" ]; then
-            if command -v "$name" >/dev/null 2>&1; then
-                ok "${name} already installed (GitHub API unavailable, skipping update)"
-            else
-                warn "${name} — GitHub API unavailable, cannot download; set GITHUB_TOKEN= to authenticate"
-            fi
-            return
-        fi
-
-        if command -v "$name" >/dev/null 2>&1; then
-            info "Updating ${name}..."
-        else
-            info "Installing ${name}..."
-        fi
-
-        curl -fsSL --retry 3 --retry-delay 2 "$url" -o "/usr/local/bin/${name}" 2>/dev/null || { warn "${name} — download failed"; return; }
-        chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
-        ok "${name} → ${tag:-latest}"
-    }
-
-    # Core PD tools (zip releases)
-    _install_go_zip nuclei   "projectdiscovery/nuclei"  "linux_amd64.zip"
-    _install_go_zip httpx    "projectdiscovery/httpx"   "linux_amd64.zip"
-    _install_go_zip naabu    "projectdiscovery/naabu"   "linux_amd64.zip"
-    _install_go_zip katana   "projectdiscovery/katana"  "linux_amd64.zip"
-
-    # Standalone binaries
-    _install_go_binary gowitness "sensepost/gowitness" "linux-amd64"
-    _install_go_binary kerbrute  "ropnop/kerbrute"     "linux_amd64"
+    else
+        warn "Go not installed — skipping Go tool binaries"
+        warn "Install: sudo apt-get install golang-go"
+    fi
 
     # ── Git-based tools ──
     _install_git_tool() {
@@ -361,18 +296,6 @@ tools_update() {
 
     _install_git_tool "enum4linux" "https://github.com/CiscoCXSecurity/enum4linux.git" "/opt/enum4linux" "/opt/enum4linux/enum4linux.pl"
     [ -x /opt/enum4linux/enum4linux.pl ] && ln -sf /opt/enum4linux/enum4linux.pl /usr/local/bin/enum4linux 2>/dev/null || true
-
-    # ── fingerprintx (Go install) ──
-    if command -v fingerprintx >/dev/null 2>&1; then
-        ok "fingerprintx already installed"
-    elif command -v go >/dev/null 2>&1; then
-        info "Installing fingerprintx..."
-        go install github.com/praetorian-inc/fingerprintx/cmd/fingerprintx@latest 2>/dev/null && \
-            cp "$(go env GOPATH 2>/dev/null || echo ~/go)/bin/fingerprintx" /usr/local/bin/ 2>/dev/null && \
-            ok "fingerprintx installed" || warn "fingerprintx — install failed"
-    else
-        warn "fingerprintx skipped (go not installed — install with: sudo apt-get install golang)"
-    fi
 
     # ── Python tools (impacket, netexec, bloodhound, ldapdomaindump) ──
     if command -v pip3 >/dev/null 2>&1; then
