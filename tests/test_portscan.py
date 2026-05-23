@@ -37,6 +37,7 @@ class TestFallbackChain:
             patch("wireghost.pipeline.portscan._run_nmap", new_callable=AsyncMock, return_value=nmap_host) as m_nmap,
             patch("wireghost.pipeline.portscan._run_naabu", new_callable=AsyncMock) as m_naabu,
             patch("wireghost.pipeline.portscan._run_masscan", new_callable=AsyncMock) as m_masscan,
+            patch("wireghost.pipeline.portscan._analyze_services", new_callable=AsyncMock, side_effect=lambda h, *a, **kw: h),
         ):
             result = await scan_host("10.0.0.1", mock_config, mock_tree, sem)
             assert len(result.open_ports) == 1
