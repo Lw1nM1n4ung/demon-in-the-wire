@@ -337,10 +337,18 @@ tools_update() {
             fi
         done
 
-        # NetExec (from GitHub, not PyPI)
+        # certipy-ad (netexec dependency — not always on PyPI; install from GitHub first)
+        if ! pip3 show certipy-ad >/dev/null 2>&1; then
+            info "pip install certipy-ad (netexec dependency)..."
+            pip3 install "certipy-ad @ git+https://github.com/Pennyw0rth/Certipy.git" -q 2>&1 | tail -1 && \
+                ok "certipy-ad installed" || warn "certipy-ad — install failed"
+        fi
+
+        # NetExec (install/upgrade from GitHub — PyPI may miss certipy-ad dependency)
         if pip3 show netexec >/dev/null 2>&1; then
             info "pip upgrade netexec..."
-            pip3 install --upgrade netexec -q 2>&1 | tail -1 || true
+            pip3 install --upgrade "git+https://github.com/Pennyw0rth/NetExec.git" -q 2>&1 | tail -1 && \
+                ok "netexec upgraded" || warn "netexec — upgrade failed (optional)"
         else
             info "pip install netexec..."
             pip3 install "git+https://github.com/Pennyw0rth/NetExec.git" -q 2>&1 | tail -1 && \
