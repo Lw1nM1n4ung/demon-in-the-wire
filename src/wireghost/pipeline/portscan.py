@@ -80,7 +80,7 @@ async def _run_masscan(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_dir = tree.host_dir(ip)
     xml_path = out_dir / "masscan_scan.xml"
     result = await run_tool(
-        ["masscan", ip, "-p0-65535", "--banners", "-oX", str(xml_path)],
+        ["masscan", ip, "-p0-65535", "--rate", "5000", "--banners", "-oX", str(xml_path)],
         timeout=int(config.tool_timeout),
         label=f"masscan:{ip}",
     )
@@ -147,6 +147,7 @@ async def _analyze_services(
     for p in host.ports:
         if p.number in svc_map:
             p.service = svc_map[p.number]
+            p.service_source = 'nmap'
 
     if analyzed.os:
         host.os = analyzed.os
@@ -245,11 +246,22 @@ def _merge_fpx_results(
         # Trust nmap when it identified something
         if port.service and port.service.name:
             continue
+        fpx_version = fpx.get("version", "")
+        fpx_product = ""
+        # Extract product from combined version string (e.g. "Apache/2.4.7")
+        if fpx_version:
+            for sep in ("/", " "):
+                if sep in fpx_version:
+                    parts = fpx_version.split(sep, 1)
+                    fpx_product = parts[0].strip()
+                    fpx_version = parts[1].strip() if len(parts) > 1 else ""
+                    break
         port.service = Service(
             name=proto,
-            product="",
-            version=fpx.get("version", ""),
+            product=fpx_product,
+            version=fpx_version,
         )
+        port.service_source = 'fingerprintx'
         augmented += 1
         log.debug(
             "[%s] fingerprintx augmented port %d: %s",

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from .ad_recon import ad_recon_task  # noqa: E402, F401
 
 
-@shared_task(bind=True, max_retries=0, time_limit=7200, soft_time_limit=7000)
+@shared_task(bind=True, max_retries=0, time_limit=604800, soft_time_limit=518400)
 def run_scan(self, scan_id):
     """Execute the full scan pipeline and persist results to DB."""
     from scanner.models import Scan, Host, Port, Finding, Technology, Report
@@ -40,6 +40,12 @@ def run_scan(self, scan_id):
         # without an extra nesting level.
         base_output = Path(scan.output_dir or '/data/output')
         target_normalized = scan.target.replace('/', '_')
+        # Truncate long multi-target names to avoid ENAMETOOLONG (255-char limit).
+        # Keep a human-readable prefix + short hash for uniqueness.
+        if len(target_normalized) > 200:
+            import hashlib
+            tag = hashlib.sha256(target_normalized.encode()).hexdigest()[:8]
+            target_normalized = target_normalized[:200] + '_' + tag
         output_dir = base_output / target_normalized
         output_dir.mkdir(parents=True, exist_ok=True)
         scan.output_dir = str(output_dir)
@@ -118,19 +124,26 @@ def run_scan(self, scan_id):
                                 [phase, done, _scan_id_hex],
                             )
                     elif action == "discovery":
-                        _, live_ips, mac_vendor_map = item
+                        _, live_ips, mac_vendor_map, dns_hostnames = item
                         # Use get_or_create — some hosts may already exist
                         # from incremental subnet_hosts creation.
                         for ip in live_ips:
                             mac, vendor = mac_vendor_map.get(ip, ("", ""))
+                            defaults = {
+                                'mac_address': mac or '',
+                                'vendor': vendor or '',
+                                'status': 'up',
+                                'ports_count': 0,
+                            }
+                            # Apply DNS PTR hostname as fallback if no hostname set yet
+                            dns_name = dns_hostnames.get(ip, '')
+                            if dns_name:
+                                host_obj = _DBHost.objects.filter(scan_id=scan_id, ip=ip).first()
+                                if host_obj and not host_obj.hostname:
+                                    defaults['hostname'] = dns_name
                             _DBHost.objects.get_or_create(
                                 scan_id=scan_id, ip=ip,
-                                defaults={
-                                    'mac_address': mac or '',
-                                    'vendor': vendor or '',
-                                    'status': 'up',
-                                    'ports_count': 0,
-                                },
+                                defaults=defaults,
                             )
                         # Set final counts (atomic correction after incremental adds)
                         _Scan.objects.filter(id=scan_id).update(
@@ -188,6 +201,8 @@ def run_scan(self, scan_id):
                                 'mac_address': getattr(host, 'mac_address', '') or '',
                                 'vendor': getattr(host, 'vendor', '') or '',
                                 'ports_count': len(host.open_ports),
+                                'web_endpoints': list(getattr(host, 'web_endpoints', []) or []),
+                                'web_titles': dict(getattr(host, 'web_titles', {}) or {}),
                             },
                         )
                         # Replace ports / tech / screenshots for this host
@@ -202,6 +217,7 @@ def run_scan(self, scan_id):
                                 service_name=svc.name if svc else '',
                                 service_product=svc.product if svc else '',
                                 service_version=svc.version if svc else '',
+                                service_source=getattr(p, 'service_source', '') or '',
                             )
                         for t in host.technologies:
                             _DBTech.objects.create(
@@ -235,6 +251,9 @@ def run_scan(self, scan_id):
                                 curl_command=f.curl_command or '',
                                 raw_output=f.raw_output or '',
                                 references=json.dumps(f.references) if f.references else '[]',
+                                tags=','.join(f.tags) if f.tags else '',
+                                script_id=f.script_id or '',
+                                matched_at=f.matched_at or '',
                             )
                             if sev in sev_counts:
                                 sev_counts[sev] += 1
@@ -277,9 +296,9 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_discovery_complete(live_ips, mac_vendor_map) -> None:
+        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None) -> None:
             try:
-                _progress_queue.put_nowait(("discovery", live_ips, mac_vendor_map))
+                _progress_queue.put_nowait(("discovery", live_ips, mac_vendor_map, dns_hostnames or {}))
             except Exception:
                 pass
 
@@ -462,6 +481,8 @@ def _persist_results(scan, report):
             vendor=getattr(h, 'vendor', '') or '',
             ports_count=len(h.open_ports),
             findings_count=0,  # updated below
+            web_endpoints=list(getattr(h, 'web_endpoints', []) or []),
+            web_titles=dict(getattr(h, 'web_titles', {}) or {}),
         )
         host_map[h.ip] = db_host
 
@@ -474,6 +495,7 @@ def _persist_results(scan, report):
                 service_name=p.service.name if p.service else '',
                 service_product=p.service.product if p.service else '',
                 service_version=p.service.version if p.service else '',
+                service_source=getattr(p, 'service_source', '') or '',
             )
 
         for t in h.technologies:
@@ -521,6 +543,9 @@ def _persist_results(scan, report):
             curl_command=f.curl_command or '',
             raw_output=f.raw_output or '',
             references=json.dumps(f.references) if f.references else '[]',
+            tags=','.join(f.tags) if f.tags else '',
+            script_id=f.script_id or '',
+            matched_at=f.matched_at or '',
         )
 
         if sev in sev_counts:
@@ -651,7 +676,9 @@ def generate_report(self, scan_id, formats=None):
         techs = [PWebTech(name=t.name, version=t.version, url=t.url) for t in db_host.technologies.all()]
         hosts.append(PHost(
             ip=db_host.ip, hostname=db_host.hostname, status=db_host.status,
-            ports=ports, web_endpoints=[], web_titles={}, technologies=techs, os=db_host.os,
+            ports=ports, web_endpoints=db_host.web_endpoints or [], web_titles=db_host.web_titles or {},
+            technologies=techs, os=db_host.os,
+            mac_address=db_host.mac_address, vendor=db_host.vendor,
         ))
 
     findings = []
@@ -664,6 +691,9 @@ def generate_report(self, scan_id, formats=None):
             cvss=db_f.cvss, request=db_f.request, response=db_f.response,
             curl_command=db_f.curl_command, raw_output=db_f.raw_output,
             references=json.loads(db_f.references) if db_f.references else [],
+            tags=(db_f.tags or '').split(',') if db_f.tags else [],
+            script_id=db_f.script_id or '',
+            matched_at=db_f.matched_at or '',
         ))
 
     report = ScanReport(

@@ -75,6 +75,8 @@ WG.renderScanDetail = function(id) {
         _u('#scan-critical-count', scanData.critical_count);
         _u('#scan-high-count', scanData.high_count);
         _u('#scan-medium-count', scanData.medium_count);
+        _u('#scan-low-count', scanData.low_count);
+        _u('#scan-info-count', scanData.info_count);
         _u('#scan-findings-count', scanData.findings_count);
         // Update host/finding tab counts
         _u('#scanTabContent-hosts-count .count', Array.isArray(hostsData) ? hostsData.length : 0);
@@ -124,14 +126,43 @@ WG.renderScanDetail = function(id) {
       '<div style="margin-bottom:24px;"><div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span class="mono" style="font-size:0.75rem;color:var(--text-dim);">Scan progress — <span id="scan-phase-label">' + WG.phaseLabel(phase) + '</span></span><span class="mono" style="font-size:0.75rem;color:var(--accent);" id="scan-progress-pct">' + progress + '%</span></div><div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%;"></div></div></div>' : '') +
     (scan.error_message ?
       '<div class="panel" style="border-color:rgba(255,59,92,0.2);margin-bottom:20px;"><div class="panel-body" style="color:var(--critical);font-family:var(--font-mono);font-size:0.82rem;">Error: ' + esc(scan.error_message) + '</div></div>' : '') +
-    '<div class="stats-grid" style="margin-bottom:24px;">' +
+    '<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">' +
       '<div class="stat-card"><div class="stat-label">Hosts</div><div class="stat-value" id="scan-hosts-count">' + scan.hosts_count + '</div></div>' +
       '<div class="stat-card"><div class="stat-label">Ports</div><div class="stat-value" id="scan-ports-count">' + scan.ports_count + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Findings</div><div class="stat-value" id="scan-findings-count">' + scan.findings_count + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Duration</div><div class="stat-value mono" id="scan-duration">' + WG.fmtDuration(scan.duration_seconds) + '</div></div>' +
+    '</div>' +
+    '<div class="stats-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:24px;">' +
       '<div class="stat-card critical"><div class="stat-label">Critical</div><div class="stat-value" id="scan-critical-count">' + scan.critical_count + '</div></div>' +
       '<div class="stat-card high"><div class="stat-label">High</div><div class="stat-value" id="scan-high-count">' + scan.high_count + '</div></div>' +
       '<div class="stat-card medium"><div class="stat-label">Medium</div><div class="stat-value" id="scan-medium-count">' + scan.medium_count + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Findings</div><div class="stat-value" id="scan-findings-count">' + scan.findings_count + '</div></div>' +
+      '<div class="stat-card low"><div class="stat-label">Low</div><div class="stat-value" id="scan-low-count">' + scan.low_count + '</div></div>' +
+      '<div class="stat-card info"><div class="stat-label">Info</div><div class="stat-value" id="scan-info-count">' + scan.info_count + '</div></div>' +
     '</div>' +
+    (function() {
+      var flags = [
+        { key: 'version_detect', label: 'Version Detect' },
+        { key: 'os_detect', label: 'OS Detect' },
+        { key: 'service_enum', label: 'Service Enum' },
+        { key: 'enum4linux', label: 'Enum4Linux' },
+        { key: 'scan_unresponsive', label: 'Scan Unresponsive' },
+        { key: 'skip_nuclei', label: 'Nuclei', invert: true },
+        { key: 'skip_screenshots', label: 'Screenshots', invert: true },
+        { key: 'skip_nikto', label: 'Nikto', invert: true },
+        { key: 'skip_netexec', label: 'NetExec', invert: true },
+      ];
+      var activeFlags = flags.filter(function(f) {
+        var val = scan[f.key];
+        return f.invert ? val === false || val === true : val === true;
+      });
+      if (activeFlags.length === 0) return '';
+      var badges = activeFlags.map(function(f) {
+        var val = scan[f.key];
+        var on = f.invert ? !val : val;
+        return '<span class="tag" style="font-size:0.68rem;' + (on ? '' : 'opacity:0.5;') + '">' + esc(f.label) + (on ? '' : ' (off)') + '</span>';
+      }).join('');
+      return '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">Scan Configuration</div></div><div class="panel-body" style="display:flex;gap:6px;flex-wrap:wrap;">' + badges + '</div></div>';
+    })() +
     '<div class="tabs" id="scanTabs">' +
       '<div class="tab active" data-tab="hosts" id="scanTabContent-hosts-count" onclick="WG.switchScanTab(\'hosts\',\'' + id + '\')">Hosts <span class="count">' + scanHosts.length + '</span></div>' +
       '<div class="tab" data-tab="findings" id="scanTabContent-findings-count" onclick="WG.switchScanTab(\'findings\',\'' + id + '\')">Findings <span class="count">' + scanFindings.length + '</span></div>' +

@@ -97,6 +97,11 @@ async def run_pipeline(
     # Set up logging and output tree
     setup_logging(output_dir=str(config.output_dir), verbose=config.verbose)
     target_name = config.target.replace("/", "_").replace(":", "_")
+    # Truncate long multi-target names to avoid ENAMETOOLONG (255-char limit)
+    if len(target_name) > 200:
+        import hashlib
+        tag = hashlib.sha256(target_name.encode()).hexdigest()[:8]
+        target_name = target_name[:200] + '_' + tag
     tree = build_output_tree(config.output_dir, target_name)
 
     log.info("Starting Wire_Ghost scan against %s", config.target)
@@ -144,14 +149,14 @@ async def run_pipeline(
 
     if on_progress:
         on_progress("discovery", 0, 0)
-    live_ips, mac_vendor_map = await discover_hosts(
+    live_ips, mac_vendor_map, dns_hostnames = await discover_hosts(
         config, tree,
         on_progress=_discovery_progress,
         on_subnet_complete=on_subnet_complete,
     )
 
     if on_discovery_complete:
-        on_discovery_complete(live_ips, mac_vendor_map)
+        on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames)
 
     if not live_ips:
         log.warning("No live hosts discovered -- nothing to scan")
@@ -219,6 +224,10 @@ async def run_pipeline(
             host.mac_address = mac
         if vendor:
             host.vendor = vendor
+
+        # Enrich with DNS PTR hostname from discovery phase (fallback only)
+        if not host.hostname and ip in dns_hostnames:
+            host.hostname = dns_hostnames[ip]
 
         if not host.open_ports:
             log.info("[%s] No open ports — skipping web/vuln phases", ip)

@@ -73,6 +73,7 @@ def _range_to_cidrs(target: str) -> list[ipaddress.IPv4Network] | None:
 def _partition_target(target: str) -> list[str]:
     """Split anything wider than a /24 into /24 subnets for parallel scanning.
 
+    - Multiple targets separated by commas or whitespace → each processed independently
     - /16 → 256 /24 subnets
     - /20 → 16 /24 subnets
     - /24 or smaller (/25, /26, …, single IP) → returned as-is
@@ -81,6 +82,28 @@ def _partition_target(target: str) -> list[str]:
       4 /24s just like /22 would.
     - Hostnames → returned as-is
     """
+    # Multi-target support: split on commas and/or whitespace
+    import re
+    if re.search(r'[,\s]', target) and '/' in target:
+        parts = re.split(r'[,\s]+', target.strip())
+        parts = [p for p in parts if p]
+        if len(parts) > 1:
+            all_subnets: list[str] = []
+            for part in parts:
+                all_subnets.extend(_partition_target(part))
+            # Dedup while preserving order
+            seen: set[str] = set()
+            deduped = []
+            for s in all_subnets:
+                if s not in seen:
+                    seen.add(s)
+                    deduped.append(s)
+            log.info(
+                "Multi-target: %d part(s) → %d unique /24 subnet(s)",
+                len(parts), len(deduped),
+            )
+            return deduped
+
     # Dash range → expand to CIDRs first, then feed each CIDR through the
     # same /24-split path so range and CIDR inputs converge on one code path.
     cidrs = _range_to_cidrs(target)
@@ -322,7 +345,12 @@ async def discover_hosts(
     mac_vendor: dict[str, tuple[str, str]] = {}
     fping_unreachable: set[str] = set()
 
-    semaphore = asyncio.Semaphore(config.parallelism)
+    # Discovery is I/O-bound (waiting on nmap/fping timeouts) — use a
+    # dedicated high-concurrency semaphore so large CIDRs (/16 → 256 /24s)
+    # scan at maximum parallelism regardless of the main pipeline setting.
+    discovery_parallelism = max(config.parallelism, 256)
+    semaphore = asyncio.Semaphore(discovery_parallelism)
+    log.info("Discovery parallelism: %d (pipeline: %d)", discovery_parallelism, config.parallelism)
 
     # Scan all subnets concurrently (semaphore-limited).
     # Active discovery + passive DNS sweep all fanned out per /24 subnet
@@ -467,4 +495,4 @@ async def discover_hosts(
     )
 
     log.info("Discovery found %d live host(s) across %d subnet(s)", len(sorted_ips), total)
-    return sorted_ips, mac_vendor
+    return sorted_ips, mac_vendor, dns_hostnames

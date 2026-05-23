@@ -291,8 +291,9 @@ class ScanViewSet(viewsets.ModelViewSet):
                 'os': h.os or '',
                 'subnet': subnet,
                 'ports': [
-                    {'number': p.number, 'protocol': p.protocol,
-                     'service_name': p.service_name, 'service_product': p.service_product}
+                    {'number': p.number, 'protocol': p.protocol, 'state': p.state,
+                     'service_name': p.service_name, 'service_product': p.service_product,
+                     'service_version': p.service_version, 'service_source': p.service_source}
                     for p in h.ports.all()
                 ],
                 'technologies': [
@@ -445,6 +446,7 @@ def dashboard_screenshots(request):
             'id': str(ss.id),
             'url': ss.url,
             'title': ss.title,
+            'status_code': ss.status_code,
             'image_url': f'/api/screenshots/{ss.id}/image/',
             'host_ip': ss.host.ip,
             'host_id': str(ss.host.id),

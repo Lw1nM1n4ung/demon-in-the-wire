@@ -24,7 +24,7 @@ class AssetSerializer(AssetListSerializer):
 class PortSerializer(serializers.ModelSerializer):
     class Meta:
         model = Port
-        fields = ['id', 'number', 'protocol', 'state', 'service_name', 'service_product', 'service_version']
+        fields = ['id', 'number', 'protocol', 'state', 'service_name', 'service_product', 'service_version', 'service_source']
 
 
 class TechnologySerializer(serializers.ModelSerializer):
@@ -40,7 +40,7 @@ class FindingSerializer(serializers.ModelSerializer):
             'id', 'scan', 'host', 'source', 'severity', 'title',
             'description', 'host_ip', 'port', 'protocol', 'endpoint',
             'full_url', 'template_id', 'cve', 'cwe', 'cvss',
-            'references', 'created_at',
+            'references', 'tags', 'script_id', 'matched_at', 'created_at',
         ]
 
 
@@ -52,7 +52,7 @@ class FindingDetailSerializer(serializers.ModelSerializer):
             'description', 'host_ip', 'port', 'protocol', 'endpoint',
             'full_url', 'template_id', 'cve', 'cwe', 'cvss',
             'request', 'response', 'curl_command', 'raw_output',
-            'references', 'created_at',
+            'references', 'tags', 'script_id', 'matched_at', 'created_at',
         ]
 
 
@@ -60,7 +60,7 @@ class FindingListSerializer(serializers.ModelSerializer):
     """Lighter serializer for list views."""
     class Meta:
         model = Finding
-        fields = ['id', 'source', 'severity', 'title', 'host_ip', 'port', 'cve', 'full_url']
+        fields = ['id', 'source', 'severity', 'title', 'host_ip', 'port', 'cve', 'cvss', 'full_url']
 
 
 class ScreenshotSerializer(serializers.ModelSerializer):
@@ -81,7 +81,7 @@ class HostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Host
-        fields = ['id', 'ip', 'hostname', 'os', 'status', 'current_phase', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'ports', 'technologies', 'screenshots']
+        fields = ['id', 'ip', 'hostname', 'os', 'status', 'current_phase', 'mac_address', 'vendor', 'ports_count', 'findings_count', 'web_endpoints', 'web_titles', 'ports', 'technologies', 'screenshots']
 
 
 class HostListSerializer(serializers.ModelSerializer):
@@ -137,7 +137,7 @@ class ScanListSerializer(serializers.ModelSerializer):
 
 
 class ScanCreateSerializer(serializers.Serializer):
-    target = serializers.CharField(max_length=500)
+    target = serializers.CharField(max_length=2000)
     name = serializers.CharField(max_length=255, required=False, default='')
     scan_type = serializers.ChoiceField(choices=['full', 'quick', 'port', 'web', 'service'], default='full')
     parallelism = serializers.IntegerField(default=10, min_value=1, max_value=100)
@@ -163,36 +163,23 @@ class ScanCreateSerializer(serializers.Serializer):
     skip_web_crawl = serializers.BooleanField(required=False, default=False)
 
     def validate_target(self, value):
-        """Block SSRF targets: localhost, link-local, cloud metadata, non-routable."""
+        """Block SSRF targets: localhost, link-local, cloud metadata, non-routable.
+
+        Supports comma-separated multi-target strings. Each target is validated
+        independently against the SSRF blocklist.
+        """
         import re
         import ipaddress
+        import socket
 
         value = value.strip()
         if not value:
             raise serializers.ValidationError('Target is required')
 
         # Must match IP, CIDR, or hostname pattern (reject encoded/special chars)
-        if not re.match(r'^[\d./a-zA-Z0-9_:-]+$', value):
+        # Commas and optional whitespace allowed for multi-target strings
+        if not re.match(r'^[\d./a-zA-Z0-9_:,\s-]+$', value):
             raise serializers.ValidationError('Invalid target format')
-
-        # Block alternative IP notations that bypass ipaddress checks
-        if re.match(r'^0[xX][0-9a-fA-F]+$', value):
-            raise serializers.ValidationError('Hex IP notation not allowed')
-        if re.match(r'^\d+$', value):
-            # Pure decimal — block ALL (even single digit like "0")
-            raise serializers.ValidationError('Decimal IP notation not allowed — use dotted format')
-        # Block octal: any octet with leading zero (127.0.0.01)
-        ip_part = value.split('/')[0]
-        if '.' in ip_part:
-            for octet in ip_part.split('.'):
-                if len(octet) > 1 and octet.startswith('0') and octet.isdigit():
-                    raise serializers.ValidationError('Octal IP notation not allowed')
-        # Block short-form IPs (127.1 = 127.0.0.1)
-        if re.match(r'^\d+\.\d+$', ip_part) or re.match(r'^\d+\.\d+\.\d+$', ip_part):
-            raise serializers.ValidationError('Short-form IP not allowed — use full dotted notation')
-
-        # Extract IP from CIDR if present
-        ip_str = value.split('/')[0]
 
         def _check_ip(ip):
             """Validate a single IP address against SSRF blocklist."""
@@ -211,38 +198,64 @@ class ScanCreateSerializer(serializers.Serializer):
             if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
                 _check_ip(ip.ipv4_mapped)
 
-        try:
-            ip = ipaddress.ip_address(ip_str)
-            _check_ip(ip)
-        except ValueError:
+        def _validate_single(target):
+            """Validate a single target (IP, CIDR, hostname) against the SSRF blocklist."""
+            target = target.strip()
+            if not target:
+                return
+
+            # Block alternative IP notations that bypass ipaddress checks
+            if re.match(r'^0[xX][0-9a-fA-F]+$', target):
+                raise serializers.ValidationError('Hex IP notation not allowed')
+            if re.match(r'^\d+$', target):
+                raise serializers.ValidationError('Decimal IP notation not allowed — use dotted format')
+
+            # Block octal: any octet with leading zero (127.0.0.01)
+            ip_part = target.split('/')[0]
+            if '.' in ip_part:
+                for octet in ip_part.split('.'):
+                    if len(octet) > 1 and octet.startswith('0') and octet.isdigit():
+                        raise serializers.ValidationError('Octal IP notation not allowed')
+
+            # Block short-form IPs (127.1 = 127.0.0.1)
+            if re.match(r'^\d+\.\d+$', ip_part) or re.match(r'^\d+\.\d+\.\d+$', ip_part):
+                raise serializers.ValidationError('Short-form IP not allowed — use full dotted notation')
+
+            ip_str = target.split('/')[0]
+
             try:
-                net = ipaddress.ip_network(value, strict=False)
-                _check_ip(net.network_address)
+                ip = ipaddress.ip_address(ip_str)
+                _check_ip(ip)
             except ValueError:
-                # Hostname — validate format and blocklist
-                if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$', value):
-                    raise serializers.ValidationError('Invalid hostname format')
-                blocked = [
-                    'localhost', 'metadata.google.internal', 'metadata.google', 'instance-data',
-                    'localtest.me', 'vcap.me', 'nip.io', 'xip.io', 'sslip.io',
-                    'lvh.me', 'lacolhost.com', '127.0.0.1.nip.io',
-                ]
-                lower = value.lower()
-                if lower in blocked:
-                    raise serializers.ValidationError('Blocked target')
-                # Block any hostname ending with known localhost-resolving domains
-                for suffix in ['.nip.io', '.xip.io', '.sslip.io', '.localtest.me', '.vcap.me', '.lvh.me']:
-                    if lower.endswith(suffix):
-                        raise serializers.ValidationError('DNS rebinding domain not allowed')
-                # Resolve hostname and check ALL addresses against full blocklist
-                import socket
                 try:
-                    results = socket.getaddrinfo(value, None, proto=socket.IPPROTO_TCP)
-                    for _, _, _, _, sockaddr in results:
-                        resolved_ip = ipaddress.ip_address(sockaddr[0])
-                        _check_ip(resolved_ip)
-                except socket.gaierror:
-                    pass  # unresolvable — nmap will handle; blocklist already checked above
+                    net = ipaddress.ip_network(target, strict=False)
+                    _check_ip(net.network_address)
+                except ValueError:
+                    # Hostname — validate format and blocklist
+                    if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$', target):
+                        raise serializers.ValidationError(f'Invalid target: {target}')
+                    blocked = [
+                        'localhost', 'metadata.google.internal', 'metadata.google', 'instance-data',
+                        'localtest.me', 'vcap.me', 'nip.io', 'xip.io', 'sslip.io',
+                        'lvh.me', 'lacolhost.com', '127.0.0.1.nip.io',
+                    ]
+                    lower = target.lower()
+                    if lower in blocked:
+                        raise serializers.ValidationError('Blocked target')
+                    for suffix in ['.nip.io', '.xip.io', '.sslip.io', '.localtest.me', '.vcap.me', '.lvh.me']:
+                        if lower.endswith(suffix):
+                            raise serializers.ValidationError('DNS rebinding domain not allowed')
+                    try:
+                        results = socket.getaddrinfo(target, None, proto=socket.IPPROTO_TCP)
+                        for _, _, _, _, sockaddr in results:
+                            resolved_ip = ipaddress.ip_address(sockaddr[0])
+                            _check_ip(resolved_ip)
+                    except socket.gaierror:
+                        pass
+
+        # Split multi-target strings on commas; validate each independently
+        for single in value.split(','):
+            _validate_single(single)
 
         return value
 

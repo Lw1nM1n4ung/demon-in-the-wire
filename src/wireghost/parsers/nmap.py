@@ -69,6 +69,7 @@ def parse_nmap_xml(xml_path: Path) -> list[Host]:
                     protocol=protocol,
                     state=state,
                     service=service,
+                    service_source='nmap' if service else '',
                 )
             )
 

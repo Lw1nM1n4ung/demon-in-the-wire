@@ -3,9 +3,23 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 from wireghost.models.finding import Finding
 from wireghost.models.severity import Severity
+
+
+def _extract_port(url: str) -> str:
+    """Extract port from *url*, defaulting to 443 for https, 80 otherwise."""
+    if not url:
+        return "80"
+    try:
+        p = urlparse(url)
+        if p.port:
+            return str(p.port)
+        return "443" if p.scheme == "https" else "80"
+    except Exception:
+        return "80"
 
 
 def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
@@ -19,6 +33,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
 
     findings: list[Finding] = []
     target_url = data.get("target_url", "")
+    port = _extract_port(target_url)
 
     # WordPress version
     wp_ver = data.get("version", {})
@@ -26,7 +41,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
         ver_num = wp_ver.get("number", "")
         if ver_num:
             findings.append(Finding(
-                source="wpscan", host=host_ip, port="80", protocol="tcp",
+                source="wpscan", host=host_ip, port=port, protocol="tcp",
                 severity=Severity.INFO,
                 title=f"WordPress Version: {ver_num}",
                 description=f"WordPress {ver_num} detected at {target_url}",
@@ -43,7 +58,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
             ver = info.get("version", {})
             ver_num = ver.get("number", "") if isinstance(ver, dict) else ""
             findings.append(Finding(
-                source="wpscan", host=host_ip, port="80", protocol="tcp",
+                source="wpscan", host=host_ip, port=port, protocol="tcp",
                 severity=Severity.INFO,
                 title=f"WP Plugin: {name}" + (f" {ver_num}" if ver_num else ""),
                 description=f"WordPress plugin '{name}' detected.",
@@ -62,7 +77,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
             if not isinstance(info, dict):
                 continue
             findings.append(Finding(
-                source="wpscan", host=host_ip, port="80", protocol="tcp",
+                source="wpscan", host=host_ip, port=port, protocol="tcp",
                 severity=Severity.INFO,
                 title=f"WP Theme: {name}",
                 description=f"WordPress theme '{name}' detected.",
@@ -76,7 +91,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
     if isinstance(users, dict):
         for username, info in users.items():
             findings.append(Finding(
-                source="wpscan", host=host_ip, port="80", protocol="tcp",
+                source="wpscan", host=host_ip, port=port, protocol="tcp",
                 severity=Severity.MEDIUM,
                 title=f"WP User: {username}",
                 description=f"WordPress user '{username}' enumerated.",
@@ -89,7 +104,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
             url = item.get("url", "")
             entry_type = item.get("type", "")
             findings.append(Finding(
-                source="wpscan", host=host_ip, port="80", protocol="tcp",
+                source="wpscan", host=host_ip, port=port, protocol="tcp",
                 severity=Severity.LOW,
                 title=f"WP: {entry_type}" if entry_type else "WP: Interesting finding",
                 description=item.get("to_s", url),
@@ -116,7 +131,7 @@ def _vuln_to_finding(vuln: dict, host_ip: str, url: str, context: str = "") -> F
         cve = ", ".join(f"CVE-{c}" for c in cves)
 
     return Finding(
-        source="wpscan", host=host_ip, port="80", protocol="tcp",
+        source="wpscan", host=host_ip, port=port, protocol="tcp",
         severity=Severity.HIGH,
         title=f"WP Vuln: {title}",
         description=vuln.get("description", title),

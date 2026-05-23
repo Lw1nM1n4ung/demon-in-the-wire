@@ -14,15 +14,21 @@ services:
     volumes:
       - ./src:/app/src:ro
       - ./templates:/opt/nuclei-template-archives:ro
+      - ./web_portal/scanner:/app/scanner:ro
 
   worker:
     environment:
       DJANGO_DEBUG: "true"
       WIREGHOST_PROTO: http
       WIREGHOST_PORT: "${WIREGHOST_PORT:-9995}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       - ./src:/app/src:ro
       - ./templates:/opt/nuclei-template-archives:ro
+      - ./web_portal/scanner:/app/scanner:ro
 
   beat:
     environment:
