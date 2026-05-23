@@ -5,13 +5,15 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/update-wireghost.sh | sudo bash
 #
-#   sudo bash scripts/update-wireghost.sh              # full update (self + tools + feeds)
-#   sudo bash scripts/update-wireghost.sh --docker     # full update + Docker stack
+#   sudo bash scripts/update-wireghost.sh              # full update (auto-detect Docker)
+#   sudo bash scripts/update-wireghost.sh --docker     # force Docker stack rebuild
+#   sudo bash scripts/update-wireghost.sh --host       # host-only (skip Docker, pip install locally)
 #   sudo bash scripts/update-wireghost.sh --self       # self-update only
-#   sudo bash scripts/update-wireghost.sh --tools      # tools only
+#   sudo bash scripts/update-wireghost.sh --tools      # tools only (install + update)
 #   sudo bash scripts/update-wireghost.sh --feeds      # feeds only
+#   sudo bash scripts/update-wireghost.sh --all        # everything (host tools + feeds + Docker)
 #
-#   # Pass --docker via curl:
+#   # Pass flags via curl:
 #   curl -fsSL <url> | sudo bash -s -- --docker
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -21,20 +23,19 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
 ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*"; }
 warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
+die()   { printf "${RED}[FATAL]${NC} %s\n" "$*" >&2; exit 1; }
 
 # ── Find project root ──────────────────────────────────────────────────
 find_root() {
-    # 1. Explicit override via env var
     if [ -n "${WG_ROOT:-}" ] && [ -f "${WG_ROOT}/pyproject.toml" ]; then
         PROJECT_DIR="$WG_ROOT"
         return
     fi
 
-    # 2. Script-relative (works when run from local clone)
-    local script_dir
+    # Script-relative (works when run from local clone)
+    local script_dir parent
     script_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || script_dir=""
     if [ -n "$script_dir" ] && [ "$script_dir" != "/" ] && [ "$script_dir" != "." ]; then
-        local parent
         parent="$(cd "$script_dir/.." 2>/dev/null && pwd)" || parent=""
         if [ -n "$parent" ] && [ -f "${parent}/pyproject.toml" ]; then
             PROJECT_DIR="$parent"
@@ -42,7 +43,7 @@ find_root() {
         fi
     fi
 
-    # 3. Common install directories (searched in order)
+    # Common install directories
     for candidate in \
         /opt/wireghost \
         /opt/demon-in-the-wire \
@@ -54,50 +55,61 @@ find_root() {
         fi
     done
 
-    # 4. Current directory
+    # Current directory
     if [ -f "$(pwd)/pyproject.toml" ]; then
         PROJECT_DIR="$(pwd)"
         return
     fi
 
-    # 5. Last resort
     PROJECT_DIR="/opt/wireghost"
 }
 
-WITH_TOOLS=true; WITH_FEEDS=true; WITH_SELF=true; WITH_DOCKER=false
-for arg in "$@"; do
-    case "$arg" in
-        --self)   WITH_TOOLS=false; WITH_FEEDS=false ;;
-        --tools)  WITH_SELF=false; WITH_FEEDS=false ;;
-        --feeds)  WITH_SELF=false; WITH_TOOLS=false ;;
-        --docker) WITH_DOCKER=true; WITH_TOOLS=false; WITH_FEEDS=false ;;
-        --help|-h)
-            echo "Usage: sudo bash update-wireghost.sh [--self] [--tools] [--feeds] [--docker]"
-            echo "  (no flags)  Full update: self + tools + feeds"
-            echo "  --self      Self-update only (git pull + pip install)"
-            echo "  --tools     Tools only (nuclei, httpx, naabu, apt)"
-            echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
-            echo "  --docker    Docker stack update: self + build + up + migrate"
-            exit 0 ;;
-    esac
-done
+# ── Detect Docker deployment ───────────────────────────────────────────
+detect_docker() {
+    DOCKER_DEPLOY=false
+    DOCKER_COMPOSE_FILES=(-f docker-compose.yml)
+
+    if [ ! -d "$PROJECT_DIR" ]; then
+        return
+    fi
+
+    cd "$PROJECT_DIR"
+
+    # Check if any compose stack is running
+    if [ -f docker-compose.host.yml ] && docker compose -f docker-compose.yml -f docker-compose.host.yml ps 2>/dev/null | grep -q "Up"; then
+        DOCKER_DEPLOY=true
+        DOCKER_COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.host.yml)
+        DOCKER_MODE="host"
+    elif [ -f docker-compose.dev.yml ] && docker compose -f docker-compose.yml -f docker-compose.dev.yml ps 2>/dev/null | grep -q "Up"; then
+        DOCKER_DEPLOY=true
+        DOCKER_COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.dev.yml)
+        DOCKER_MODE="dev"
+    elif docker compose ps 2>/dev/null | grep -q "Up"; then
+        DOCKER_DEPLOY=true
+        DOCKER_MODE="docker"
+    fi
+
+    cd - >/dev/null
+}
 
 # ── Progress ───────────────────────────────────────────────────────────
-_TOTAL=0; [ "$WITH_SELF" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_TOOLS" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_FEEDS" = true ] && _TOTAL=$((_TOTAL + 1)); [ "$WITH_DOCKER" = true ] && _TOTAL=$((_TOTAL + 1)); _STEP=0
+declare -a STEPS=()
 step() {
-    _STEP=$((_STEP + 1))
-    printf "\n${BOLD}${CYAN}[%d/%d]${NC} %s\n\n" "$_STEP" "$_TOTAL" "$1"
+    local n="${#STEPS[@]}"
+    STEPS+=("$1")
+    n=$((n + 1))
+    printf "\n${BOLD}${CYAN}[%d/%d]${NC} %s\n\n" "$n" "${_TOTAL}" "$1"
 }
 
 ###########################################################################
 # 1. Self-update
 ###########################################################################
 self_update() {
-    step "Updating Wire_Ghost"
+    step "Updating Wire_Ghost code"
 
     if [ ! -d "$PROJECT_DIR" ]; then
         warn "Project directory ${PROJECT_DIR} not found"
-        warn "Run the installer first: curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/${BRANCH:-rewrite-v2}/scripts/install-wireghost.sh | sudo bash"
+        warn "Run the installer: curl -fsSL ${RAW_BASE}/scripts/install-wireghost.sh | sudo bash"
         return
     fi
 
@@ -105,12 +117,13 @@ self_update() {
 
     if [ ! -d .git ]; then
         warn "Not a git repo at ${PROJECT_DIR} — skipping self-update"
-        warn "Run the installer: curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/${BRANCH:-rewrite-v2}/scripts/install-wireghost.sh | sudo bash"
+        warn "Run the installer: curl -fsSL ${RAW_BASE}/scripts/install-wireghost.sh | sudo bash"
         return
     fi
 
     # ── Git pull ──
-    local branch; branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "rewrite-v2")
+    local branch
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "rewrite-v2")
     info "Pulling ${branch}..."
     git fetch origin "$branch" || warn "git fetch failed — check network"
     if ! git pull --ff-only origin "$branch" 2>&1 | tail -3; then
@@ -119,9 +132,14 @@ self_update() {
     fi
     ok "Code updated ($(git rev-parse --short HEAD))"
 
-    # ── Find a pip backed by Python >= 3.11 ──
+    # ── Pip install (host mode only — Docker containers have their own Python) ──
+    if [ "$WITH_HOST_PIP" = false ]; then
+        info "Skipping host pip install (Docker containers handle their own dependencies)"
+        return
+    fi
+
+    # Find Python >= 3.11
     _py_ok() {
-        # Parse Python version from "pip -V" output, check >= 3.11 with integers
         local ver
         ver=$("$1" -V 2>/dev/null | grep -oE 'python [0-9]+\.[0-9]+' | head -1 | cut -d' ' -f2)
         [ -z "$ver" ] && return 1
@@ -144,7 +162,7 @@ self_update() {
 
     if [ -z "$pip" ]; then
         if [ -n "$py_ver" ]; then
-            warn "Python ${py_ver} too old — need 3.11+; skipping pip install"
+            warn "Python ${py_ver} too old — need 3.11+; install python3.11: sudo apt-get install python3.11 python3.11-venv"
         else
             warn "pip not found — skipping Python package update"
         fi
@@ -158,46 +176,198 @@ self_update() {
         "$pip" install --no-cache-dir -r "${PROJECT_DIR}/web_portal/requirements.txt" -q 2>&1 | tail -2
     fi
     set -e
+    ok "Python packages updated"
 }
 
 ###########################################################################
-# 2. Tools
+# 2. Tools — install missing + update existing
 ###########################################################################
 tools_update() {
-    step "Updating security tools"
+    step "Installing & updating security tools"
 
-    # ── APT tools ──
+    # ── APT packages ──
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq 2>/dev/null || true
-        for tool in nmap fping masscan searchsploit; do
+
+        # All required APT packages (from installer + Dockerfile)
+        local apt_pkgs=(
+            nmap fping masscan libpcap0.8 libsnmp40
+            sslscan nfs-common snmp onesixtyone
+            arp-scan netdiscover
+            smbclient samba-common-bin ldap-utils
+            git rsync libxml2-utils
+            perl libnet-ssleay-perl libio-socket-ssl-perl
+            libjson-perl libxml-writer-perl libxml-libxml-perl
+        )
+
+        local to_install=()
+        for pkg in "${apt_pkgs[@]}"; do
+            if ! dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
+                to_install+=("$pkg")
+            fi
+        done
+
+        if [ ${#to_install[@]} -gt 0 ]; then
+            info "Installing ${#to_install[@]} missing packages..."
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${to_install[@]}" -qq 2>&1 | tail -2
+            ok "Installed: ${to_install[*]}"
+        fi
+
+        # Upgrade already-installed tools
+        for tool in nmap fping masscan; do
             if command -v "$tool" >/dev/null 2>&1; then
                 info "apt upgrade ${tool}..."
                 DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade "$tool" -qq 2>/dev/null && \
-                    ok "$tool upgraded" || warn "$tool — already latest or failed"
+                    ok "$tool upgraded" || true  # already latest is fine
             fi
         done
     fi
 
-    # ── ProjectDiscovery tools ──
-    for tool_data in "nuclei:projectdiscovery/nuclei" "httpx:projectdiscovery/httpx" "naabu:projectdiscovery/naabu"; do
-        local name="${tool_data%%:*}" repo="${tool_data##*:}"
-        if ! command -v "$name" >/dev/null 2>&1; then
-            continue
-        fi
-        info "Updating ${name}..."
-        local url tag
+    # ── Go binaries (ProjectDiscovery + others) ──
+    _install_go_zip() {
+        local name="$1" repo="$2" pattern="${3:-linux_amd64.zip}"
+        local arch="amd64"
+        uname -m | grep -q "aarch64\|arm64" && arch="arm64"
+        pattern="${pattern/amd64/$arch}"
+
+        local tag url
         tag=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | cut -d'"' -f4) || true
-        [ -z "$tag" ] && { warn "${name} — could not fetch latest release"; continue; }
-        local arch="amd64"; uname -m | grep -q "aarch64\|arm64" && arch="arm64"
-        url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep -o "\"browser_download_url\": *\"[^\"]*linux_${arch}.zip\"" | head -1 | cut -d'"' -f4) || true
-        [ -z "$url" ] && { warn "${name} — no binary for linux_${arch}"; continue; }
-        local tmp="/tmp/${name}_update.zip"
-        curl -fsSL "$url" -o "$tmp" 2>/dev/null || { warn "${name} — download failed"; continue; }
-        unzip -o "$tmp" "$name" -d /usr/local/bin/ >/dev/null 2>&1 || true
+
+        if command -v "$name" >/dev/null 2>&1; then
+            local current_ver
+            current_ver=$("$name" -version 2>&1 | head -1 || echo "unknown")
+            # Check if update needed
+            if [ -n "$tag" ]; then
+                url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep -o "\"browser_download_url\": *\"[^\"]*${pattern}\"" | head -1 | cut -d'"' -f4) || true
+                if [ -n "$url" ]; then
+                    info "Updating ${name}..."
+                    local tmp="/tmp/${name}_update.zip"
+                    curl -fsSL "$url" -o "$tmp" 2>/dev/null || { warn "${name} — download failed"; return; }
+                    unzip -o "$tmp" "$name" -d /usr/local/bin/ >/dev/null 2>&1 || true
+                    chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
+                    rm -f "$tmp"
+                    ok "${name} → ${tag}"
+                fi
+            fi
+        else
+            # Install fresh
+            [ -z "$tag" ] && { warn "${name} — could not fetch latest release"; return; }
+            url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep -o "\"browser_download_url\": *\"[^\"]*${pattern}\"" | head -1 | cut -d'"' -f4) || true
+            [ -z "$url" ] && { warn "${name} — no binary for ${pattern}"; return; }
+            info "Installing ${name}..."
+            local tmp="/tmp/${name}_install.zip"
+            curl -fsSL "$url" -o "$tmp" 2>/dev/null || { warn "${name} — download failed"; return; }
+            unzip -o "$tmp" "$name" -d /usr/local/bin/ >/dev/null 2>&1 || true
+            chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
+            rm -f "$tmp"
+            ok "${name} installed (${tag})"
+        fi
+    }
+
+    _install_go_binary() {
+        local name="$1" repo="$2" pattern="${3:-linux-amd64}"
+        local arch="amd64"
+        uname -m | grep -q "aarch64\|arm64" && arch="arm64"
+        pattern="${pattern/amd64/$arch}"
+
+        if command -v "$name" >/dev/null 2>&1; then
+            info "${name} already installed — updating..."
+        else
+            info "Installing ${name}..."
+        fi
+
+        local url
+        url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep -o "\"browser_download_url\": *\"[^\"]*${pattern}[^\"]*\"" | head -1 | cut -d'"' -f4) || true
+        [ -z "$url" ] && { warn "${name} — no binary for ${pattern}"; return; }
+        curl -fsSL "$url" -o "/usr/local/bin/${name}" 2>/dev/null || { warn "${name} — download failed"; return; }
         chmod +x "/usr/local/bin/${name}" 2>/dev/null || true
-        rm -f "$tmp"
-        ok "${name} → ${tag}"
+        local tag
+        tag=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | cut -d'"' -f4) || true
+        ok "${name} → ${tag:-latest}"
+    }
+
+    # Core PD tools (zip releases)
+    _install_go_zip nuclei   "projectdiscovery/nuclei"  "linux_amd64.zip"
+    _install_go_zip httpx    "projectdiscovery/httpx"   "linux_amd64.zip"
+    _install_go_zip naabu    "projectdiscovery/naabu"   "linux_amd64.zip"
+    _install_go_zip katana   "projectdiscovery/katana"  "linux_amd64.zip"
+
+    # Standalone binaries
+    _install_go_binary gowitness "sensepost/gowitness" "linux-amd64"
+    _install_go_binary kerbrute  "ropnop/kerbrute"     "linux_amd64"
+
+    # ── Git-based tools ──
+    _install_git_tool() {
+        local name="$1" repo="$2" dest="$3" bin_path="$4"
+        if [ -x "$bin_path" ]; then
+            info "${name} already installed — updating..."
+            cd "$dest" && git pull --ff-only origin HEAD 2>/dev/null || true
+            cd - >/dev/null
+            ok "${name} updated"
+        else
+            info "Installing ${name}..."
+            git clone --depth 1 "$repo" "$dest" 2>/dev/null || { warn "${name} — clone failed"; return; }
+            chmod +x "$bin_path" 2>/dev/null || true
+            ok "${name} installed"
+        fi
+    }
+
+    _install_git_tool "searchsploit" "https://gitlab.com/exploit-database/exploitdb.git" "/opt/exploitdb" "/opt/exploitdb/searchsploit"
+    [ -x /opt/exploitdb/searchsploit ] && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit 2>/dev/null || true
+    [ -f /opt/exploitdb/.searchsploit_rc ] && cp /opt/exploitdb/.searchsploit_rc /root/ 2>/dev/null || true
+
+    _install_git_tool "nikto" "https://github.com/sullo/nikto.git" "/opt/nikto" "/opt/nikto/program/nikto.pl"
+    [ -x /opt/nikto/program/nikto.pl ] && ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto 2>/dev/null || true
+
+    _install_git_tool "enum4linux" "https://github.com/CiscoCXSecurity/enum4linux.git" "/opt/enum4linux" "/opt/enum4linux/enum4linux.pl"
+    [ -x /opt/enum4linux/enum4linux.pl ] && ln -sf /opt/enum4linux/enum4linux.pl /usr/local/bin/enum4linux 2>/dev/null || true
+
+    # ── fingerprintx (Go install) ──
+    if command -v fingerprintx >/dev/null 2>&1; then
+        ok "fingerprintx already installed"
+    elif command -v go >/dev/null 2>&1; then
+        info "Installing fingerprintx..."
+        go install github.com/praetorian-inc/fingerprintx/cmd/fingerprintx@latest 2>/dev/null && \
+            cp "$(go env GOPATH 2>/dev/null || echo ~/go)/bin/fingerprintx" /usr/local/bin/ 2>/dev/null && \
+            ok "fingerprintx installed" || warn "fingerprintx — install failed"
+    else
+        warn "fingerprintx skipped (go not installed — install with: sudo apt-get install golang)"
+    fi
+
+    # ── Python tools (impacket, netexec, bloodhound, ldapdomaindump) ──
+    if command -v pip3 >/dev/null 2>&1; then
+        for pypkg in impacket ldapdomaindump bloodhound; do
+            if pip3 show "$pypkg" >/dev/null 2>&1; then
+                info "pip upgrade ${pypkg}..."
+                pip3 install --upgrade "$pypkg" -q 2>&1 | tail -1 || true
+            else
+                info "pip install ${pypkg}..."
+                pip3 install "$pypkg" -q 2>&1 | tail -1 && ok "${pypkg} installed" || warn "${pypkg} — install failed"
+            fi
+        done
+
+        # NetExec (from GitHub, not PyPI)
+        if pip3 show netexec >/dev/null 2>&1; then
+            info "pip upgrade netexec..."
+            pip3 install --upgrade netexec -q 2>&1 | tail -1 || true
+        else
+            info "pip install netexec..."
+            pip3 install "git+https://github.com/Pennyw0rth/NetExec.git" -q 2>&1 | tail -1 && \
+                ok "netexec installed" || warn "netexec — install failed (optional)"
+        fi
+    fi
+
+    # ── Summary ──
+    local ok_count=0 missing=0
+    for cmd in nmap fping masscan nuclei httpx naabu katana gowitness sslscan searchsploit nikto enum4linux kerbrute fingerprintx; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            ok_count=$((ok_count + 1))
+        else
+            warn "  ${cmd} — not found"
+            missing=$((missing + 1))
+        fi
     done
+    ok "Tools: ${ok_count} available, ${missing} missing"
 }
 
 ###########################################################################
@@ -206,14 +376,26 @@ tools_update() {
 feeds_update() {
     step "Updating vulnerability feeds"
 
+    # Prefer running inside worker container if Docker is up
+    if [ "$DOCKER_DEPLOY" = true ] && docker compose "${DOCKER_COMPOSE_FILES[@]}" ps 2>/dev/null | grep -q "worker.*Up"; then
+        info "Updating nuclei templates in worker container..."
+        docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T worker nuclei -update-templates 2>&1 | tail -2 && \
+            ok "nuclei templates updated (worker)" || warn "worker nuclei template update failed"
+
+        info "Updating searchsploit DB in worker container..."
+        docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T worker searchsploit -u 2>&1 | tail -2 && \
+            ok "searchsploit DB updated (worker)" || warn "worker searchsploit update failed"
+    fi
+
+    # Also update on host if tools are installed
     if command -v nuclei >/dev/null 2>&1; then
-        info "nuclei -update-templates..."
-        nuclei -update-templates 2>&1 | tail -2 && ok "nuclei templates updated" || warn "nuclei template update failed"
+        info "nuclei -update-templates (host)..."
+        nuclei -update-templates 2>&1 | tail -2 && ok "nuclei templates updated (host)" || true
     fi
 
     if command -v searchsploit >/dev/null 2>&1; then
-        info "searchsploit -u..."
-        searchsploit -u 2>&1 | tail -2 && ok "searchsploit DB updated" || warn "searchsploit update failed"
+        info "searchsploit -u (host)..."
+        searchsploit -u 2>&1 | tail -2 && ok "searchsploit DB updated (host)" || true
     fi
 }
 
@@ -221,27 +403,22 @@ feeds_update() {
 # 4. Docker stack
 ###########################################################################
 docker_update() {
-    step "Updating Docker Compose stack"
+    step "Rebuilding Docker Compose stack"
 
-    # Detect which compose files are in use
-    local compose_files=(-f docker-compose.yml)
-    if [ -f docker-compose.host.yml ] && docker compose -f docker-compose.yml -f docker-compose.host.yml ps 2>/dev/null | grep -q "Up"; then
-        compose_files+=(-f docker-compose.host.yml)
-        info "Detected host-mode deployment"
-    elif [ -f docker-compose.dev.yml ] && docker compose -f docker-compose.yml -f docker-compose.dev.yml ps 2>/dev/null | grep -q "Up"; then
-        compose_files+=(-f docker-compose.dev.yml)
-        info "Detected dev-mode deployment"
-    fi
+    cd "$PROJECT_DIR"
 
-    # Pull external base images (mysql, redis, nginx — not app images)
+    info "Mode: ${DOCKER_MODE:-docker}"
+    info "Compose files: ${DOCKER_COMPOSE_FILES[*]}"
+
+    # Pull external base images
     info "Pulling external images..."
-    docker compose "${compose_files[@]}" pull db redis portal 2>&1 | tail -3 || true
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis portal 2>&1 | tail -3 || true
 
-    # Build app images with retry (transient CDN errors are common)
+    # Build app images with retry
     info "Building app images..."
     local build_ok=false
     for attempt in 1 2 3; do
-        if docker compose "${compose_files[@]}" build --pull 2>&1 | tail -5; then
+        if docker compose "${DOCKER_COMPOSE_FILES[@]}" build --pull 2>&1 | tail -8; then
             build_ok=true; break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
@@ -251,17 +428,30 @@ docker_update() {
         warn "Build failed after 3 attempts — images may be stale"
     fi
 
-    # Recreate containers with new images
+    # Recreate containers
     info "Recreating containers..."
-    docker compose "${compose_files[@]}" up -d --remove-orphans 2>&1 | tail -5
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --remove-orphans 2>&1 | tail -5
+    ok "Containers recreated"
 
-    # Run migrations
+    # Wait for DB
+    info "Waiting for database..."
+    for i in $(seq 1 20); do
+        if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db mysqladmin ping -h localhost --silent 2>/dev/null; then
+            ok "Database ready"
+            break
+        fi
+        [ "$i" -eq 20 ] && warn "Database not ready after 20s"
+        sleep 1
+    done
+
+    # Migrations
     info "Running Django migrations..."
-    docker compose "${compose_files[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -3 || warn "migrations may have failed — check: docker compose logs api"
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -3 || \
+        warn "migrations may have failed — check: docker compose logs api"
 
     # Collect static
     info "Collecting static files..."
-    docker compose "${compose_files[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | tail -2 || true
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | tail -2 || true
 
     # Prune old images
     docker image prune -f 2>/dev/null || true
@@ -271,9 +461,64 @@ docker_update() {
 ###########################################################################
 # Main
 ###########################################################################
+RAW_BASE="https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2"
+
+# ── Parse flags ────────────────────────────────────────────────────────
+WITH_SELF=true; WITH_TOOLS=true; WITH_FEEDS=true; WITH_DOCKER=false; FORCE_HOST=false; WITH_HOST_PIP=false
+for arg in "$@"; do
+    case "$arg" in
+        --self)   WITH_TOOLS=false; WITH_FEEDS=false ;;
+        --tools)  WITH_SELF=false; WITH_FEEDS=false ;;
+        --feeds)  WITH_SELF=false; WITH_TOOLS=false ;;
+        --docker) WITH_DOCKER=true ;;
+        --host)   FORCE_HOST=true; WITH_HOST_PIP=true ;;
+        --all)    WITH_DOCKER=true; WITH_HOST_PIP=true ;;  # everything including host pip
+        --help|-h)
+            echo "Usage: sudo bash update-wireghost.sh [flags]"
+            echo "  (no flags)  Auto-detect: self + tools + feeds + Docker (if running)"
+            echo "  --docker    Force Docker stack rebuild"
+            echo "  --host      Host-only mode (pip install locally, skip Docker)"
+            echo "  --all       Everything: host tools + pip + Docker rebuild"
+            echo "  --self      Self-update only (git pull + pip install)"
+            echo "  --tools     Tools only (install missing + update existing)"
+            echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
+            exit 0 ;;
+    esac
+done
+
+# ── Banner ─────────────────────────────────────────────────────────────
 printf "\n${BOLD}${CYAN} Wire_Ghost — One-Line Updater${NC}\n\n"
+
 find_root
+detect_docker
+
 info "Project: ${PROJECT_DIR}"
+if [ "$DOCKER_DEPLOY" = true ]; then
+    ok "Detected Docker deployment (${DOCKER_MODE})"
+fi
+
+# Auto-enable Docker rebuild when deployment is detected and no explicit flags override
+if [ "$DOCKER_DEPLOY" = true ] && [ "$FORCE_HOST" = false ] && [ "$WITH_SELF" = true ] && [ "$WITH_TOOLS" = true ] && [ "$WITH_FEEDS" = true ] && [ "$WITH_DOCKER" = false ]; then
+    WITH_DOCKER=true
+    info "Auto-enabling Docker stack rebuild (use --host to skip)"
+fi
+
+# For Docker deployments, skip host pip by default unless --host or --all
+if [ "$DOCKER_DEPLOY" = true ] && [ "$FORCE_HOST" = false ]; then
+    WITH_HOST_PIP=false
+fi
+
+# Count steps
+_TOTAL=0
+[ "$WITH_SELF" = true ] && _TOTAL=$((_TOTAL + 1))
+[ "$WITH_TOOLS" = true ] && _TOTAL=$((_TOTAL + 1))
+[ "$WITH_FEEDS" = true ] && _TOTAL=$((_TOTAL + 1))
+[ "$WITH_DOCKER" = true ] && _TOTAL=$((_TOTAL + 1))
+
+if [ "$_TOTAL" -eq 0 ]; then
+    warn "Nothing selected — run with --help for usage"
+    exit 0
+fi
 
 if [ "$WITH_SELF" = true ]; then
     self_update
@@ -292,3 +537,8 @@ if [ "$WITH_DOCKER" = true ]; then
 fi
 
 printf "\n${GREEN}${BOLD}══ Update complete ═══════════════════════════════════${NC}\n\n"
+
+if [ "$DOCKER_DEPLOY" = true ]; then
+    printf "  ${BOLD}Check status:${NC}  cd ${PROJECT_DIR} && docker compose ps\n"
+fi
+printf "  ${BOLD}View logs:${NC}    cd ${PROJECT_DIR} && docker compose logs -f api\n\n"
