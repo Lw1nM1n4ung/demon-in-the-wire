@@ -477,10 +477,18 @@ for arg in "$@"; do
     esac
 done
 
+# ── Re-exec from local copy when piped from curl (CDN may be stale) ─────
+find_root
+if [ "${_WG_UPDATER_REEXEC:-}" != "1" ] && [ ! -t 0 ] && [ -f "${PROJECT_DIR}/scripts/update-wireghost.sh" ]; then
+    # When piped via curl | bash, re-exec from the local copy so we always
+    # run the latest pulled version — CDN may cache the old script.
+    export _WG_UPDATER_REEXEC=1
+    exec bash "${PROJECT_DIR}/scripts/update-wireghost.sh" "$@"
+fi
+
 # ── Banner ─────────────────────────────────────────────────────────────
 printf "\n${BOLD}${CYAN} Wire_Ghost — One-Line Updater${NC}\n\n"
 
-find_root
 detect_docker
 
 info "Project: ${PROJECT_DIR}"
