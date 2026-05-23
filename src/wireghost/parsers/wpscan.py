@@ -49,7 +49,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
             ))
             # Version vulnerabilities
             for vuln in wp_ver.get("vulnerabilities", []):
-                findings.append(_vuln_to_finding(vuln, host_ip, target_url))
+                findings.append(_vuln_to_finding(vuln, host_ip, target_url, port))
 
     # Plugins
     plugins = data.get("plugins", {})
@@ -65,7 +65,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
                 full_url=target_url,
             ))
             for vuln in info.get("vulnerabilities", []):
-                findings.append(_vuln_to_finding(vuln, host_ip, target_url, context=f"Plugin: {name}"))
+                findings.append(_vuln_to_finding(vuln, host_ip, target_url, port, context=f"Plugin: {name}"))
 
     # Themes
     themes = data.get("themes", {}) or data.get("main_theme", {})
@@ -84,7 +84,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
                 full_url=target_url,
             ))
             for vuln in info.get("vulnerabilities", []):
-                findings.append(_vuln_to_finding(vuln, host_ip, target_url, context=f"Theme: {name}"))
+                findings.append(_vuln_to_finding(vuln, host_ip, target_url, port, context=f"Theme: {name}"))
 
     # Users
     users = data.get("users", {})
@@ -115,7 +115,7 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
     return findings
 
 
-def _vuln_to_finding(vuln: dict, host_ip: str, url: str, context: str = "") -> Finding:
+def _vuln_to_finding(vuln: dict, host_ip: str, url: str, port: str, context: str = "") -> Finding:
     title = vuln.get("title", "Unknown Vulnerability")
     refs: list[str] = []
     ref_data = vuln.get("references", {})
