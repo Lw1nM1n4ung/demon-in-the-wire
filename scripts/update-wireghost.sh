@@ -124,6 +124,11 @@ self_update() {
     # ── Git pull ──
     local branch
     branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "rewrite-v2")
+
+    # Remember script hash before pull — if the updater itself changed, re-exec
+    local _self_hash
+    _self_hash=$(sha256sum "${PROJECT_DIR}/scripts/update-wireghost.sh" 2>/dev/null | cut -d' ' -f1)
+
     info "Pulling ${branch}..."
     git fetch origin "$branch" || warn "git fetch failed — check network"
     if ! git pull --ff-only origin "$branch" 2>&1 | tail -3; then
@@ -131,6 +136,17 @@ self_update() {
         return
     fi
     ok "Code updated ($(git rev-parse --short HEAD))"
+
+    # If the updater script itself was updated, re-exec the new version
+    if [ "${_WG_UPDATER_POST_PULL:-}" != "1" ] && [ -n "${_self_hash:-}" ]; then
+        local _new_hash
+        _new_hash=$(sha256sum "${PROJECT_DIR}/scripts/update-wireghost.sh" 2>/dev/null | cut -d' ' -f1)
+        if [ "$_self_hash" != "$_new_hash" ]; then
+            export _WG_UPDATER_POST_PULL=1 _WG_UPDATER_REEXEC=1
+            info "Updater script updated — re-executing new version..."
+            exec bash "${PROJECT_DIR}/scripts/update-wireghost.sh" "$@"
+        fi
+    fi
 
     # ── Pip install (host mode only — Docker containers have their own Python) ──
     if [ "$WITH_HOST_PIP" = false ]; then
