@@ -16,7 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-MSF_JSON_PATH = Path('/opt/msf/modules_metadata_base.json')
+MSF_JSON_PATH = Path('/opt/metasploit-framework/embedded/framework/db/modules_metadata_base.json')
 
 _cve_index: dict[str, list[dict]] | None = None
 _product_index: dict[str, list[dict]] | None = None

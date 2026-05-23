@@ -80,7 +80,7 @@ async def _run_masscan(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_dir = tree.host_dir(ip)
     xml_path = out_dir / "masscan_scan.xml"
     result = await run_tool(
-        ["masscan", ip, "-p0-65535", "--rate", "5000", "--banners", "-oX", str(xml_path)],
+        ["masscan", ip, "-p0-65535", "--banners", "-oX", str(xml_path)],
         timeout=int(config.tool_timeout),
         label=f"masscan:{ip}",
     )

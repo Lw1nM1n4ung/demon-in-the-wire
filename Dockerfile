@@ -112,7 +112,7 @@ RUN pip install --no-cache-dir .
 RUN pip install --no-cache-dir getsploit
 
 # AD recon tools (impacket, BloodHound, LDAP enumeration)
-RUN pip install --no-cache-dir impacket ldapdomaindump bloodhound-python
+RUN pip install --no-cache-dir impacket ldapdomaindump bloodhound
 
 # Install NetExec (nxc) from GitHub — not on PyPI
 RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec.git 2>/dev/null || \
@@ -149,7 +149,7 @@ RUN echo "=== Tool verification ===" \
     && (timeout 5 netdiscover -help 2>&1 | head -1 || true) \
     && (timeout 5 impacket-GetNPUsers -h 2>&1 | head -1 || echo "impacket: available") \
     && (timeout 5 ldapdomaindump --help 2>&1 | head -1 || echo "ldapdomaindump: available") \
-    && (timeout 5 bloodhound-python --help 2>&1 | head -1 || echo "bloodhound: available") \
+    && (timeout 5 bloodhound --help 2>&1 | head -1 || echo "bloodhound: available") \
     && (timeout 5 kerbrute --help 2>&1 | head -1 || echo "kerbrute: available") \
     && timeout 5 fingerprintx -h 2>&1 | head -1 || echo "fingerprintx: available" \
     && wireghost --version
