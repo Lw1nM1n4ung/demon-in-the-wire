@@ -356,7 +356,7 @@ WG._assetInventoryHtml = function() {
     return '<div class="panel-empty" style="padding:40px;"><div class="icon">&#128269;</div>No assets match the current filters.</div>';
   }
   return '<table class="data-table"><thead><tr>' +
-    '<th>IP</th><th style="width:80px;">Port</th><th>Service</th><th>Product / Version</th>' +
+    '<th>IP</th><th>OS</th><th style="width:80px;">Port</th><th>Service</th><th>Product / Version</th>' +
     '<th style="width:100px;">Risk</th><th style="width:80px;text-align:right;">Findings</th>' +
     '<th style="width:120px;">First seen</th><th style="width:120px;">Last seen</th><th style="width:90px;">Status</th>' +
     '</tr></thead><tbody>' +
@@ -368,6 +368,7 @@ WG._assetInventoryHtml = function() {
       return '<tr>' +
         '<td class="mono"><span class="host-tag">' + esc(a.ip) + '</span>' +
           (a.hostname ? '<div style="font-size:0.68rem;color:var(--text-dim);margin-top:2px;">' + esc(a.hostname) + '</div>' : '') + '</td>' +
+        '<td><span class="tag">' + (esc(a.os) || '\u2014') + '</span></td>' +
         '<td class="mono">' + (a.port == null ? '\u2014' : a.port) + (a.protocol ? '/' + esc(a.protocol) : '') + '</td>' +
         '<td>' + (a.service_name ? '<span class="tag">' + esc(a.service_name) + '</span>' : '<span style="color:var(--text-muted);">\u2014</span>') + '</td>' +
         '<td class="mono" style="font-size:0.76rem;">' + product + '</td>' +
@@ -557,8 +558,20 @@ WG._renderWebSurface = function() {
       var label = document.createElement('div');
       label.className = 'label';
       label.textContent = ss.host_ip + ' — ' + ss.url;
+      var meta = document.createElement('div');
+      meta.className = 'screenshot-meta';
+      meta.style.cssText = 'font-size:0.68rem;color:var(--text-dim);margin-top:2px;';
+      if (ss.title) meta.appendChild(document.createTextNode(ss.title));
+      if (ss.status_code) {
+        if (ss.title) meta.appendChild(document.createTextNode(' · '));
+        var scSpan = document.createElement('span');
+        scSpan.style.color = ss.status_code < 300 ? 'var(--low)' : ss.status_code < 400 ? 'var(--medium)' : 'var(--critical)';
+        scSpan.textContent = 'HTTP ' + ss.status_code;
+        meta.appendChild(scSpan);
+      }
       card.appendChild(image);
       card.appendChild(label);
+      card.appendChild(meta);
       fragment.appendChild(card);
     });
     el.replaceChildren(fragment);

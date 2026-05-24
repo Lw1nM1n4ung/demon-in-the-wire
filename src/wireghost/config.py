@@ -68,6 +68,13 @@ class ScanConfig:
     # Skip passive reverse-DNS sweep during discovery (no packets sent —
     # resolves PTR records to find named hosts). Independent of enhanced_discovery.
     skip_passive_dns: bool = False
+    # Skip fingerprintx service identification during port scan.
+    # When False (default), fingerprintx runs after nmap -sV to augment
+    # ports where nmap was uncertain — filling in service names so all
+    # downstream phases (service_enum, MSF, vulnscan, web detection)
+    # benefit from corrected data.
+    # Set to True when fingerprintx is not installed or not desired.
+    skip_fingerprintx: bool = False
 
     @classmethod
     def load(
@@ -170,6 +177,7 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "vulners_api_key": "vulners_api_key",
         "enhanced_discovery": "enhanced_discovery",
         "skip_passive_dns": "skip_passive_dns",
+        "skip_fingerprintx": "skip_fingerprintx",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -216,6 +224,7 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_VULNERS_API_KEY": ("vulners_api_key", str),
         "WIREGHOST_ENHANCED_DISCOVERY": ("enhanced_discovery", bool),
         "WIREGHOST_SKIP_PASSIVE_DNS": ("skip_passive_dns", bool),
+        "WIREGHOST_SKIP_FINGERPRINTX": ("skip_fingerprintx", bool),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

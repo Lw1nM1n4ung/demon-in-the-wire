@@ -46,6 +46,7 @@ WG.renderFindingDetail = function(id) {
       (f.cwe ? '<div class="info-item"><div class="info-label">CWE</div><div class="info-value mono">' + esc(f.cwe) + '</div></div>' : '') +
       (f.template_id ? '<div class="info-item"><div class="info-label">Template</div><div class="info-value mono" style="font-size:0.75rem;">' + esc(f.template_id) + '</div></div>' : '') +
       (f.full_url ? '<div class="info-item"><div class="info-label">URL</div><div class="info-value mono" style="font-size:0.75rem;word-break:break-all;">' + esc(f.full_url) + '</div></div>' : '') +
+      (f.endpoint ? '<div class="info-item"><div class="info-label">Endpoint</div><div class="info-value mono" style="font-size:0.75rem;">' + esc(f.endpoint) + '</div></div>' : '') +
     '</div>' +
 
     (f.description ?
@@ -59,6 +60,9 @@ WG.renderFindingDetail = function(id) {
 
     (f.curl_command ?
       '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">Reproduce</div><button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(decodeURIComponent(\'' + curlCopy + '\'));WG.toast(\'Copied\',\'success\');">Copy</button></div><div class="panel-body" style="padding:0;"><div class="code-block" style="color:var(--accent);">' + esc(f.curl_command) + '</div></div></div>' : '') +
+
+    (f.raw_output ?
+      '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">Raw Output</div></div><div class="panel-body" style="padding:0;"><div class="code-block">' + esc(f.raw_output) + '</div></div></div>' : '') +
 
     (refs.length ?
       '<div class="panel" style="margin-bottom:20px;"><div class="panel-header"><div class="panel-title">References</div></div><div class="panel-body">' +

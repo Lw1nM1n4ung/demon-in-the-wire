@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from .ad_recon import ad_recon_task  # noqa: E402, F401
 
 
-@shared_task(bind=True, max_retries=0, time_limit=7200, soft_time_limit=7000)
+@shared_task(bind=True, max_retries=0, time_limit=604800, soft_time_limit=518400)
 def run_scan(self, scan_id):
     """Execute the full scan pipeline and persist results to DB."""
     from scanner.models import Scan, Host, Port, Finding, Technology, Report
@@ -32,10 +32,21 @@ def run_scan(self, scan_id):
         from wireghost.pipeline.orchestrator import run_pipeline
         from wireghost.config import ScanConfig
 
-        # Build config from scan record
-        output_dir = Path(
-            f"{scan.output_dir or '/data/output'}/{scan.target.replace('/', '_')}"
-        )
+        # Build config from scan record.
+        # scan.output_dir = <base>/<target>  (e.g. /data/output/192.168.1.0_28)
+        # config.output_dir = <base> only    (e.g. /data/output)
+        # build_output_tree(config.output_dir, target) creates <base>/<target>
+        # so that scan.output_dir == tree.base — screenshots + reports resolve
+        # without an extra nesting level.
+        base_output = Path(scan.output_dir or '/data/output')
+        target_normalized = scan.target.replace('/', '_')
+        # Truncate long multi-target names to avoid ENAMETOOLONG (255-char limit).
+        # Keep a human-readable prefix + short hash for uniqueness.
+        if len(target_normalized) > 200:
+            import hashlib
+            tag = hashlib.sha256(target_normalized.encode()).hexdigest()[:8]
+            target_normalized = target_normalized[:200] + '_' + tag
+        output_dir = base_output / target_normalized
         output_dir.mkdir(parents=True, exist_ok=True)
         scan.output_dir = str(output_dir)
         scan.save(update_fields=['output_dir'])
@@ -56,14 +67,280 @@ def run_scan(self, scan_id):
             skip_enum4linux=not scan.enum4linux,
             skip_nikto=scan.skip_nikto,
             skip_netexec=scan.skip_netexec,
-            output_dir=str(output_dir),
+            output_dir=str(base_output),
         )
 
-        # Run the async pipeline
-        report = asyncio.run(run_pipeline(config))
+        # Progress + result persistence daemon thread.
+        # Runs in a dedicated daemon thread so DB writes are never inside the
+        # asyncio event loop, avoiding Django's async-safety guard entirely.
+        # The callbacks (called from inside the loop) only push tuples onto a
+        # thread-safe queue; the thread picks them up, opens its own DB
+        # connection, and executes the work.
+        #
+        # Queue items:
+        #   ("progress", phase_label, progress_pct, hosts_done) — progress update
+        #   ("discovery", live_ips, mac_vendor_map)    — finalize Host records + counts
+        #   ("subnet_hosts", new_ips, mac_updates)     — incremental Host creation per subnet
+        #   ("host_result", host, findings)            — update Host, create Ports/Findings
+        #   ("host_phase", ip, phase)                  — update Host.current_phase
+        #
+        # MySQL stores UUIDs without dashes (CHAR(32)), so we strip them
+        # from the string form before passing to raw SQL.
+        import threading as _threading
+        from queue import Queue as _Queue, Empty as _Empty
 
-        # ── Persist results to ORM ──
-        _persist_results(scan, report)
+        _scan_id_hex = str(scan_id).replace("-", "")
+        _progress_queue: _Queue = _Queue()
+        _progress_stop = _threading.Event()
+
+        def _progress_thread() -> None:
+            from django.db import connection as _conn
+            from django.db.models import F as _F
+            from scanner.models import (
+                Host as _DBHost, Port as _DBPort, Finding as _DBFinding,
+                Technology as _DBTech, Screenshot as _DBScreenshot,
+                Scan as _Scan,
+            )
+            while not _progress_stop.is_set():
+                try:
+                    item = _progress_queue.get(timeout=0.5)
+                except _Empty:
+                    continue
+                if item is None:          # sentinel — shut down
+                    break
+                try:
+                    action = item[0]
+                    if action == "progress":
+                        # Semantics (per-host weighted average model):
+                        #   phase  = dominant phase label (most hosts in this phase)
+                        #   done   = weighted progress percentage (0-99)
+                        #   total  = count of hosts fully done with their pipeline
+                        _, phase, done, total = item
+                        with _conn.cursor() as cursor:
+                            cursor.execute(
+                                "UPDATE scanner_scan SET current_phase=%s, "
+                                "hosts_scanned=%s "
+                                "WHERE id=%s",
+                                [phase, done, _scan_id_hex],
+                            )
+                    elif action == "discovery":
+                        _, live_ips, mac_vendor_map, dns_hostnames = item
+                        # Use get_or_create — some hosts may already exist
+                        # from incremental subnet_hosts creation.
+                        for ip in live_ips:
+                            mac, vendor = mac_vendor_map.get(ip, ("", ""))
+                            defaults = {
+                                'mac_address': mac or '',
+                                'vendor': vendor or '',
+                                'status': 'up',
+                                'ports_count': 0,
+                            }
+                            # Apply DNS PTR hostname as fallback if no hostname set yet
+                            dns_name = dns_hostnames.get(ip, '')
+                            if dns_name:
+                                host_obj = _DBHost.objects.filter(scan_id=scan_id, ip=ip).first()
+                                if host_obj and not host_obj.hostname:
+                                    defaults['hostname'] = dns_name
+                            _DBHost.objects.get_or_create(
+                                scan_id=scan_id, ip=ip,
+                                defaults=defaults,
+                            )
+                        # Set final counts (atomic correction after incremental adds)
+                        _Scan.objects.filter(id=scan_id).update(
+                            hosts_count=len(live_ips),
+                            hosts_total=len(live_ips),
+                        )
+                        logger.info("Discovery finalized: %d host(s) total", len(live_ips))
+                    elif action == "subnet_hosts":
+                        _, new_ips, mac_updates = item
+                        # Create Host records for newly discovered IPs.
+                        for ip in new_ips:
+                            mac, vendor = mac_updates.get(ip, ("", ""))
+                            _DBHost.objects.get_or_create(
+                                scan_id=scan_id, ip=ip,
+                                defaults={
+                                    'mac_address': mac or '',
+                                    'vendor': vendor or '',
+                                    'status': 'up',
+                                    'ports_count': 0,
+                                },
+                            )
+                        # Apply MAC/vendor updates for IPs that just got
+                        # ARP data (may include IPs discovered by earlier
+                        # subnets via nmap/fping that only now got L2 data).
+                        if mac_updates:
+                            for ip, (mac, vendor) in mac_updates.items():
+                                _DBHost.objects.filter(
+                                    scan_id=scan_id, ip=ip,
+                                ).update(
+                                    mac_address=mac or '',
+                                    vendor=vendor or '',
+                                )
+                        # Increment hosts_count for the new hosts.
+                        # The final "discovery" action corrects the exact count.
+                        if new_ips:
+                            _Scan.objects.filter(id=scan_id).update(
+                                hosts_count=_F('hosts_count') + len(new_ips),
+                            )
+                    elif action == "host_phase":
+                        _, ip, phase = item
+                        _DBHost.objects.filter(scan_id=scan_id, ip=ip).update(
+                            current_phase=phase,
+                        )
+                    elif action == "host_result":
+                        _, host, findings = item
+                        # update_or_create handles the edge case where a fast
+                        # host finishes before the discovery handler has created
+                        # its Host record (e.g. tiny scan with parallelism=1).
+                        db_host, _ = _DBHost.objects.update_or_create(
+                            scan_id=scan_id, ip=host.ip,
+                            defaults={
+                                'hostname': host.hostname or '',
+                                'os': host.os or '',
+                                'status': host.status or 'up',
+                                'mac_address': getattr(host, 'mac_address', '') or '',
+                                'vendor': getattr(host, 'vendor', '') or '',
+                                'ports_count': len(host.open_ports),
+                                'web_endpoints': list(getattr(host, 'web_endpoints', []) or []),
+                                'web_titles': dict(getattr(host, 'web_titles', {}) or {}),
+                            },
+                        )
+                        # Replace ports / tech / screenshots for this host
+                        _DBPort.objects.filter(host=db_host).delete()
+                        _DBTech.objects.filter(host=db_host).delete()
+                        _DBScreenshot.objects.filter(host=db_host, scan_id=scan_id).delete()
+                        for p in host.ports:
+                            svc = p.service
+                            _DBPort.objects.create(
+                                host=db_host, number=p.number,
+                                protocol=p.protocol, state=p.state,
+                                service_name=svc.name if svc else '',
+                                service_product=svc.product if svc else '',
+                                service_version=svc.version if svc else '',
+                                service_source=getattr(p, 'service_source', '') or '',
+                            )
+                        for t in host.technologies:
+                            _DBTech.objects.create(
+                                host=db_host, name=t.name,
+                                version=t.version or '', url=t.url or '',
+                            )
+                        for sc in getattr(host, 'screenshots', []):
+                            _DBScreenshot.objects.create(
+                                host=db_host, scan_id=scan_id,
+                                url=sc.url, filename=sc.filename,
+                                title=sc.title or '', status_code=sc.status_code,
+                            )
+                        # Create findings + tally severity counts
+                        sev_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
+                        for f in findings:
+                            sev = f.severity.value if hasattr(f.severity, 'value') else str(f.severity).lower()
+                            _DBFinding.objects.create(
+                                scan_id=scan_id, host=db_host, source=f.source,
+                                severity=sev, title=f.title,
+                                description=f.description or '',
+                                host_ip=f.host,
+                                port=str(f.port) if f.port else '',
+                                protocol=f.protocol or 'tcp',
+                                endpoint=f.endpoint or '',
+                                full_url=f.full_url or '',
+                                template_id=f.template_id or '',
+                                cve=f.cve or '', cwe=f.cwe or '',
+                                cvss=str(f.cvss) if f.cvss else '',
+                                request=f.request or '',
+                                response=f.response or '',
+                                curl_command=f.curl_command or '',
+                                raw_output=f.raw_output or '',
+                                references=json.dumps(f.references) if f.references else '[]',
+                                tags=','.join(f.tags) if f.tags else '',
+                                script_id=f.script_id or '',
+                                matched_at=f.matched_at or '',
+                            )
+                            if sev in sev_counts:
+                                sev_counts[sev] += 1
+                            db_host.findings_count += 1
+                        db_host.save(update_fields=['findings_count'])
+                        # Atomic counter increments on the scan.
+                        # hosts_scanned is now the weighted progress % set
+                        # by ("progress", ...) — not incremented here.
+                        _Scan.objects.filter(id=scan_id).update(
+                            ports_count=_F('ports_count') + len(host.open_ports),
+                            findings_count=_F('findings_count') + len(findings),
+                            critical_count=_F('critical_count') + sev_counts['critical'],
+                            high_count=_F('high_count') + sev_counts['high'],
+                            medium_count=_F('medium_count') + sev_counts['medium'],
+                            low_count=_F('low_count') + sev_counts['low'],
+                            info_count=_F('info_count') + sev_counts['info'],
+                        )
+                except Exception as _exc:
+                    import traceback as _tb
+                    logger.error(
+                        "Progress thread DB write failed: %s\n%s",
+                        _exc, _tb.format_exc(),
+                    )
+                finally:
+                    _progress_queue.task_done()
+            # Close the thread-local connection on exit so it isn't leaked.
+            try:
+                _conn.close()
+            except Exception:
+                pass
+
+        _thread = _threading.Thread(target=_progress_thread, daemon=True)
+        _thread.start()
+
+        # _on_progress now receives (phase_label, weighted_pct, hosts_fully_done)
+        # from the orchestrator's weighted per-host average model.
+        def _on_progress(phase: str, done: int, total: int) -> None:
+            try:
+                _progress_queue.put_nowait(("progress", phase, done, total))
+            except Exception:
+                pass
+
+        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None) -> None:
+            try:
+                _progress_queue.put_nowait(("discovery", live_ips, mac_vendor_map, dns_hostnames or {}))
+            except Exception:
+                pass
+
+        def _on_host_complete(host, findings) -> None:
+            try:
+                _progress_queue.put_nowait(("host_result", host, findings))
+            except Exception:
+                pass
+
+        def _on_subnet_complete(new_ips, mac_updates) -> None:
+            try:
+                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates))
+            except Exception:
+                pass
+
+        def _on_host_phase(ip: str, phase: str) -> None:
+            try:
+                _progress_queue.put_nowait(("host_phase", ip, phase))
+            except Exception:
+                pass
+
+        try:
+            report = asyncio.run(run_pipeline(
+                config,
+                on_progress=_on_progress,
+                on_discovery_complete=_on_discovery_complete,
+                on_host_complete=_on_host_complete,
+                on_host_phase=_on_host_phase,
+                on_subnet_complete=_on_subnet_complete,
+            ))
+        finally:
+            # Send sentinel first so the thread drains remaining queue items
+            # gracefully.  Only force-stop if it's still alive after draining.
+            _progress_queue.put(None)          # sentinel — drain then exit
+            _thread.join(timeout=30)           # wait for drain
+            if _thread.is_alive():             # force-stop if stuck
+                _progress_stop.set()
+                _thread.join(timeout=5)
+
+        # Results are already persisted incrementally — skip bulk _persist_results.
+        # Still need asset sync from the in-memory report.
+        _sync_assets(scan, report)
 
         # ── Match MSF exploits ──
         try:
@@ -141,6 +418,9 @@ def run_scan(self, scan_id):
             )
 
         # ── Finalize ──
+        # Refresh the scan object — counters were updated atomically in the
+        # daemon thread via F() expressions, so our in-memory copy is stale.
+        scan.refresh_from_db()
         scan.status = 'completed'
         scan.completed_at = timezone.now()
         scan.duration_seconds = int(
@@ -201,6 +481,8 @@ def _persist_results(scan, report):
             vendor=getattr(h, 'vendor', '') or '',
             ports_count=len(h.open_ports),
             findings_count=0,  # updated below
+            web_endpoints=list(getattr(h, 'web_endpoints', []) or []),
+            web_titles=dict(getattr(h, 'web_titles', {}) or {}),
         )
         host_map[h.ip] = db_host
 
@@ -213,6 +495,7 @@ def _persist_results(scan, report):
                 service_name=p.service.name if p.service else '',
                 service_product=p.service.product if p.service else '',
                 service_version=p.service.version if p.service else '',
+                service_source=getattr(p, 'service_source', '') or '',
             )
 
         for t in h.technologies:
@@ -260,6 +543,9 @@ def _persist_results(scan, report):
             curl_command=f.curl_command or '',
             raw_output=f.raw_output or '',
             references=json.dumps(f.references) if f.references else '[]',
+            tags=','.join(f.tags) if f.tags else '',
+            script_id=f.script_id or '',
+            matched_at=f.matched_at or '',
         )
 
         if sev in sev_counts:
@@ -390,7 +676,9 @@ def generate_report(self, scan_id, formats=None):
         techs = [PWebTech(name=t.name, version=t.version, url=t.url) for t in db_host.technologies.all()]
         hosts.append(PHost(
             ip=db_host.ip, hostname=db_host.hostname, status=db_host.status,
-            ports=ports, web_endpoints=[], web_titles={}, technologies=techs, os=db_host.os,
+            ports=ports, web_endpoints=db_host.web_endpoints or [], web_titles=db_host.web_titles or {},
+            technologies=techs, os=db_host.os,
+            mac_address=db_host.mac_address, vendor=db_host.vendor,
         ))
 
     findings = []
@@ -403,6 +691,9 @@ def generate_report(self, scan_id, formats=None):
             cvss=db_f.cvss, request=db_f.request, response=db_f.response,
             curl_command=db_f.curl_command, raw_output=db_f.raw_output,
             references=json.loads(db_f.references) if db_f.references else [],
+            tags=(db_f.tags or '').split(',') if db_f.tags else [],
+            script_id=db_f.script_id or '',
+            matched_at=db_f.matched_at or '',
         ))
 
     report = ScanReport(

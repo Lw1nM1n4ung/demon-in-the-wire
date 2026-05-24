@@ -131,6 +131,14 @@ def parse_searchsploit_json(json_path: Path, host_ip: str = "") -> list[Finding]
             if path:
                 desc_parts.append(f"Exploit path: {path}")
 
+            # Extract first CVE for the cve field
+            cve = ""
+            for code in codes.split(";"):
+                code = code.strip()
+                if code.startswith("CVE-"):
+                    cve = code
+                    break
+
             findings.append(Finding(
                 source="searchsploit",
                 host=host_ip,
@@ -140,6 +148,7 @@ def parse_searchsploit_json(json_path: Path, host_ip: str = "") -> list[Finding]
                 title=f"Exploit: {title}",
                 description="\n".join(desc_parts),
                 template_id=f"EDB-{edb_id}" if edb_id else "",
+                cve=cve,
                 references=refs,
                 tags=[exploit_type, platform] if exploit_type else [],
             ))

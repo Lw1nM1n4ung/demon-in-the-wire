@@ -10,7 +10,7 @@ from django.core.cache import cache
 log = logging.getLogger('scanner.docker_stats')
 
 _PROXY_URL = os.environ.get('DOCKER_PROXY_URL', 'http://docker-proxy:2375')
-_PROJECT = os.environ.get('COMPOSE_PROJECT', 'demon-in-the-wire')
+_PROJECT = os.environ.get('COMPOSE_PROJECT', 'wireghost')
 _CACHE_KEY = 'scanner.docker_processes.v1'
 _CACHE_TTL = 3
 

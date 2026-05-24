@@ -67,6 +67,7 @@ class Port:
     protocol: str = "tcp"
     state: str = "open"
     service: Service | None = None
+    service_source: str = ""  # 'nmap' or 'fingerprintx' — who identified the service
 
     @property
     def service_name(self) -> str:

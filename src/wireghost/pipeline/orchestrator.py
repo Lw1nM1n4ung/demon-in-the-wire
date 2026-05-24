@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from datetime import datetime
+from typing import Callable
 
 from wireghost.config import ScanConfig
 from wireghost.models.finding import Finding
@@ -31,6 +33,17 @@ from wireghost.utils.process import check_tools
 
 log = logging.getLogger("wireghost")
 
+# Ordered list of pipeline phases.  The overall "current phase" is the
+# earliest phase where at least one host is still working.
+PHASE_ORDER = [
+    "discovery",
+    "portscan",
+    "webdetect",
+    "webcrawl",
+    "enumeration",
+    "reports",
+]
+
 
 def _dedup_findings(findings: list[Finding]) -> list[Finding]:
     """Remove duplicate findings across tools based on host:port:vuln identity."""
@@ -50,22 +63,45 @@ def _dedup_findings(findings: list[Finding]) -> list[Finding]:
     return deduped
 
 
-async def run_pipeline(config: ScanConfig) -> ScanReport:
+async def run_pipeline(
+    config: ScanConfig,
+    on_progress: Callable[[str, int, int], None] | None = None,
+    on_discovery_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
+    on_host_complete: Callable[[Host, list[Finding]], None] | None = None,
+    on_host_phase: Callable[[str, str], None] | None = None,
+    on_subnet_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
+) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
 
-    Phases:
-        1. Tool verification
-        2. Host discovery (nmap + fping)
-        3. Port scanning (parallel per host)
-        4. Web detection (parallel per host)
-        5. Vulnerability scanning (parallel per host, nuclei + nmap concurrent)
-        6. Report generation
+    If *on_progress* is provided it is called with
+    ``on_progress(phase_label, weighted_pct, hosts_fully_done)`` where
+    *weighted_pct* is a per-host-weighted average (0-99) and
+    *hosts_fully_done* is the count of hosts that have finished their
+    entire pipeline.
+
+    If *on_discovery_complete* is provided it is called right after
+    host discovery with the list of live IPs and the MAC/vendor map.
+
+    If *on_host_complete* is provided it is called after each host
+    finishes its full pipeline with the populated Host and its Findings.
+
+    If *on_host_phase* is provided it is called when a host advances
+    to a new phase: ``on_host_phase(ip, phase)``.
+
+    If *on_subnet_complete* is provided it is called after each subnet
+    scan during discovery with the list of newly discovered IPs and
+    MAC/vendor updates, enabling incremental host creation in the DB.
     """
     scan_start = datetime.now()
 
     # Set up logging and output tree
     setup_logging(output_dir=str(config.output_dir), verbose=config.verbose)
     target_name = config.target.replace("/", "_").replace(":", "_")
+    # Truncate long multi-target names to avoid ENAMETOOLONG (255-char limit)
+    if len(target_name) > 200:
+        import hashlib
+        tag = hashlib.sha256(target_name.encode()).hexdigest()[:8]
+        target_name = target_name[:200] + '_' + tag
     tree = build_output_tree(config.output_dir, target_name)
 
     log.info("Starting Wire_Ghost scan against %s", config.target)
@@ -85,9 +121,42 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         else:
             log.info("Optional scanner not found: %s (fallback skipped if needed)", tool)
 
+    # --- Phase weights (shared by discovery and per-host progress) ---
+    # Midpoints of the frontend progress segments so the weighted average
+    # approximates actual work done.
+    _PHASE_WEIGHTS: dict[str, int] = {
+        "discovery": 9,    # 3-15% midpoint
+        "portscan": 27,    # 15-40% midpoint
+        "webdetect": 46,   # 40-52% midpoint
+        "webcrawl": 58,    # 52-64% midpoint
+        "enumeration": 77, # 64-90% midpoint
+        "reports": 94,     # 90-98% midpoint
+    }
+
     # --- Phase 2: Discovery ---
     log.info("Phase 2: Host discovery")
-    live_ips, mac_vendor_map = await discover_hosts(config, tree)
+
+    # Wrap *on_progress* so discovery subnet counts are normalised into the
+    # same 0-99 weighted-percentage scale that per-host phases use.
+    # discovery_weight=9 → discovery progress ranges from 0% to 9%.
+    _discovery_weight = _PHASE_WEIGHTS.get("discovery", 9)
+
+    def _discovery_progress(phase: str, subnets_done: int, total_subnets: int) -> None:
+        if on_progress is None:
+            return
+        pct = (subnets_done * _discovery_weight) // total_subnets if total_subnets else 0
+        on_progress(phase, pct, total_subnets)
+
+    if on_progress:
+        on_progress("discovery", 0, 0)
+    live_ips, mac_vendor_map, dns_hostnames = await discover_hosts(
+        config, tree,
+        on_progress=_discovery_progress,
+        on_subnet_complete=on_subnet_complete,
+    )
+
+    if on_discovery_complete:
+        on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames)
 
     if not live_ips:
         log.warning("No live hosts discovered -- nothing to scan")
@@ -98,17 +167,56 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         )
         return report
 
+    # --- Per-host phase tracking ---
+    # Each host independently advances through phases. Progress is a
+    # weighted average across all hosts so that fast hosts pull the bar
+    # forward instead of one slow host holding it back.
+    total_hosts = len(live_ips)
+    _host_phases: dict[str, str] = {ip: "discovery" for ip in live_ips}
+    _phase_lock = asyncio.Lock()
+
+    def _compute_progress() -> tuple[str, int, int]:
+        """Return (phase_label, weighted_pct, hosts_fully_done)."""
+        total_weight = 0
+        completed = 0
+        phase_counts: dict[str, int] = defaultdict(int)
+        for ip in live_ips:
+            ph = _host_phases.get(ip, "discovery")
+            total_weight += _PHASE_WEIGHTS.get(ph, 0)
+            phase_counts[ph] += 1
+            if ph in ("enumeration", "reports"):
+                completed += 1
+        pct = min(99, total_weight // total_hosts)
+        # Dominant phase label — the phase with the most hosts
+        dominant = max(phase_counts, key=lambda k: phase_counts[k]) if phase_counts else "discovery"
+        return dominant, pct, completed
+
+    async def _advance_host_phase(ip: str, phase: str) -> None:
+        """Mark *ip* as having entered *phase*; recompute progress."""
+        async with _phase_lock:
+            _host_phases[ip] = phase
+            if on_progress:
+                phase_label, pct, completed = _compute_progress()
+                on_progress(phase_label, pct, completed)
+            if on_host_phase:
+                on_host_phase(ip, phase)
+
     # --- Per-host pipeline (1 host = 1 full pipeline, all in parallel) ---
     log.info(
         "Launching per-host pipelines: %d host(s), parallelism=%d",
-        len(live_ips), config.parallelism,
+        total_hosts, config.parallelism,
     )
+    # Initial progress: all hosts at discovery (weight 9 ≈ 9%)
+    if on_progress:
+        phase_label, pct, completed = _compute_progress()
+        on_progress(phase_label, pct, completed)
     sem = asyncio.Semaphore(config.parallelism)
 
     async def _host_pipeline(ip: str) -> tuple[Host, list[Finding]]:
         """Run the full scan pipeline for a single host."""
-        # Phase 3: Port scan (with fallback chain)
+        # Phase 3a: Port scan (with fallback chain) + service detection
         host = await scan_host(ip, config, tree, sem)
+        await _advance_host_phase(ip, "portscan")
 
         # Enrich with ARP data from discovery phase
         mac, vendor = mac_vendor_map.get(ip, ("", ""))
@@ -117,18 +225,27 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         if vendor:
             host.vendor = vendor
 
+        # Enrich with DNS PTR hostname from discovery phase (fallback only)
+        if not host.hostname and ip in dns_hostnames:
+            host.hostname = dns_hostnames[ip]
+
         if not host.open_ports:
             log.info("[%s] No open ports — skipping web/vuln phases", ip)
+            # Mark all remaining phases done for this host
+            for ph in ("webdetect", "webcrawl", "enumeration"):
+                await _advance_host_phase(ip, ph)
             snmp_findings = await enumerate_snmp(host, config, tree, sem)
             return host, snmp_findings
 
-        # Phase 4: Web detection
+        # Phase 3b: Web detection
         await probe_host(host, config, tree, sem)
+        await _advance_host_phase(ip, "webdetect")
 
-        # Phase 4a: Web crawl (sequential — nuclei needs the URLs)
+        # Phase 3c: Web crawl (sequential — nuclei needs the URLs)
         crawl_findings = await crawl_host(host, config, tree, sem)
+        await _advance_host_phase(ip, "webcrawl")
 
-        # Phases 4b-5: All enumeration + vuln scan in parallel
+        # Phases 3d: All enumeration + vuln scan + screenshot + MSF in parallel
         svc_task = (
             enumerate_services(host, config, tree, sem)
             if config.service_enum
@@ -148,6 +265,7 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
             scan_msf(host, config, tree, sem),
             return_exceptions=True,
         )
+        await _advance_host_phase(ip, "enumeration")
 
         task_names = [
             "cms", "service_enum", "smb", "netexec", "tls",
@@ -167,6 +285,8 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
             "[%s] Pipeline done: %d port(s), %d endpoint(s), %d finding(s)",
             ip, len(host.open_ports), len(host.web_endpoints), len(findings),
         )
+        if on_host_complete:
+            on_host_complete(host, findings)
         return host, findings
 
     results = await asyncio.gather(
@@ -183,6 +303,8 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         host, findings = r
         hosts.append(host)
         all_findings.extend(findings)
+        # on_host_complete was already called inside _host_pipeline
+        # when the host finished — no need to call it again here.
 
     scan_end = datetime.now()
     report = ScanReport(
@@ -200,7 +322,9 @@ async def run_pipeline(config: ScanConfig) -> ScanReport:
         len(report.findings),
     )
 
-    # --- Phase 6: Report generation ---
+    # --- Phase 4: Report generation ---
+    if on_progress:
+        on_progress("reports", 0, 0)
     _generate_reports(config, report, tree)
 
     return report

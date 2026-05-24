@@ -291,8 +291,9 @@ class ScanViewSet(viewsets.ModelViewSet):
                 'os': h.os or '',
                 'subnet': subnet,
                 'ports': [
-                    {'number': p.number, 'protocol': p.protocol,
-                     'service_name': p.service_name, 'service_product': p.service_product}
+                    {'number': p.number, 'protocol': p.protocol, 'state': p.state,
+                     'service_name': p.service_name, 'service_product': p.service_product,
+                     'service_version': p.service_version, 'service_source': p.service_source}
                     for p in h.ports.all()
                 ],
                 'technologies': [
@@ -411,6 +412,17 @@ def screenshot_image(request, screenshot_id):
     output_root = Path(scan_dir)
     img_path = (output_root / ss.filename).resolve()
 
+    if not img_path.exists():
+        # Backward compat: older scans have a nested target subdirectory
+        # (output_dir was passed including the target, build_output_tree
+        # appended it again).  Try output_root / target / filename.
+        target = ss.scan.target.replace('/', '_')
+        nested_root = (output_root / target).resolve()
+        alt_path = (nested_root / ss.filename).resolve()
+        if alt_path.is_relative_to(nested_root) and alt_path.exists():
+            img_path = alt_path
+            output_root = nested_root
+
     if not img_path.is_relative_to(output_root.resolve()):
         raise Http404
     if not img_path.exists():
@@ -434,6 +446,7 @@ def dashboard_screenshots(request):
             'id': str(ss.id),
             'url': ss.url,
             'title': ss.title,
+            'status_code': ss.status_code,
             'image_url': f'/api/screenshots/{ss.id}/image/',
             'host_ip': ss.host.ip,
             'host_id': str(ss.host.id),

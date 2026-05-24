@@ -150,9 +150,12 @@ class Scan(models.Model):
 
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
     name = models.CharField(max_length=255)
-    target = models.CharField(max_length=500)
+    target = models.CharField(max_length=2000)
     scan_type = models.CharField(max_length=20, choices=SCAN_TYPE_CHOICES, default='full')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    current_phase = models.CharField(max_length=20, default='pending')
+    hosts_scanned = models.IntegerField(default=0)
+    hosts_total = models.IntegerField(default=0)
     parallelism = models.IntegerField(default=10)
     timeout = models.IntegerField(default=3600)
     report_formats = models.CharField(max_length=100, default='dashboard,html,docx,xlsx')
@@ -201,6 +204,13 @@ class Scan(models.Model):
     class Meta:
         ordering = ['-created_at']
 
+    @property
+    def elapsed_seconds(self):
+        """Real-time elapsed time for running scans; stored duration otherwise."""
+        if self.status in ('running', 'pending') and self.started_at:
+            return int((timezone.now() - self.started_at).total_seconds())
+        return self.duration_seconds or 0
+
     def __str__(self):
         return f"{self.name} ({self.target})"
 
@@ -212,10 +222,13 @@ class Host(models.Model):
     hostname = models.CharField(max_length=255, blank=True)
     os = models.CharField(max_length=255, blank=True)
     status = models.CharField(max_length=20, default='up')
+    current_phase = models.CharField(max_length=20, default='discovery')
     mac_address = models.CharField(max_length=17, blank=True)
     vendor = models.CharField(max_length=255, blank=True)
     ports_count = models.IntegerField(default=0)
     findings_count = models.IntegerField(default=0)
+    web_endpoints = models.JSONField(default=list)
+    web_titles = models.JSONField(default=dict)
 
     class Meta:
         ordering = ['ip']
@@ -233,6 +246,7 @@ class Port(models.Model):
     service_name = models.CharField(max_length=100, blank=True)
     service_product = models.CharField(max_length=200, blank=True)
     service_version = models.CharField(max_length=200, blank=True)
+    service_source = models.CharField(max_length=50, blank=True)
 
     class Meta:
         ordering = ['number']
@@ -268,6 +282,9 @@ class Finding(models.Model):
     curl_command = models.TextField(blank=True)
     raw_output = models.TextField(blank=True)
     references = models.TextField(blank=True)
+    tags = models.TextField(blank=True)
+    script_id = models.CharField(max_length=200, blank=True)
+    matched_at = models.CharField(max_length=500, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -564,7 +581,7 @@ class ScheduledScan(models.Model):
 
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
     name = models.CharField(max_length=255)
-    target = models.CharField(max_length=500)
+    target = models.CharField(max_length=2000)
     frequency = models.CharField(max_length=20, choices=FREQUENCY_CHOICES)
     time = models.TimeField()
     stop_time = models.TimeField(null=True, blank=True)

@@ -50,7 +50,7 @@ class TestOpenvasRemoval:
     def test_dockerfile_two_stages(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
         from_count = sum(1 for line in dockerfile.splitlines() if line.strip().startswith("FROM "))
-        assert from_count == 2, f"Expected 2 FROM stages, got {from_count}"
+        assert from_count == 3, f"Expected 3 FROM stages (tools, fpx-builder, final), got {from_count}"
 
     def test_no_openvas_in_tools_health(self):
         tools_health = (ROOT / "web_portal" / "scanner" / "tools_health.py").read_text()
@@ -58,8 +58,12 @@ class TestOpenvasRemoval:
         assert "openvas" not in tools_health.lower()
 
     def test_no_openvas_in_views(self):
-        views = (ROOT / "web_portal" / "scanner" / "views.py").read_text()
-        assert "skip_openvas" not in views
+        views_dir = ROOT / "web_portal" / "scanner" / "views"
+        result = subprocess.run(
+            ["grep", "-rn", "skip_openvas", str(views_dir)],
+            capture_output=True, text=True,
+        )
+        assert result.stdout.strip() == "", f"Found skip_openvas in views:\n{result.stdout}"
 
     def test_no_openvas_in_setup_wizard_ui(self):
         setup_boot = (ROOT / "web" / "js" / "public" / "setup-boot.js").read_text()

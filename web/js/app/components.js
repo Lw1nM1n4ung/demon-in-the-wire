@@ -1,5 +1,56 @@
 /* Wire_Ghost — Shared render components */
 
+/* ── Shared phase ordering and labels ──
+ * Single source of truth — all pages that render phase pills or progress bars
+ * must reference WG.PHASE_ORDER and WG.PHASE_LABELS instead of hardcoding. */
+WG.PHASE_ORDER = ['discovery', 'portscan', 'webdetect', 'webcrawl', 'enumeration', 'reports'];
+WG.PHASE_LABELS = {
+  'discovery': 'Discovery', 'portscan': 'Port Scan', 'webdetect': 'Web Detect',
+  'webcrawl': 'Web Crawl', 'enumeration': 'Enumeration', 'reports': 'Reports'
+};
+
+/* ── Real-time progress calculation ──
+ * hosts_scanned is now a pre-computed weighted percentage (0-99) from the
+ * orchestrator's per-host phase tracking.  Fast hosts pull the bar forward
+ * instead of one slow host stalling it.  Terminal states return 100 or 0. */
+WG.phaseProgress = function(s) {
+  if (s.status === 'completed' || s.current_phase === 'completed') return 100;
+  if (s.status === 'failed' || s.current_phase === 'failed') return 100;
+  if (s.status === 'cancelled' || s.current_phase === 'cancelled') return 100;
+  if (!s.current_phase || s.current_phase === 'pending') return 0;
+  // Running scan — hosts_scanned IS the weighted progress % (0-99).
+  return Math.min(99, s.hosts_scanned || 0);
+};
+
+/* ── Global elapsed-time ticker ──
+ * Updates every .elapsed-live element once per second. Each element carries a
+ * data-started-at ISO-8601 timestamp. The ticker runs once and uses a single
+ * setInterval for all visible pages — no per-render leak. */
+(function() {
+  var _tickerStarted = false;
+  WG._startElapsedTicker = function() {
+    if (_tickerStarted) return;
+    _tickerStarted = true;
+    setInterval(function() {
+      document.querySelectorAll('.elapsed-live').forEach(function(el) {
+        var started = el.getAttribute('data-started-at');
+        if (!started) return;
+        var secs = Math.floor((Date.now() - Date.parse(started)) / 1000);
+        if (secs < 0) secs = 0;
+        el.textContent = WG.fmtDuration(secs);
+      });
+    }, 1000);
+  };
+})();
+
+/* ── Phase label helper ── */
+WG.phaseLabel = function(phase) {
+  var labels = {
+    'pending': 'Pending', 'completed': 'Done', 'failed': 'Failed', 'cancelled': 'Cancelled'
+  };
+  return WG.PHASE_LABELS[phase] || labels[phase] || phase || 'Pending';
+};
+
 WG.sevBarHtml = function(scan) {
   var total = (scan.critical_count || 0) + (scan.high_count || 0) + (scan.medium_count || 0) + (scan.low_count || 0) + (scan.info_count || 0);
   if (!total) return '<div class="sev-bar"><span class="i" style="width:100%"></span></div>';

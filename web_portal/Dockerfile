@@ -15,6 +15,15 @@ RUN NAABU_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/naabu/rel
 RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/releases/latest \
         | grep -o '"browser_download_url": *"[^"]*linux-amd64[^"]*"' | head -1 | cut -d'"' -f4) \
     && curl -sL "$GOWITNESS_URL" -o /tools/gowitness && chmod +x /tools/gowitness
+# katana — ProjectDiscovery web crawler (Go binary)
+RUN KATANA_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/katana/releases/latest \
+        | grep -o '"browser_download_url": *"[^"]*linux_amd64.zip"' | head -1 | cut -d'"' -f4) \
+    && curl -sL "$KATANA_URL" -o /tmp/katana.zip && unzip -o /tmp/katana.zip katana -d /tools/ && chmod +x /tools/katana
+
+# ── Stage 1.5: build fingerprintx from source (Go toolchain required) ──
+# Repo is archived (read-only) and publishes no pre-built binaries.
+FROM golang:1.23-bookworm AS fpx-builder
+RUN go install github.com/praetorian-inc/fingerprintx/cmd/fingerprintx@latest
 
 # ── Stage 2: final image ──
 FROM python:3.12-slim-bookworm
@@ -30,6 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nmap fping masscan git libpcap0.8 \
     chromium perl libnet-ssleay-perl libio-socket-ssl-perl \
     libjson-perl libxml-writer-perl libxml-libxml-perl \
+    sslscan snmp nfs-common ldap-utils curl unzip \
+    ruby ruby-dev build-essential libcurl4 \
     && rm -rf /var/lib/apt/lists/*
 
 # searchsploit (exploitdb) — shallow clone to keep image size reasonable.
@@ -42,16 +53,31 @@ RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
     && chmod +x /usr/local/bin/nikto \
     && rm -rf /opt/nikto/.git
 
+# wpscan — WordPress vulnerability scanner (Ruby gem)
+RUN gem install wpscan --no-document \
+    && ln -sf /usr/local/bin/wpscan /usr/bin/wpscan
+
 # Python deps (before Go binaries — pip httpx overwrites /usr/local/bin/httpx)
 COPY web_portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec@v1.5.1
+RUN pip install --no-cache-dir getsploit
 
 # ProjectDiscovery Go binaries + gowitness (AFTER pip to avoid overwrite)
 COPY --from=pd-tools /tools/nuclei    /usr/local/bin/nuclei
 COPY --from=pd-tools /tools/httpx     /usr/local/bin/httpx
 COPY --from=pd-tools /tools/naabu     /usr/local/bin/naabu
 COPY --from=pd-tools /tools/gowitness /usr/local/bin/gowitness
+COPY --from=pd-tools /tools/katana    /usr/local/bin/katana
+
+# fingerprintx — service fingerprinting for web detection refinement
+COPY --from=fpx-builder /go/bin/fingerprintx /usr/local/bin/fingerprintx
+
+# kerbrute — Kerberos brute-force (pre-built binary from GitHub)
+RUN KERBRUTE_URL=$(curl -sL https://api.github.com/repos/ropnop/kerbrute/releases/latest \
+        | grep -o '"browser_download_url": *"[^"]*linux_amd64"' | head -1 | cut -d'"' -f4) \
+    && curl -sL "$KERBRUTE_URL" -o /usr/local/bin/kerbrute \
+    && chmod +x /usr/local/bin/kerbrute
 
 # App code
 COPY web_portal/ .

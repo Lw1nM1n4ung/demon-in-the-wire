@@ -377,7 +377,7 @@ verify_stack() {
         fail "Portal root returned $root_code instead of redirect"
     fi
 
-    if run_logged "$RESULTS_DIR/phase-4-worker-tools.log" docker compose exec -T worker sh -lc 'set -e; for bin in nmap fping masscan nuclei httpx naabu gowitness searchsploit nikto nxc; do command -v "$bin" >/dev/null || { echo "missing $bin"; exit 1; }; done; nmap --version | head -1; nuclei -version 2>&1 | head -1; httpx -version 2>&1 | head -1; naabu -version 2>&1 | head -1; nikto -Version 2>&1 | head -1; nxc --version 2>&1 | head -1'; then
+    if run_logged "$RESULTS_DIR/phase-4-worker-tools.log" docker compose exec -T worker sh -lc 'set -e; for bin in nmap fping masscan nuclei httpx naabu gowitness searchsploit nikto nxc fingerprintx; do command -v "$bin" >/dev/null || { echo "missing $bin"; exit 1; }; done; nmap --version | head -1; nuclei -version 2>&1 | head -1; httpx -version 2>&1 | head -1; naabu -version 2>&1 | head -1; nikto -Version 2>&1 | head -1; nxc --version 2>&1 | head -1; fingerprintx -h 2>&1 | head -1'; then
         pass "Worker scanner tool probe passed"
     else
         fail "Worker scanner tool probe failed"

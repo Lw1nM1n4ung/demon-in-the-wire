@@ -39,6 +39,8 @@ WG.renderHostDetail = function(id) {
     '<div class="info-grid" style="margin-bottom:24px;">' +
       '<div class="info-item"><div class="info-label">IP Address</div><div class="info-value mono">' + esc(host.ip) + '</div></div>' +
       '<div class="info-item"><div class="info-label">Hostname</div><div class="info-value">' + esc(host.hostname || '\u2014') + '</div></div>' +
+      '<div class="info-item"><div class="info-label">MAC Address</div><div class="info-value mono">' + esc(host.mac_address || '\u2014') + '</div></div>' +
+      '<div class="info-item"><div class="info-label">Vendor</div><div class="info-value">' + esc(host.vendor || '\u2014') + '</div></div>' +
       '<div class="info-item"><div class="info-label">OS</div><div class="info-value"><span class="tag">' + esc(host.os || '\u2014') + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Open Ports</div><div class="info-value mono">' + host.ports_count + '</div></div>' +
       '<div class="info-item"><div class="info-label">Findings</div><div class="info-value mono">' + host.findings_count + '</div></div>' +
@@ -57,15 +59,21 @@ WG.renderHostDetail = function(id) {
 WG._hostPortsTab = function(ports) {
   if (!ports.length) return '<div class="panel-empty"><div class="icon">&#8862;</div>No open ports</div>';
   var esc = WG.escHtml;
-  return '<div class="panel"><table class="data-table"><thead><tr><th>Port</th><th>Protocol</th><th>State</th><th>Service</th><th>Product</th><th>Version</th></tr></thead><tbody>' +
+  return '<div class="panel"><table class="data-table"><thead><tr><th>Port</th><th>Protocol</th><th>State</th><th>Service</th><th>Product</th><th>Version</th><th>Source</th></tr></thead><tbody>' +
     ports.map(function(p) {
+      var src = p.service_source || '';
+      var srcBadge = '';
+      if (src === 'nmap') srcBadge = '<span style="font-size:0.6rem;padding:1px 6px;border-radius:3px;background:rgba(59,130,246,0.15);color:#60a5fa;">nmap</span>';
+      else if (src === 'fingerprintx') srcBadge = '<span style="font-size:0.6rem;padding:1px 6px;border-radius:3px;background:rgba(52,211,153,0.15);color:#34d399;">fpx</span>';
+      else srcBadge = '<span style="color:var(--text-dim)">\u2014</span>';
       return '<tr>' +
         '<td class="mono" style="font-weight:600;color:var(--text-bright);">' + esc(p.number) + '</td>' +
         '<td class="mono">' + esc(p.protocol) + '</td>' +
         '<td><span class="status-badge completed" style="font-size:0.65rem;padding:2px 7px;">' + esc(p.state) + '</span></td>' +
         '<td>' + esc(p.service_name) + '</td>' +
         '<td>' + (esc(p.service_product) || '<span style="color:var(--text-dim)">\u2014</span>') + '</td>' +
-        '<td class="mono">' + (esc(p.service_version) || '\u2014') + '</td></tr>';
+        '<td class="mono">' + (esc(p.service_version) || '\u2014') + '</td>' +
+        '<td>' + srcBadge + '</td></tr>';
     }).join('') +
     '</tbody></table></div>';
 };

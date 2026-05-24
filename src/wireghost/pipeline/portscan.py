@@ -1,21 +1,34 @@
-"""Phase 3 -- Port discovery (nmap -> naabu -> masscan) + targeted service analysis.
+"""Phase 3 -- Port discovery (nmap → naabu → masscan) + targeted service analysis.
 
 Port discovery only finds which ports are open — fast SYN scan, no service
-probing. Once ports are known, service analysis runs ``nmap -sV -sC -O``
+probing.  Once ports are known, service analysis runs ``nmap -sV -sC -O``
 targeted at only the discovered ports, which completes in seconds instead
 of the 30-90 minutes a full -sV on 65535 ports would take.
+
+Service detection is then augmented by **fingerprintx** (Praetorian) as a
+second source of truth.  fingerprintx sends protocol-specific probes and
+matches responses against signatures, identifying services regardless of
+port number.  It fills in ports where nmap -sV was uncertain — nmap's
+identifications are trusted when present; fingerprintx augments, never
+overrides.  This means every downstream phase (service_enum, MSF module
+selection, vulnscan targeting, web detection) benefits from corrected
+service names.
 
 Splitting the two steps means the fallback chain is symmetric (all three
 tools just find ports) and service analysis always happens regardless of
 which tool won the chain.
 """
 from __future__ import annotations
+
 import asyncio
+import json
 import logging
 import shutil
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from wireghost.models.scan import Host, Service
+from wireghost.models.scan import Host, Port, Service
 from wireghost.parsers.nmap import parse_nmap_xml
 from wireghost.parsers.naabu import parse_naabu_json
 from wireghost.parsers.masscan import parse_masscan_xml
@@ -67,7 +80,7 @@ async def _run_masscan(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_dir = tree.host_dir(ip)
     xml_path = out_dir / "masscan_scan.xml"
     result = await run_tool(
-        ["masscan", ip, "-p0-65535", "--rate", "5000", "--banners", "-oX", str(xml_path)],
+        ["masscan", ip, "-p0-65535", "--banners", "-oX", str(xml_path)],
         timeout=int(config.tool_timeout),
         label=f"masscan:{ip}",
     )
@@ -134,6 +147,7 @@ async def _analyze_services(
     for p in host.ports:
         if p.number in svc_map:
             p.service = svc_map[p.number]
+            p.service_source = 'nmap'
 
     if analyzed.os:
         host.os = analyzed.os
@@ -144,6 +158,116 @@ async def _analyze_services(
         host.ip, svc_count, len(host.open_ports),
     )
     return host
+
+
+async def _run_fingerprintx(
+    host_ip: str,
+    ports: list[Port],
+    timeout: int,
+) -> dict[int, dict[str, str]]:
+    """Run fingerprintx against all open *ports* on *host_ip*.
+
+    fingerprintx sends protocol-specific probes and matches responses against
+    signature fingerprints. It identifies services regardless of port number,
+    making it a reliable second source of truth alongside nmap -sV.
+
+    Returns ``{port_number: {protocol, transport, version}}``, or an empty
+    dict when the tool is not installed, produces no output, or exits non-zero.
+    """
+    if not shutil.which("fingerprintx"):
+        return {}
+    if not ports:
+        return {}
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", prefix="fpx_", delete=False,
+    ) as fh:
+        for port in ports:
+            fh.write(f"{host_ip}:{port.number}\n")
+        targets_path = fh.name
+
+    try:
+        result = await run_tool(
+            ["fingerprintx", "-l", targets_path, "--json"],
+            timeout=timeout,
+            label=f"fingerprintx {host_ip}",
+        )
+        if result.returncode != 0:
+            log.debug(
+                "[%s] fingerprintx exited rc=%d: %s",
+                host_ip, result.returncode, (result.stderr or "")[:200],
+            )
+            return {}
+
+        output = result.stdout.strip()
+        if not output:
+            return {}
+
+        parsed: dict[int, dict[str, str]] = {}
+        for line in output.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            port_num = int(data.get("port", 0))
+            if port_num:
+                parsed[port_num] = {
+                    "protocol": data.get("protocol", "").lower(),
+                    "transport": data.get("transport", ""),
+                    "version": data.get("version", ""),
+                }
+        return parsed
+    finally:
+        Path(targets_path).unlink(missing_ok=True)
+
+
+def _merge_fpx_results(
+    host: Host, fpx_results: dict[int, dict[str, str]],
+) -> int:
+    """Merge fingerprintx results into ``Port.service`` where nmap was uncertain.
+
+    Only fills in ports where nmap -sV did NOT produce a service name.
+    nmap's identifications are trusted when present — fingerprintx augments,
+    never overrides.
+
+    Returns the number of ports augmented.
+    """
+    augmented = 0
+    for port in host.open_ports:
+        fpx = fpx_results.get(port.number)
+        if not fpx:
+            continue
+        proto = fpx["protocol"]
+        if not proto:
+            continue
+        # Trust nmap when it identified something
+        if port.service and port.service.name:
+            continue
+        fpx_version = fpx.get("version", "")
+        fpx_product = ""
+        # Extract product from combined version string (e.g. "Apache/2.4.7")
+        if fpx_version:
+            for sep in ("/", " "):
+                if sep in fpx_version:
+                    parts = fpx_version.split(sep, 1)
+                    fpx_product = parts[0].strip()
+                    fpx_version = parts[1].strip() if len(parts) > 1 else ""
+                    break
+        port.service = Service(
+            name=proto,
+            product=fpx_product,
+            version=fpx_version,
+        )
+        port.service_source = 'fingerprintx'
+        augmented += 1
+        log.debug(
+            "[%s] fingerprintx augmented port %d: %s",
+            host.ip, port.number, proto,
+        )
+    return augmented
 
 
 async def scan_host(
@@ -177,6 +301,29 @@ async def scan_host(
             if host.open_ports:
                 log.info("%s found %d open port(s) on %s", name, len(host.open_ports), ip)
                 host = await _analyze_services(host, config, tree)
+
+                # fingerprintx: second source of truth for service detection.
+                # Augments ports where nmap -sV was uncertain — runs on all
+                # open ports so downstream phases (service_enum, MSF, vulnscan,
+                # web detection) all benefit from corrected service names.
+                if (
+                    not config.skip_fingerprintx
+                    and shutil.which("fingerprintx")
+                    and host.open_ports
+                ):
+                    fpx_timeout = min(30, int(config.tool_timeout))
+                    fpx_results = await _run_fingerprintx(
+                        host.ip, host.open_ports, fpx_timeout,
+                    )
+                    if fpx_results:
+                        augmented = _merge_fpx_results(host, fpx_results)
+                        if augmented:
+                            log.info(
+                                "[%s] fingerprintx augmented %d port(s) "
+                                "nmap could not identify",
+                                host.ip, augmented,
+                            )
+
                 return host
 
             log.info("%s found no open ports on %s, trying next scanner", name, ip)

@@ -111,11 +111,35 @@ def system_audit(
 def system_update(
     tools: bool = typer.Option(False, "--tools", help="Update security tools"),
     feeds: bool = typer.Option(False, "--feeds", help="Update vulnerability feeds"),
+    self_update: bool = typer.Option(False, "--self", help="Update wireghost itself (git pull + pip install)"),
+    all_update: bool = typer.Option(False, "--all", help="Update everything: tools, feeds, and wireghost (local)"),
 ) -> None:
     """Check for or apply updates."""
-    client = get_client()
-    try:
+    # --all runs everything locally via updater.py
+    if all_update:
+        try:
+            from wireghost.utils.updater import update_all
+            update_all()
+        except Exception as e:
+            console.print(f"[bold red]Error:[/] {e}")
+            raise typer.Exit(code=1)
+        return
+
+    # --self runs self-update locally
+    if self_update:
+        try:
+            from wireghost.utils.updater import update_self
+            update_self()
+        except Exception as e:
+            console.print(f"[bold red]Error:[/] {e}")
+            raise typer.Exit(code=1)
         if not tools and not feeds:
+            return
+
+    # Check mode (no flags)
+    if not tools and not feeds and not self_update:
+        client = get_client()
+        try:
             resp = client.get("/update-check/")
             resp.raise_for_status()
             data = resp.json()
@@ -127,15 +151,22 @@ def system_update(
                 ("Latest version:", data.get("latest", "—")),
                 ("Update available:", str(data.get("update_available", False))),
             ])
-        else:
-            if tools:
-                resp = client.post("/update/apply/", json={"type": "tools"})
-                resp.raise_for_status()
-                console.print("[bold green]Tools update triggered[/]")
-            if feeds:
-                resp = client.post("/update/feeds/")
-                resp.raise_for_status()
-                console.print("[bold green]Feeds update triggered[/]")
+        except Exception as e:
+            console.print(f"[bold red]Error:[/] {e}")
+            raise typer.Exit(code=1)
+        return
+
+    # API-based tools/feeds update
+    client = get_client()
+    try:
+        if tools:
+            resp = client.post("/update/apply/", json={"type": "tools"})
+            resp.raise_for_status()
+            console.print("[bold green]Tools update triggered[/]")
+        if feeds:
+            resp = client.post("/update/feeds/")
+            resp.raise_for_status()
+            console.print("[bold green]Feeds update triggered[/]")
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)

@@ -51,6 +51,10 @@ def scan(
         False, "--skip-brute-force",
         help="Exclude brute-force scripts (nmap vnc-brute, dns-brute, etc.)",
     ),
+    skip_fingerprintx: bool = typer.Option(
+        False, "--skip-fingerprintx",
+        help="Skip fingerprintx service identification during port scan",
+    ),
     timeout: float = typer.Option(3600.0, "--timeout", "-t", help="Per-tool timeout"),
     report_formats: Optional[str] = typer.Option(
         None, "--formats", "-f", help="Comma-separated report formats"
@@ -110,6 +114,7 @@ def scan(
         "skip_msf_scan": skip_msf,
         "skip_getsploit": skip_getsploit,
         "skip_brute_force": skip_brute_force,
+        "skip_fingerprintx": skip_fingerprintx,
         "tool_timeout": timeout,
         "verbose": verbose,
         "nuclei_templates": nuclei_templates,
@@ -163,6 +168,8 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
         cmd_parts.append("--skip-getsploit")
     if cfg.skip_brute_force:
         cmd_parts.append("--skip-brute-force")
+    if cfg.skip_fingerprintx:
+        cmd_parts.append("--skip-fingerprintx")
     if cfg.tool_timeout != 3600.0:
         cmd_parts.extend(["-t", str(cfg.tool_timeout)])
     if cfg.nuclei_templates:

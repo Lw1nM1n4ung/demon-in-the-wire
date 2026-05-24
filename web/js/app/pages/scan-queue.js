@@ -10,8 +10,8 @@ WG.renderScanQueue = function() {
 
   // Background refresh
   WG.refreshAndRerender('scans', '/scans/', WG.renderScanQueue, 'scan-queue');
-
-  var phases = ['Discovery', 'Port Scan', 'Web Detect', 'Vuln Scan', 'Reports'];
+  // Start/stop live polling for running scan cards
+  if (running.length) WG._startQueuePolling(); else WG._stopQueuePolling();
 
   return '' +
     '<div class="page-header"><div class="page-header-left"><h1>Scan Queue</h1><p>' + queue.length + ' active &mdash; ' + running.length + ' running, ' + pending.length + ' pending</p></div>' +
@@ -28,8 +28,10 @@ WG.renderScanQueue = function() {
       '<div style="display:flex;flex-direction:column;gap:14px;">' +
         queue.map(function(s, i) {
           var isRunning = s.status === 'running';
-          var progress = isRunning ? Math.min(95, Math.floor((s.duration_seconds / Math.max(s.timeout || 3600, 1)) * 100)) : 0;
-          var activePhase = isRunning ? Math.min(4, Math.floor(progress / 20)) : -1;
+          var phase = s.current_phase || 'discovery';
+          var progress = isRunning ? WG.phaseProgress(s) : 0;
+          var activeIdx = isRunning ? WG.PHASE_ORDER.indexOf(phase) : -1;
+          if (activeIdx < 0) activeIdx = 0;
 
           return '<div class="panel">' +
             '<div class="panel-body">' +
@@ -52,24 +54,25 @@ WG.renderScanQueue = function() {
                   (isRunning ? '' +
                     '<div style="margin-top:10px;">' +
                       '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
-                        '<span class="mono" style="font-size:0.68rem;color:var(--text-dim);">' + WG.fmtDuration(s.duration_seconds) + ' elapsed</span>' +
-                        '<span class="mono" style="font-size:0.68rem;color:var(--accent);">' + progress + '%</span>' +
+                        '<span class="elapsed-live mono" style="font-size:0.68rem;color:var(--text-dim);" data-started-at="' + (s.started_at || '') + '">' + WG.fmtDuration(s.elapsed_seconds || 0) + '</span>' +
+                        '<span class="live-scan-pct mono" data-sid="' + s.id + '" style="font-size:0.68rem;color:var(--accent);">' + progress + '%</span>' +
                       '</div>' +
-                      '<div class="progress-bar" style="margin-bottom:8px;"><div class="progress-fill" style="width:' + progress + '%;"></div></div>' +
+                      '<div class="progress-bar" style="margin-bottom:8px;"><div class="progress-fill live-scan-fill" data-sid="' + s.id + '" style="width:' + progress + '%;"></div></div>' +
                       '<div style="display:flex;gap:3px;">' +
-                        phases.map(function(ph, pi) {
-                          var done = pi < activePhase;
-                          var active = pi === activePhase;
+                        WG.PHASE_ORDER.map(function(ph, pi) {
+                          var done = pi < activeIdx;
+                          var active = pi === activeIdx;
                           return '<div style="flex:1;text-align:center;padding:3px 0;border-radius:var(--radius-xs);font-size:0.58rem;font-family:var(--font-mono);' +
                             (done ? 'background:var(--success-dim);color:var(--success);' : active ? 'background:var(--accent-dim);color:var(--accent);' : 'background:var(--bg-card);color:var(--text-muted);') +
-                          '">' + (done ? '&#10003; ' : '') + ph + '</div>';
+                          '">' + (done ? '&#10003; ' : '') + WG.PHASE_LABELS[ph] + '</div>';
                         }).join('') +
                       '</div>' +
                       '<div style="display:flex;gap:16px;margin-top:8px;font-family:var(--font-mono);font-size:0.65rem;color:var(--text-dim);">' +
-                        '<span>Hosts: ' + s.hosts_count + '</span>' +
-                        '<span>Ports: ' + (s.ports_count || 0) + '</span>' +
-                        '<span>Findings: ' + s.findings_count + '</span>' +
-                        (s.critical_count ? '<span style="color:var(--critical);">Critical: ' + s.critical_count + '</span>' : '') +
+                        '<span class="live-scan-count" data-sid="' + s.id + '" data-field="phase">Phase: ' + WG.phaseLabel(phase) + '</span>' +
+                        '<span class="live-scan-count" data-sid="' + s.id + '" data-field="hosts_count">Hosts: ' + s.hosts_count + '</span>' +
+                        '<span class="live-scan-count" data-sid="' + s.id + '" data-field="ports_count">Ports: ' + (s.ports_count || 0) + '</span>' +
+                        '<span class="live-scan-count" data-sid="' + s.id + '" data-field="findings_count">Findings: ' + s.findings_count + '</span>' +
+                        '<span class="live-scan-count" data-sid="' + s.id + '" data-field="critical_count" style="' + (s.critical_count ? 'color:var(--critical);' : '') + '">Critical: ' + (s.critical_count || 0) + '</span>' +
                       '</div>' +
                     '</div>'
                   : '<div style="margin-top:8px;font-size:0.78rem;color:var(--text-dim);">Waiting in queue...</div>') +
@@ -106,4 +109,43 @@ WG._removeFromQueue = function(id) {
   WG.invalidateCache('scans');
   WG.toast('Removed from queue', 'info');
   WG.render();
+};
+
+/* Live polling for scan queue page — same pattern as scans.js: update
+   running scan card counts, progress, and phase label in-place every 3s. */
+WG._startQueuePolling = function() {
+  WG._stopQueuePolling();
+  WG._queuePollTimer = setInterval(function() {
+    if (WG.state.currentPage !== 'scan-queue') { WG._stopQueuePolling(); return; }
+    WG.fetchData('/scans/').then(function(data) {
+      if (!Array.isArray(data)) return;
+      WG._cache['scans'] = data;
+      WG._cacheTime['scans'] = Date.now();
+      var hasRunning = false;
+      data.forEach(function(s) {
+        if (s.status !== 'running') return;
+        hasRunning = true;
+        var phase = s.current_phase || 'discovery';
+        var progress = WG.phaseProgress(s);
+        document.querySelectorAll('.live-scan-count[data-sid="' + s.id + '"]').forEach(function(el) {
+          var f = el.dataset.field;
+          var labels = {phase:'Phase: ',hosts_count:'Hosts: ',ports_count:'Ports: ',findings_count:'Findings: ',critical_count:'Critical: '};
+          if (f === 'phase') el.textContent = labels[f] + WG.phaseLabel(phase);
+          else {
+            el.textContent = labels[f] + (s[f] || 0);
+            if (f === 'critical_count') el.style.color = (s[f] || 0) > 0 ? 'var(--critical)' : '';
+          }
+        });
+        var pct = document.querySelector('.live-scan-pct[data-sid="' + s.id + '"]');
+        if (pct) pct.textContent = progress + '%';
+        var fill = document.querySelector('.live-scan-fill[data-sid="' + s.id + '"]');
+        if (fill) fill.style.width = progress + '%';
+      });
+      if (!hasRunning) WG._stopQueuePolling();
+    });
+  }, 3000);
+};
+
+WG._stopQueuePolling = function() {
+  if (WG._queuePollTimer) { clearInterval(WG._queuePollTimer); WG._queuePollTimer = null; }
 };

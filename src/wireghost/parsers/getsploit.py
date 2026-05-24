@@ -100,11 +100,14 @@ def parse_getsploit_json(output: str, host_ip: str = "") -> list[Finding]:
 
         # Extract CVE references from title (e.g., "CVE-2021-41773")
         refs: list[str] = []
+        cve = ""
         import re
         for cve_match in re.finditer(r'(CVE-\d{4}-\d{4,})', title, re.IGNORECASE):
             cve_id = cve_match.group(1).upper()
             refs.append(cve_id)
             refs.append(f"https://nvd.nist.gov/vuln/detail/{cve_id}")
+            if not cve:
+                cve = cve_id
 
         if url:
             refs.append(url)
@@ -131,6 +134,7 @@ def parse_getsploit_json(output: str, host_ip: str = "") -> list[Finding]:
             title=f"Exploit ({source_label}): {title[:120]}",
             description=f"Vulners ID: {vuln_id}\nURL: {url}",
             template_id=vuln_id,
+            cve=cve,
             references=refs,
             tags=[source_label],
         ))
