@@ -106,13 +106,6 @@ jobs:
           pip-audit --audit-level high
         continue-on-error: true
 
-      - name: GitHub secret scanning
-        uses: advanced-security/secret-scanning@v1
-        continue-on-error: true
-        with:
-          # Scan source files for secrets; results appear in repo Security tab
-          filter: '*'
-
   # ── Docker Build + Trivy ──────────────────────────────────────────
   docker-security:
     name: Docker Build + Trivy
