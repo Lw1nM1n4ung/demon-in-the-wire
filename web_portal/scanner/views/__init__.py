@@ -86,8 +86,8 @@ from ..serializers import (
     FindingSerializer,
     FindingDetailSerializer,
     FindingListSerializer,
-    ReportSerializer,
-    ReportConfigSerializer,  # noqa: F401 — re-exported for API router
+    ReportSerializer,  # noqa: F401 — re-exported for API router
+    ReportConfigSerializer,
     ScanPolicySerializer,
     ScheduledScanSerializer,
     AssetSerializer,
