@@ -62,6 +62,12 @@ class ScanConfig:
     skip_brute_force: bool = False
     msf_metadata_path: str = "/opt/msf/modules_metadata_base.json"
     vulners_api_key: str = ""
+    # Use extended TCP port list + UDP ping for host discovery. When False,
+    # falls back to nmap -sn defaults (ICMP + TCP:80,443 only).
+    enhanced_discovery: bool = True
+    # Skip passive reverse-DNS sweep during discovery (no packets sent —
+    # resolves PTR records to find named hosts). Independent of enhanced_discovery.
+    skip_passive_dns: bool = False
 
     @classmethod
     def load(
@@ -162,6 +168,8 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "skip_brute_force": "skip_brute_force",
         "msf_metadata_path": "msf_metadata_path",
         "vulners_api_key": "vulners_api_key",
+        "enhanced_discovery": "enhanced_discovery",
+        "skip_passive_dns": "skip_passive_dns",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -206,6 +214,8 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_SKIP_BRUTE_FORCE": ("skip_brute_force", bool),
         "WIREGHOST_MSF_METADATA_PATH": ("msf_metadata_path", str),
         "WIREGHOST_VULNERS_API_KEY": ("vulners_api_key", str),
+        "WIREGHOST_ENHANCED_DISCOVERY": ("enhanced_discovery", bool),
+        "WIREGHOST_SKIP_PASSIVE_DNS": ("skip_passive_dns", bool),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

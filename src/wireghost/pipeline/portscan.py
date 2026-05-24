@@ -1,4 +1,14 @@
-"""Phase 2 -- Port scanning with fallback chain: nmap -> naabu -> masscan."""
+"""Phase 3 -- Port discovery (nmap -> naabu -> masscan) + targeted service analysis.
+
+Port discovery only finds which ports are open — fast SYN scan, no service
+probing. Once ports are known, service analysis runs ``nmap -sV -sC -O``
+targeted at only the discovered ports, which completes in seconds instead
+of the 30-90 minutes a full -sV on 65535 ports would take.
+
+Splitting the two steps means the fallback chain is symmetric (all three
+tools just find ports) and service analysis always happens regardless of
+which tool won the chain.
+"""
 from __future__ import annotations
 import asyncio
 import logging
@@ -23,15 +33,11 @@ def _is_tool_available(name: str) -> bool:
 
 
 async def _run_nmap(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
+    """Port discovery only — fast SYN scan, no service/OS/script overhead."""
     nmap_dir = tree.host_nmap_xml_dir(ip)
     out_base = str(nmap_dir / "portscan")
     xml_path = nmap_dir / "portscan.xml"
-    cmd = ["nmap", "--open", "-p-", "-sC"]
-    if config.version_detect:
-        cmd.append("-sV")
-    if config.os_detect:
-        cmd.append("-O")
-    cmd.extend(["-Pn", "-oA", out_base, ip])
+    cmd = ["nmap", "--open", "-p-", "-Pn", "-oA", out_base, ip]
     result = await run_tool(
         cmd,
         timeout=int(config.nmap_timeout or config.tool_timeout),
@@ -78,26 +84,27 @@ _SCANNERS: list[tuple[str, str, str]] = [
 ]
 
 
-async def _enrich_services(
+async def _analyze_services(
     host: Host, config: ScanConfig, tree: OutputTree,
 ) -> Host:
-    """Run targeted nmap -sV on ports found by naabu/masscan to identify services.
+    """Run targeted ``nmap -sV -sC -O`` on discovered open ports.
 
-    Only called when a non-nmap scanner found ports (Port.service is None).
-    Scans only the known-open ports, so it completes in seconds.
+    Always called after port discovery regardless of which tool found the
+    ports.  Scans only the known-open ports, so service identification
+    completes in seconds instead of the 30-90 minutes a full -sV on all
+    65535 ports would take.
     """
-    ports_without_service = [p for p in host.open_ports if p.service is None]
-    if not ports_without_service:
+    if not host.open_ports:
         return host
 
-    port_csv = ",".join(str(p.number) for p in ports_without_service)
+    port_csv = ",".join(str(p.number) for p in host.open_ports)
     log.info(
-        "[%s] Enriching %d port(s) with nmap -sV: %s",
-        host.ip, len(ports_without_service), port_csv,
+        "[%s] Service analysis on %d port(s): %s",
+        host.ip, len(host.open_ports), port_csv,
     )
 
     nmap_dir = tree.host_nmap_xml_dir(host.ip)
-    xml_path = nmap_dir / "service_enrich.xml"
+    xml_path = nmap_dir / "service_analysis.xml"
 
     cmd = ["nmap", "-sV", "-sC", "-Pn", "-p", port_csv]
     if config.os_detect:
@@ -107,34 +114,34 @@ async def _enrich_services(
     result = await run_tool(
         cmd,
         timeout=min(300, int(config.nmap_timeout or config.tool_timeout)),
-        label=f"nmap-enrich:{host.ip}",
+        label=f"nmap-svc:{host.ip}",
     )
 
     if result.returncode != 0:
-        log.warning("[%s] nmap enrichment failed (rc=%d) — using port heuristics", host.ip, result.returncode)
+        log.warning("[%s] Service analysis failed (rc=%d)", host.ip, result.returncode)
         return host
 
-    enriched_hosts = parse_nmap_xml(xml_path)
-    if not enriched_hosts:
+    analyzed_hosts = parse_nmap_xml(xml_path)
+    if not analyzed_hosts:
         return host
 
-    enriched = enriched_hosts[0]
+    analyzed = analyzed_hosts[0]
     svc_map: dict[int, Service] = {}
-    for p in enriched.ports:
+    for p in analyzed.ports:
         if p.service and p.service.name:
             svc_map[p.number] = p.service
 
     for p in host.ports:
-        if p.service is None and p.number in svc_map:
+        if p.number in svc_map:
             p.service = svc_map[p.number]
 
-    if not host.os and enriched.os:
-        host.os = enriched.os
+    if analyzed.os:
+        host.os = analyzed.os
 
-    enriched_count = sum(1 for p in host.open_ports if p.service is not None)
+    svc_count = sum(1 for p in host.open_ports if p.service is not None)
     log.info(
-        "[%s] Service enrichment: %d/%d port(s) now have service info",
-        host.ip, enriched_count, len(host.open_ports),
+        "[%s] Service analysis: %d/%d port(s) identified",
+        host.ip, svc_count, len(host.open_ports),
     )
     return host
 
@@ -145,16 +152,19 @@ async def scan_host(
     tree: OutputTree,
     sem: asyncio.Semaphore,
 ) -> Host:
-    """Scan a host with fallback chain: nmap -> naabu -> masscan.
+    """Port discovery (nmap → naabu → masscan) + targeted service analysis.
 
-    Tries each scanner in order. Returns as soon as one finds open ports.
-    When a non-nmap scanner finds ports, runs targeted nmap -sV to
-    identify services on the discovered ports.
+    Phase 3a: Find open ports. Tries each scanner in order, returns as
+    soon as one finds ports. All three tools only discover ports — no
+    service/OS/script overhead.
+
+    Phase 3b: Run ``nmap -sV -sC -O`` targeted at only the discovered
+    ports. Completes in seconds since it only probes known-open ports.
+    Always runs regardless of which tool found the ports.
     """
     import wireghost.pipeline.portscan as _mod
 
     async with sem:
-        scanner_used = ""
         for name, fn_name, tool_bin in _SCANNERS:
             if name != "nmap" and not _is_tool_available(tool_bin):
                 log.debug("Skipping %s for %s (not installed)", name, ip)
@@ -166,15 +176,10 @@ async def scan_host(
 
             if host.open_ports:
                 log.info("%s found %d open port(s) on %s", name, len(host.open_ports), ip)
-                scanner_used = name
-                break
+                host = await _analyze_services(host, config, tree)
+                return host
 
             log.info("%s found no open ports on %s, trying next scanner", name, ip)
-        else:
-            log.warning("All scanners found no open ports on %s", ip)
-            return Host(ip=ip, status="up")
 
-        if scanner_used != "nmap" and host.open_ports:
-            host = await _enrich_services(host, config, tree)
-
-        return host
+        log.warning("All scanners found no open ports on %s", ip)
+        return Host(ip=ip, status="up")
