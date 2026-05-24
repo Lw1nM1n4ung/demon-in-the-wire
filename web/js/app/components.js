@@ -3,10 +3,10 @@
 /* ── Shared phase ordering and labels ──
  * Single source of truth — all pages that render phase pills or progress bars
  * must reference WG.PHASE_ORDER and WG.PHASE_LABELS instead of hardcoding. */
-WG.PHASE_ORDER = ['discovery', 'portscan', 'webdetect', 'webcrawl', 'enumeration', 'reports'];
+WG.PHASE_ORDER = ['discovery', 'portscan', 'webdetect', 'webcrawl', 'vulnscan', 'enumeration', 'reports'];
 WG.PHASE_LABELS = {
   'discovery': 'Discovery', 'portscan': 'Port Scan', 'webdetect': 'Web Detect',
-  'webcrawl': 'Web Crawl', 'enumeration': 'Enumeration', 'reports': 'Reports'
+  'webcrawl': 'Web Crawl', 'vulnscan': 'Vuln Scan', 'enumeration': 'Enumeration', 'reports': 'Reports'
 };
 
 /* ── Real-time progress calculation ──

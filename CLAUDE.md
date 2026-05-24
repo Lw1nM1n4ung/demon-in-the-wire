@@ -81,13 +81,13 @@ Browser/live QA tests require `WG_BASE` env var (default: `https://localhost:184
 
 ### Pipeline (`src/wireghost/pipeline/`)
 
-`orchestrator.run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None, on_subnet_complete=None)` is the single async entry point. The pipeline tracks 6 phases in `PHASE_ORDER`:
+`orchestrator.run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None, on_subnet_complete=None)` is the single async entry point. The pipeline tracks 7 phases in `PHASE_ORDER`:
 
 ```python
-PHASE_ORDER = ["discovery", "portscan", "webdetect", "webcrawl", "enumeration", "reports"]
+PHASE_ORDER = ["discovery", "portscan", "webdetect", "webcrawl", "vulnscan", "enumeration", "reports"]
 ```
 
-**Per-host weighted progress**: Instead of a global bottleneck phase, each host independently advances through phases via `_advance_host_phase(ip, phase)`. Progress is a weighted average across all hosts using per-phase weights (`discovery=9, portscan=27, webdetect=46, webcrawl=58, enumeration=77, reports=94`). Fast hosts pull the bar forward — one slow host won't stall it.
+**Per-host weighted progress**: Instead of a global bottleneck phase, each host independently advances through phases via `_advance_host_phase(ip, phase)`. Progress is a weighted average across all hosts using per-phase weights (`discovery=9, portscan=27, webdetect=46, webcrawl=58, vulnscan=67, enumeration=77, reports=94`). Fast hosts pull the bar forward — one slow host won't stall it.
 
 **Callbacks** (from orchestrator to Celery bridge):
 - `on_progress(phase_label, weighted_pct, hosts_fully_done)` — scan-level progress, called on every host phase change
@@ -107,15 +107,10 @@ All phases fan out per-host with `asyncio.Semaphore(config.parallelism)`:
 3. Per-host pipeline (all hosts run in parallel, semaphore-bounded):
    - **Phase: portscan** — two-step architecture. **Step 1 (port discovery):** nmap → naabu → masscan **symmetric fallback chain** — all three only do fast SYN scan (`nmap -p- --open -Pn`), no service probing. If tool N finds 0 ports, try N+1. Symmetric because all three just find ports. **Step 2 (service analysis):** runs `nmap -sV -sC [-O]` targeted at only discovered ports — always runs regardless of which tool won the chain. Completes in seconds instead of the 30-90 minutes a full `-sV` on 65535 would take. Merges service/OS data back into the Host model. Then **fingerprintx augmentation** fills in service names where nmap was uncertain — benefits ALL downstream phases (service_enum, MSF module selection, vulnscan targeting, web detection).
    - **Phase: webdetect** — **verification-driven, two-layer**: service-name filter (skip only confident non-web protocols from nmap/fingerprintx) → HTTP HEAD verification (HTTP then HTTPS on every candidate). The HTTP response IS the verification — no positive assumptions from port numbers. httpx tech detect on confirmed endpoints.
-   - **Phase: webcrawl** — katana spider crawls web endpoints before vuln scan so nuclei scans discovered URLs
-   - **Phase: enumeration** — all of the following run concurrently per host:
-     - CMS scan — auto-triggers WPScan for WordPress
-     - Service enumeration — 18 services, pure-Python, no brute force
-     - SMB/NetExec/LDAP/SNMP/NFS enumeration
-     - TLS/SSL audit
-     - Vulnerability scan — nuclei + nmap `--script=vuln` + searchsploit + getsploit (Vulners API) + nikto (all concurrent per host)
-     - MSF scan — service-routed Metasploit auxiliary/scanner modules (skips gracefully if msfconsole not installed)
-     - Screenshots via gowitness
+   - **Phase: webcrawl** — katana spider ∥ gowitness v3 screenshots run in parallel via `asyncio.gather` (both need confirmed web endpoints from webdetect)
+   - **Phase: vulnscan** — `scan_host_vulns` (nuclei + nmap `--script=vuln` + searchsploit + getsploit + nikto) ∥ `scan_msf` (Metasploit auxiliary/scanner modules, service-routed) run in parallel via `asyncio.gather`
+   - **Phase: enumeration** — 8 service tools concurrent per host:
+     - CMS scan (WPScan), SMB enumeration (enum4linux), NetExec (SMB/WinRM/MSSQL/RDP), TLS audit (sslscan), SNMP enumeration, NFS enumeration, LDAP enumeration, service banner enumeration
    - **Cross-tool finding dedup**: `_dedup_findings()` normalizes by CVE (when present) or title prefix (stripping `nmap:`, `msf:`, `nxc:` prefixes), deduplicating on `host:port:identity`.
 4. **Phase: reports** — `ReportEngine.generate()` dispatches to all configured formats
 
@@ -140,8 +135,8 @@ Models, views, serializers, and tasks have each been split from single files int
 Frontend is vanilla JS in `web/`: hash-router in `web/js/app/router.js`, pages in `web/js/app/pages/` (including `ad-recon.js` — three-panel cockpit with session polling; and `scan-queue.js` — live queue with per-phase progress pills), `api.js` wraps fetch with CSRF. Stored XSS hardening applied — prefer `textContent` over `innerHTML` when injecting scan output into the DOM.
 
 The shared components file (`web/js/app/components.js`) defines the single source of truth for scan progress display:
-- **`WG.PHASE_ORDER`** — `['discovery', 'portscan', 'webdetect', 'webcrawl', 'enumeration', 'reports']`
-- **`WG.PHASE_LABELS`** — human-readable labels for each phase
+- **`WG.PHASE_ORDER`** — `['discovery', 'portscan', 'webdetect', 'webcrawl', 'vulnscan', 'enumeration', 'reports']`
+- **`WG.PHASE_LABELS`** — human-readable labels for each phase (including Vuln Scan)
 - **`WG.phaseProgress(s)`** — reads progress % directly from `hosts_scanned` (pre-computed by the orchestrator's weighted average; 0-99 for running, 100 for terminal states)
 - **`WG.phaseLabel(phase)`** — returns human-readable phase name
 - **`WG._startElapsedTicker()`** — live duration counter updating every second
@@ -178,14 +173,14 @@ Three Dockerfiles:
 | `src/wireghost/cli/output.py` | Shared output formatting — `echo_table()`, `echo_json()` for consistent CLI rendering |
 | `src/wireghost/cli/deploy.py` | Cloud deployment CLI (`aws`, `aws-serverless`, `aws-sam`) |
 | `src/wireghost/config.py` | `ScanConfig` with layered loader (defaults → YAML → env → overrides). Key flags: `enhanced_discovery` (TCP 17 ports + UDP 5 ports, default True), `skip_passive_dns`, `scan_unresponsive`, `skip_msf_scan`, `skip_fingerprintx`, `vulners_api_key` |
-| `src/wireghost/pipeline/orchestrator.py` | Async phase coordinator with `PHASE_ORDER` (6 phases) and per-host weighted progress via `_advance_host_phase()` + `_compute_progress()`; call `run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None, on_subnet_complete=None)` |
+| `src/wireghost/pipeline/orchestrator.py` | Async phase coordinator with `PHASE_ORDER` (7 phases) and per-host weighted progress via `_advance_host_phase()` + `_compute_progress()`; call `run_pipeline(config, on_progress=None, on_discovery_complete=None, on_host_complete=None, on_host_phase=None, on_subnet_complete=None)` |
 | `src/wireghost/pipeline/discovery.py` | Phase: discovery — enhanced nmap/fping/ARP/DNS sweep with per-subnet parallel tool execution, CIDR partitioning (multi-target comma-separated support with dedup), fping ICMP Host Unreachable capture (firewalled hosts always scanned), passive DNS interleaved with active scans per /24, dedicated 256-concurrency semaphore (`max(config.parallelism, 256)`), returns `(sorted_ips, mac_vendor, dns_hostnames)` |
 | `src/wireghost/pipeline/portscan.py` | Phase: portscan — two-step: port discovery fallback chain (nmap → naabu → masscan, all symmetric SYN-only) + targeted service analysis (nmap -sV -sC -O on discovered ports only) + fingerprintx augmentation. Masscan uses `--rate 5000` (~13s per host); without --rate it defaults to 100 pps (~11 min per host) causing event-loop deadlocks |
 | `src/wireghost/pipeline/webdetect.py` | Phase: webdetect — verification-driven web probing: two-layer filter (service-name skip → HTTP HEAD verify). Service names come from portscan (nmap -sV + fingerprintx). Only confident non-web protocol labels are skipped; everything else gets probed — the HTTP response IS the verification |
-| `src/wireghost/pipeline/web_crawl.py` | Phase: webcrawl — katana spider; crawls web endpoints before vuln scan so nuclei scans discovered URLs |
-| `src/wireghost/pipeline/vulnscan.py` | Phase: enumeration — nuclei + nmap vuln + searchsploit + getsploit + nikto (all concurrent per host) |
+| `src/wireghost/pipeline/web_crawl.py` | Phase: webcrawl — katana spider (runs in parallel with gowitness screenshots via `asyncio.gather`); crawls web endpoints before vuln scan so nuclei scans discovered URLs |
+| `src/wireghost/pipeline/vulnscan.py` | Phase: vulnscan — nuclei + nmap vuln + searchsploit + getsploit + nikto (runs in parallel with msf_scan via `asyncio.gather`) |
 | `src/wireghost/pipeline/service_enum.py` | Phase: enumeration — Pure-Python enumeration of 18 services (SSH, FTP, Redis, MongoDB, MySQL, PostgreSQL, SMTP, VNC, RDP, LDAP, NTP, DNS, SIP, NNTP, Memcached, Elasticsearch, Docker, Telnet) — no brute force |
-| `src/wireghost/pipeline/msf_scan.py` | Phase: enumeration — Service-routed Metasploit auxiliary/scanner modules (skips if msfconsole not installed) |
+| `src/wireghost/pipeline/msf_scan.py` | Phase: vulnscan — Service-routed Metasploit auxiliary/scanner modules (runs in parallel with scan_host_vulns; skips if msfconsole not installed) |
 | `src/wireghost/pipeline/smb_enum.py` | Phase: enumeration — SMB enumeration via NetExec (shares, users, groups, password policy) |
 | `src/wireghost/pipeline/netexec_enum.py` | Phase: enumeration — NetExec multi-protocol enumeration (SMB, SSH, FTP, RDP, LDAP, WinRM, MSSQL) |
 | `src/wireghost/pipeline/ldap_enum.py` | Phase: enumeration — LDAP directory enumeration (naming contexts, domain info, users, computers, groups) |
@@ -193,8 +188,8 @@ Three Dockerfiles:
 | `src/wireghost/pipeline/nfs_enum.py` | Phase: enumeration — NFS export enumeration (exports, permissions, mountable shares) |
 | `src/wireghost/pipeline/tls_audit.py` | Phase: enumeration — TLS/SSL certificate audit (cipher suites, protocol versions, certificate details) |
 | `src/wireghost/pipeline/cms_scan.py` | Phase: enumeration — CMS detection + WPScan trigger for WordPress |
-| `src/wireghost/pipeline/webscreenshot.py` | Phase: enumeration — gowitness v3 screenshots of web endpoints (`--chrome-window-x/y` not `--resolution-x/y`; add `--screenshot-format png` since v3 defaults to JPEG) |
-| `src/wireghost/pipeline/nikto_scan.py` | Phase: enumeration — nikto web server scanner subprocess |
+| `src/wireghost/pipeline/webscreenshot.py` | Phase: webcrawl — gowitness v3 screenshots of web endpoints (runs in parallel with katana via `asyncio.gather`; `--chrome-window-x/y` not `--resolution-x/y`; add `--screenshot-format png` since v3 defaults to JPEG) |
+| `src/wireghost/pipeline/nikto_scan.py` | Phase: vulnscan — nikto web server scanner subprocess (called from `scan_host_vulns`) |
 | `src/wireghost/parsers/getsploit.py` | Parses Vulners API JSON (getsploit output) into Finding objects |
 | `src/wireghost/parsers/msf.py` | Parses MSF spool/console output into Finding objects |
 | `src/wireghost/deploy/engine.py` | Cloud-native deployment engine (SAM, IaC generation) |
