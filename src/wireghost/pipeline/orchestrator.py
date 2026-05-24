@@ -40,6 +40,7 @@ PHASE_ORDER = [
     "portscan",
     "webdetect",
     "webcrawl",
+    "vulnscan",
     "enumeration",
     "reports",
 ]
@@ -129,7 +130,8 @@ async def run_pipeline(
         "portscan": 27,    # 15-40% midpoint
         "webdetect": 46,   # 40-52% midpoint
         "webcrawl": 58,    # 52-64% midpoint
-        "enumeration": 77, # 64-90% midpoint
+        "vulnscan": 67,    # 64-70% midpoint
+        "enumeration": 77, # 70-90% midpoint
         "reports": 94,     # 90-98% midpoint
     }
 
@@ -232,7 +234,7 @@ async def run_pipeline(
         if not host.open_ports:
             log.info("[%s] No open ports — skipping web/vuln phases", ip)
             # Mark all remaining phases done for this host
-            for ph in ("webdetect", "webcrawl", "enumeration"):
+            for ph in ("webdetect", "webcrawl", "vulnscan", "enumeration"):
                 await _advance_host_phase(ip, ph)
             snmp_findings = await enumerate_snmp(host, config, tree, sem)
             return host, snmp_findings
@@ -241,17 +243,43 @@ async def run_pipeline(
         await probe_host(host, config, tree, sem)
         await _advance_host_phase(ip, "webdetect")
 
-        # Phase 3c: Web crawl (sequential — nuclei needs the URLs)
-        crawl_findings = await crawl_host(host, config, tree, sem)
+        # Phase 3c: Web crawl + screenshot (parallel — both need confirmed web endpoints)
+        crawl_result, screenshot_findings = await asyncio.gather(
+            crawl_host(host, config, tree, sem),
+            screenshot_host(host, config, tree, sem),
+            return_exceptions=True,
+        )
         await _advance_host_phase(ip, "webcrawl")
 
-        # Phases 3d: All enumeration + vuln scan + screenshot + MSF in parallel
+        crawl_findings = crawl_result if not isinstance(crawl_result, Exception) else []
+        if isinstance(crawl_result, Exception):
+            log.error("[%s] web crawl failed", ip, exc_info=crawl_result)
+        if isinstance(screenshot_findings, Exception):
+            log.error("[%s] screenshot failed", ip, exc_info=screenshot_findings)
+            screenshot_findings = []
+
+        # Phase 3d: Vulnerability scanning (nuclei + nmap NSE vuln + searchsploit + getsploit + nikto + MSF)
+        vuln_result, msf_result = await asyncio.gather(
+            scan_host_vulns(host, config, tree, sem),
+            scan_msf(host, config, tree, sem),
+            return_exceptions=True,
+        )
+        await _advance_host_phase(ip, "vulnscan")
+
+        vuln_findings = vuln_result if not isinstance(vuln_result, Exception) else []
+        msf_findings = msf_result if not isinstance(msf_result, Exception) else []
+        if isinstance(vuln_result, Exception):
+            log.error("[%s] vuln scan failed", ip, exc_info=vuln_result)
+        if isinstance(msf_result, Exception):
+            log.error("[%s] msf scan failed", ip, exc_info=msf_result)
+
+        # Phase 3e: Service enumeration (SMB, NetExec, SNMP, NFS, LDAP, TLS, CMS, services)
         svc_task = (
             enumerate_services(host, config, tree, sem)
             if config.service_enum
             else asyncio.sleep(0, result=[])
         )
-        results = await asyncio.gather(
+        enum_results = await asyncio.gather(
             scan_cms(host, config, tree, sem),
             svc_task,
             enumerate_smb(host, config, tree, sem),
@@ -260,19 +288,19 @@ async def run_pipeline(
             enumerate_snmp(host, config, tree, sem),
             enumerate_nfs(host, config, tree, sem),
             enumerate_ldap(host, config, tree, sem),
-            scan_host_vulns(host, config, tree, sem),
-            screenshot_host(host, config, tree, sem),
-            scan_msf(host, config, tree, sem),
             return_exceptions=True,
         )
         await _advance_host_phase(ip, "enumeration")
 
-        task_names = [
+        enum_names = [
             "cms", "service_enum", "smb", "netexec", "tls",
-            "snmp", "nfs", "ldap", "vulnscan", "screenshot", "msf",
+            "snmp", "nfs", "ldap",
         ]
-        findings: list[Finding] = list(crawl_findings)
-        for name, result in zip(task_names, results):
+        findings: list[Finding] = (
+            list(crawl_findings) + list(screenshot_findings)
+            + list(vuln_findings) + list(msf_findings)
+        )
+        for name, result in zip(enum_names, enum_results):
             if isinstance(result, Exception):
                 log.error("[%s] %s scanner failed", ip, name, exc_info=result)
                 continue

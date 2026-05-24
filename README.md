@@ -1,6 +1,6 @@
 # Wire\_Ghost
 
-Automated vulnerability scanner and attack surface management platform. Chains **nmap, nuclei, nikto, naabu, masscan, httpx, gowitness, wpscan, and searchsploit** into an 8-phase async pipeline — discovers hosts, scans ports (with fallback scanners), detects web services and CMS platforms, enumerates 18 services, runs vulnerability scans, maps known exploits, captures screenshots, and generates professional reports. Ships as both a standalone CLI tool and a full web portal with Django REST API, Telegram bot, scheduled scans, and role-based access control.
+Automated vulnerability scanner and attack surface management platform. Chains **nmap, nuclei, nikto, naabu, masscan, httpx, katana, gowitness, wpscan, netexec, sslscan, searchsploit, and Metasploit** into a 7-phase async pipeline — discovers hosts, scans ports (with fallback chain + fingerprintx augmentation), detects web services, crawls and screenshots web endpoints, runs vulnerability scans (nuclei, nmap NSE, MSF), enumerates services (SMB, LDAP, SNMP, NFS, TLS, CMS), and generates professional reports. Ships as both a standalone CLI tool and a full web portal with Django REST API, Telegram bot, scheduled scans, and role-based access control.
 
 **v2.0** · Python 3.12 · Docker · MySQL · Redis · Celery
 
@@ -37,14 +37,17 @@ Automated vulnerability scanner and attack surface management platform. Chains *
 
 ### Scanning Pipeline
 
-- **8-phase async pipeline** — discovery, port scan, web detect, CMS scan, service enumeration, vulnerability scan, exploit detection, report generation
-- **Scanner fallback chain** — nmap → naabu → masscan (auto-fallback when a scanner finds zero ports)
-- **18-service enumeration** — SSH, FTP, Redis, MongoDB, MySQL, PostgreSQL, SMTP, VNC, RDP, LDAP, Memcached, Elasticsearch, Docker API, Telnet, and more (pure Python, no brute force)
-- **CMS detection** — auto-triggers WPScan when WordPress is detected
+- **7-phase async pipeline** — discovery, port scan, web detect, web crawl + screenshots, vulnerability scan (nuclei + MSF), service enumeration, report generation
+- **Enhanced host discovery** — nmap -sn (TCP 17 ports + UDP 5 ports) + fping ICMP + arp-scan L2 ARP + passive DNS PTR sweep per /24; large CIDRs auto-partitioned
+- **Scanner fallback chain** — nmap → naabu → masscan (SYN-only port discovery, symmetric fallback)
+- **Two-phase port scan** — SYN-only discovery then targeted `nmap -sV -sC [-O]` on discovered ports only, augmented by fingerprintx as second source of truth
+- **Web crawl + screenshots** — katana spider ∥ gowitness v3 screenshots run in parallel after web detection confirms endpoints
+- **Metasploit auxiliary scanning** — service-routed MSF modules (EternalBlue, BlueKeep, default credentials) via static curated map + dynamic metadata lookup
+- **8-service enumeration** — SMB (enum4linux), NetExec (SMB/WinRM/MSSQL/RDP), TLS (sslscan), SNMP, NFS, LDAP, CMS (WPScan), service banners (pure Python, no brute force)
 - **External nuclei templates** — configurable template directories with batched execution (5000/batch) to limit resource usage
 - **Web server scanning** — nikto detects misconfigurations, dangerous files, outdated software, and insecure headers on web endpoints
 - **Version-aware exploit detection** — searchsploit per detected software version, linked to Exploit-DB
-- **Web screenshots** — gowitness captures of discovered web services
+- **Cross-tool deduplication** — findings deduplicated by CVE or normalized title prefix on host:port:identity
 - **SSRF-safe target validation** — blocks loopback, link-local, multicast, reserved, cloud metadata IPs; detects hex/octal/short-form IP encoding; resolves hostnames via getaddrinfo (IPv4+IPv6) against full blocklist
 
 ### Web Portal
@@ -748,18 +751,26 @@ Config priority: **CLI flags > `WIREGHOST_*` env vars > `wireghost.yml` > defaul
 ### Pipeline Phases
 
 ```
-Phase 1  Host Discovery        nmap -sn + fping → merge + dedupe
-Phase 2  Port Scanning         nmap -sV -sC -O → naabu → masscan (fallback chain)
-Phase 3  Web Detection         async HTTP/HTTPS probing + httpx tech-detect
-Phase 4  CMS Scanning          WordPress detection → WPScan
-Phase 5  Service Enumeration   18 services, pure Python (no brute force)
-Phase 6  Vuln Scanning         nuclei + nmap --script=vuln + nikto (parallel per host)
-Phase 7  Exploit Detection     searchsploit per detected version → Exploit-DB
-Phase 8  Report Generation     DOCX, XLSX, HTML, Interactive Dashboard
-Phase 9  Asset Sync            upsert Asset rows keyed by (ip, port, protocol)
+Phase 1  Discovery             Enhanced nmap -sn (TCP 17 ports + UDP 5 ports) + fping ICMP
+                               + arp-scan L2 ARP + passive DNS PTR sweep interleaved per /24
+
+Phase 2  Port Scan             SYN-only discovery (nmap→naabu→masscan fallback)
+                               → targeted nmap -sV -sC [-O] on discovered ports + fingerprintx
+
+Phase 3  Web Detection         Two-layer: service-name filter → HTTP HEAD verify + httpx tech detect
+
+Phase 4  Web Crawl + Screenshots  katana spider ∥ gowitness v3 screenshots (parallel)
+
+Phase 5  Vulnerability Scan    scan_host_vulns (nuclei + nmap NSE vuln + searchsploit + getsploit
+                               + nikto) ∥ scan_msf (Metasploit auxiliary/scanner modules)
+
+Phase 6  Service Enumeration   CMS (WPScan) ∥ SMB (enum4linux) ∥ NetExec ∥ TLS (sslscan)
+                               ∥ SNMP ∥ NFS ∥ LDAP ∥ service banners (8 tools in parallel)
+
+Phase 7  Report Generation     DOCX, XLSX, HTML, Interactive Dashboard
 ```
 
-`pipeline.orchestrator.run_pipeline()` is the single async entry point for both CLI and the Celery `run_scan` task. Per-host parallelism is controlled via `asyncio.Semaphore(config.parallelism)`.
+`pipeline.orchestrator.run_pipeline()` is the single async entry point for both CLI and the Celery `run_scan` task. Per-host parallelism is controlled via `asyncio.Semaphore(config.parallelism)`. Each host independently advances through phases; overall progress is a weighted average across all hosts. Cross-tool finding deduplication runs after all phases per host.
 
 ---
 
@@ -990,13 +1001,24 @@ src/wireghost/                  # Python package (standalone pipeline)
     config.py                   # ScanConfig (layered: yaml → env → overrides)
     models/                     # Severity, Host, Port, Finding, ScanReport
     parsers/                    # nmap, nuclei, naabu, masscan, searchsploit, wpscan
-    pipeline/                   # orchestrator + phase modules
+    pipeline/                   # orchestrator + 19 phase modules
         orchestrator.py         # async run_pipeline (shared by CLI + Celery)
-        portscan.py             # nmap → naabu → masscan fallback chain
-        webdetect.py            # httpx probing + tech detection
+        discovery.py            # enhanced host discovery (nmap, fping, arp-scan, DNS PTR)
+        portscan.py             # two-phase: SYN fallback → targeted -sV -sC -O + fingerprintx
+        webdetect.py            # two-layer web detection + httpx tech detect
+        web_crawl.py            # katana spider
+        webscreenshot.py        # gowitness v3 screenshots
+        vulnscan.py             # nuclei + nmap NSE vuln + searchsploit + getsploit + nikto
+        msf_scan.py             # Metasploit auxiliary/scanner (service-routed)
         cms_scan.py             # WordPress detection → WPScan
-        service_enum.py         # 18-service enumeration
-        vulnscan.py             # nuclei + nmap + searchsploit
+        service_enum.py         # service banner enumeration
+        smb_enum.py             # enum4linux SMB enumeration
+        netexec_enum.py         # NetExec (SMB/WinRM/MSSQL/RDP)
+        tls_audit.py            # sslscan TLS audit
+        snmp_enum.py            # SNMP community string enumeration
+        nfs_enum.py             # NFS export enumeration
+        ldap_enum.py            # LDAP anonymous bind enumeration
+        nikto_scan.py           # nikto web server scanner
     reports/                    # html, docx, xlsx, dashboard renderers
     utils/                      # fs, log, process, updater, network helpers
 
