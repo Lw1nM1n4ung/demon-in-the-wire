@@ -174,15 +174,21 @@ WG.renderScanDetail = function(id) {
 WG._scanHostsTab = function(hosts) {
   if (!hosts.length) return '<div class="panel-empty"><div class="icon">&#9678;</div>No hosts discovered</div>';
   var esc = WG.escHtml;
-  return '<div class="panel"><table class="data-table"><thead><tr><th>IP Address</th><th>Hostname</th><th>OS</th><th>Phase</th><th>Ports</th><th>Findings</th></tr></thead><tbody>' +
+  return '<div class="panel"><table class="data-table"><thead><tr><th>IP Address</th><th>Hostname</th><th>OS</th><th>Phase</th><th>Ports</th><th>Findings</th><th>Screenshots</th></tr></thead><tbody>' +
     hosts.map(function(h) {
+      var ssCell = '<span style="color:var(--text-dim)">\u2014</span>';
+      if (h.thumbnail_url) {
+        ssCell = '<img class="screenshot-thumb" src="' + esc(h.thumbnail_url) + '" loading="lazy" alt="screenshot" style="width:80px;height:45px;" onclick="event.stopPropagation();WG.navigate(\'host\',{id:\'' + h.id + '\'})">';
+        if ((h.screenshot_count || 0) > 1) ssCell += ' <span class="screenshot-more">+' + (h.screenshot_count - 1) + '</span>';
+      }
       return '<tr onclick="WG.navigate(\'host\',{id:\'' + h.id + '\'})">' +
         '<td><span class="host-tag">' + esc(h.ip) + '</span></td>' +
         '<td>' + (esc(h.hostname) || '<span style="color:var(--text-dim)">\u2014</span>') + '</td>' +
         '<td><span class="tag">' + (esc(h.os) || '\u2014') + '</span></td>' +
         '<td><span class="tag" style="font-family:var(--font-mono);font-size:0.65rem;">' + WG.phaseLabel(h.current_phase || '') + '</span></td>' +
         '<td class="mono">' + h.ports_count + '</td>' +
-        '<td class="mono">' + h.findings_count + '</td></tr>';
+        '<td class="mono">' + h.findings_count + '</td>' +
+        '<td style="padding:4px 8px;">' + ssCell + '</td></tr>';
     }).join('') +
     '</tbody></table></div>';
 };
