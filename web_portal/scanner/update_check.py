@@ -11,13 +11,13 @@ from pathlib import Path
 
 from django.core.cache import cache
 
-log = logging.getLogger('scanner.update_check')
+log = logging.getLogger("scanner.update_check")
 
-GITHUB_REPO = 'Lw1nM1n4ung/demon-in-the-wire'
-GITHUB_API_URL = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
-CACHE_KEY = 'wg:update:check_result'
+GITHUB_REPO = "Lw1nM1n4ung/demon-in-the-wire"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+CACHE_KEY = "wg:update:check_result"
 CACHE_TTL = 6 * 3600
-FLAG_DIR = Path('/app/logs')
+FLAG_DIR = Path("/app/logs")
 
 
 def _now_iso() -> str:
@@ -27,9 +27,10 @@ def _now_iso() -> str:
 def _current_version() -> str:
     try:
         from wireghost import __version__
+
         return __version__
     except ImportError:
-        return '0.0.0'
+        return "0.0.0"
 
 
 def check_latest_release(*, force: bool = False) -> dict:
@@ -40,81 +41,82 @@ def check_latest_release(*, force: bool = False) -> dict:
 
     current = _current_version()
     result = {
-        'current': current,
-        'latest': None,
-        'latest_url': None,
-        'release_notes': None,
-        'published_at': None,
-        'update_available': False,
-        'error': None,
-        'checked_at': _now_iso(),
+        "current": current,
+        "latest": None,
+        "latest_url": None,
+        "release_notes": None,
+        "published_at": None,
+        "update_available": False,
+        "error": None,
+        "checked_at": _now_iso(),
     }
 
     try:
         req = urllib.request.Request(
             GITHUB_API_URL,
-            headers={'User-Agent': 'wireghost', 'Accept': 'application/vnd.github+json'},
+            headers={"User-Agent": "wireghost", "Accept": "application/vnd.github+json"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
 
-        tag = (data.get('tag_name') or '').lstrip('v')
+        tag = (data.get("tag_name") or "").lstrip("v")
         if not tag:
-            result['error'] = 'No tag_name in release'
+            result["error"] = "No tag_name in release"
             cache.set(CACHE_KEY, result, CACHE_TTL)
             return result
 
-        result['latest'] = tag
-        result['latest_url'] = data.get('html_url', '')
-        result['release_notes'] = (data.get('body') or '')[:2000]
-        result['published_at'] = data.get('published_at', '')
+        result["latest"] = tag
+        result["latest_url"] = data.get("html_url", "")
+        result["release_notes"] = (data.get("body") or "")[:2000]
+        result["published_at"] = data.get("published_at", "")
 
         try:
             from packaging.version import Version, InvalidVersion
+
             try:
-                result['update_available'] = Version(tag) > Version(current)
+                result["update_available"] = Version(tag) > Version(current)
             except InvalidVersion:
-                result['update_available'] = tag != current
+                result["update_available"] = tag != current
         except ImportError:
-            result['update_available'] = tag != current
+            result["update_available"] = tag != current
 
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            result['latest'] = current
-            result['update_available'] = False
+            result["latest"] = current
+            result["update_available"] = False
         else:
-            result['error'] = str(e)
-            log.info('GitHub release check failed: %s', e)
+            result["error"] = str(e)
+            log.info("GitHub release check failed: %s", e)
     except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
-        result['error'] = str(e)
-        log.info('GitHub release check failed: %s', e)
+        result["error"] = str(e)
+        log.info("GitHub release check failed: %s", e)
 
     cache.set(CACHE_KEY, result, CACHE_TTL)
     return result
 
 
 def write_update_flag(requested_by: str) -> dict:
-    flag_path = FLAG_DIR / 'update-requested.json'
+    flag_path = FLAG_DIR / "update-requested.json"
     try:
         flag_path.parent.mkdir(parents=True, exist_ok=True)
         flag_data = {
-            'requested_at': _now_iso(),
-            'requested_by': requested_by,
-            'target_version': (check_latest_release() or {}).get('latest', 'unknown'),
+            "requested_at": _now_iso(),
+            "requested_by": requested_by,
+            "target_version": (check_latest_release() or {}).get("latest", "unknown"),
         }
         flag_path.write_text(json.dumps(flag_data, indent=2))
     except OSError as e:
-        log.warning('Failed to write update flag: %s', e)
-        return {'status': 'error', 'error': str(e)}
+        log.warning("Failed to write update flag: %s", e)
+        return {"status": "error", "error": str(e)}
     return {
-        'status': 'flagged',
-        'flag_path': 'logs/api/update-requested.json',
-        'command': './scripts/wg-ctl update',
+        "status": "flagged",
+        "flag_path": "logs/api/update-requested.json",
+        "command": "./scripts/wg-ctl update",
     }
 
 
 def read_update_status() -> dict | None:
-    status_path = FLAG_DIR / 'update-status.json'
+    status_path = FLAG_DIR / "update-status.json"
     if not status_path.exists():
         return None
     try:
@@ -130,32 +132,35 @@ def run_feed_update() -> dict:
     updated = []
     errors = []
 
-    if shutil.which('nuclei'):
+    if shutil.which("nuclei"):
         try:
             r = subprocess.run(
-                ['nuclei', '-update-templates'],
-                capture_output=True, text=True, timeout=120,
+                ["nuclei", "-update-templates"],
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if r.returncode == 0:
-                updated.append('nuclei-templates')
+                updated.append("nuclei-templates")
             else:
-                errors.append(f'nuclei: exit {r.returncode}')
+                errors.append(f"nuclei: exit {r.returncode}")
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            errors.append(f'nuclei: {e}')
+            errors.append(f"nuclei: {e}")
 
-    if shutil.which('searchsploit'):
+    if shutil.which("searchsploit"):
         try:
             r = subprocess.run(
-                ['searchsploit', '-u'],
-                capture_output=True, text=True, timeout=120,
+                ["searchsploit", "-u"],
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if r.returncode == 0:
-                updated.append('searchsploit-db')
+                updated.append("searchsploit-db")
             else:
-                errors.append(f'searchsploit: exit {r.returncode}')
+                errors.append(f"searchsploit: exit {r.returncode}")
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            errors.append(f'searchsploit: {e}')
+            errors.append(f"searchsploit: {e}")
 
-
-    status = 'completed' if not errors else ('partial' if updated else 'failed')
-    return {'status': status, 'updated': updated, 'errors': errors}
+    status = "completed" if not errors else ("partial" if updated else "failed")
+    return {"status": status, "updated": updated, "errors": errors}

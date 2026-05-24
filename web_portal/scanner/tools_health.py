@@ -18,55 +18,57 @@ from typing import List
 
 from django.core.cache import cache
 
-_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 log = logging.getLogger(__name__)
 
-CACHE_KEY = 'scanner.tools_health.v2'
+CACHE_KEY = "scanner.tools_health.v2"
 CACHE_TTL = 60  # seconds
 
 TOOLS = [
-    ('Nmap',         'nmap',         ['-V']),
-    ('Nuclei',       'nuclei',       ['-version']),
-    ('Naabu',        'naabu',        ['-version']),
-    ('Masscan',      'masscan',      ['--version']),
-    ('httpx',        'httpx',        ['-version']),
-    ('fping',        'fping',        ['-v']),
-    ('Searchsploit', 'searchsploit', ['-h']),
-    ('WPScan',       'wpscan',       ['--version']),
-    ('Nikto',         'nikto',        ['-Version']),
-    ('NetExec',        'nxc',           ['--version']),
-    ('enum4linux',    'enum4linux',    ['-h']),
-    ('fingerprintx',  'fingerprintx',  ['-h']),
+    ("Nmap", "nmap", ["-V"]),
+    ("Nuclei", "nuclei", ["-version"]),
+    ("Naabu", "naabu", ["-version"]),
+    ("Masscan", "masscan", ["--version"]),
+    ("httpx", "httpx", ["-version"]),
+    ("fping", "fping", ["-v"]),
+    ("Searchsploit", "searchsploit", ["-h"]),
+    ("WPScan", "wpscan", ["--version"]),
+    ("Nikto", "nikto", ["-Version"]),
+    ("NetExec", "nxc", ["--version"]),
+    ("enum4linux", "enum4linux", ["-h"]),
+    ("fingerprintx", "fingerprintx", ["-h"]),
 ]
 
 
 def _extract_version(output: str) -> str:
     if not output:
-        return ''
+        return ""
     for line in output.splitlines():
-        line = _ANSI_RE.sub('', line).strip()
+        line = _ANSI_RE.sub("", line).strip()
         if not line or len(line) < 4:
             continue
-        if set(line) <= set('_/\\| ()-*.,\t`~^#[]{}'):
+        if set(line) <= set("_/\\| ()-*.,\t`~^#[]{}"):
             continue
         return line[:120]
-    return ''
+    return ""
 
 
 def _probe_one(binary: str, version_args: list) -> dict:
     path = shutil.which(binary)
     if not path:
-        return {'path': '', 'version': '', 'ok': False}
+        return {"path": "", "version": "", "ok": False}
     try:
         res = subprocess.run(
             [path, *version_args],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
-        combined = (res.stdout or '') + (res.stderr or '')
-        return {'path': path, 'version': _extract_version(combined), 'ok': True}
+        combined = (res.stdout or "") + (res.stderr or "")
+        return {"path": path, "version": _extract_version(combined), "ok": True}
     except (subprocess.TimeoutExpired, OSError, ValueError):
-        return {'path': path, 'version': '(no response)', 'ok': True}
+        return {"path": path, "version": "(no response)", "ok": True}
 
 
 def probe_all_local() -> List[dict]:
@@ -74,11 +76,11 @@ def probe_all_local() -> List[dict]:
     results = []
     for name, binary, args in TOOLS:
         info = _probe_one(binary, args)
-        results.append({'name': name, 'binary': binary, **info})
+        results.append({"name": name, "binary": binary, **info})
     return results
 
 
-DISPATCH_KEY = 'scanner.tools_health.dispatched'
+DISPATCH_KEY = "scanner.tools_health.dispatched"
 
 
 def probe_all(*, refresh: bool = False) -> List[dict]:
@@ -95,18 +97,16 @@ def probe_all(*, refresh: bool = False) -> List[dict]:
     already_dispatched = cache.get(DISPATCH_KEY)
     if not already_dispatched:
         from scanner.tasks import probe_tools_on_worker
+
         try:
             probe_tools_on_worker.delay()
             cache.set(DISPATCH_KEY, True, 30)
         except Exception as exc:
-            log.warning('Failed to dispatch worker probe: %s', exc)
+            log.warning("Failed to dispatch worker probe: %s", exc)
 
     if cached is not None:
         return cached
     # Celery unavailable — return all tools as unknown (ok=False) so the
     # API shape is consistent. The test suite and environments without a
     # worker both rely on this fallback.
-    return [
-        {'name': n, 'binary': b, 'path': '', 'version': '', 'ok': False}
-        for n, b, _ in TOOLS
-    ]
+    return [{"name": n, "binary": b, "path": "", "version": "", "ok": False} for n, b, _ in TOOLS]

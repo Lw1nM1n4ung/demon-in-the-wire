@@ -22,115 +22,122 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     import secrets as _s
+
     SECRET_KEY = _s.token_urlsafe(50)
     import warnings
-    warnings.warn('DJANGO_SECRET_KEY not set — using random key (sessions will not persist across restarts)', stacklevel=1)
 
-DEBUG = os.environ.get('DJANGO_DEBUG', 'false').lower() in ('true', '1', 'yes')
+    warnings.warn(
+        "DJANGO_SECRET_KEY not set — using random key (sessions will not persist across restarts)",
+        stacklevel=1,
+    )
 
-ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() in ("true", "1", "yes")
+
+ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 if not any(h.strip() for h in ALLOWED_HOSTS):
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'rest_framework',
-    'drf_spectacular',
-    'corsheaders',
-    'django_celery_beat',
-    'scanner',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "drf_spectacular",
+    "corsheaders",
+    "django_celery_beat",
+    "scanner",
 ]
 
-AUTH_USER_MODEL = 'scanner.User'
+AUTH_USER_MODEL = "scanner.User"
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'scanner.middleware.IdleTimeoutMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "scanner.middleware.IdleTimeoutMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 # Build the default origin list from WIREGHOST_HOST + WIREGHOST_PORT so users
 # only need to set those two in .env. Explicit CORS_ALLOWED_ORIGINS /
 # CSRF_TRUSTED_ORIGINS env vars still win for advanced setups.
-_PORTAL_PROTO = os.environ.get('WIREGHOST_PROTO', 'http')
-_PORTAL_PORT = os.environ.get('WIREGHOST_PORT', '9995')
-_PORTAL_HOST = os.environ.get('WIREGHOST_HOST', 'localhost')
-_is_default_port = (_PORTAL_PROTO == 'https' and _PORTAL_PORT == '443') or (_PORTAL_PROTO == 'http' and _PORTAL_PORT == '80')
-_port_suffix = '' if _is_default_port else f':{_PORTAL_PORT}'
+_PORTAL_PROTO = os.environ.get("WIREGHOST_PROTO", "http")
+_PORTAL_PORT = os.environ.get("WIREGHOST_PORT", "9995")
+_PORTAL_HOST = os.environ.get("WIREGHOST_HOST", "localhost")
+_is_default_port = (_PORTAL_PROTO == "https" and _PORTAL_PORT == "443") or (
+    _PORTAL_PROTO == "http" and _PORTAL_PORT == "80"
+)
+_port_suffix = "" if _is_default_port else f":{_PORTAL_PORT}"
 _default_origins = [
-    f'http://localhost{_port_suffix}',
-    f'http://127.0.0.1{_port_suffix}',
+    f"http://localhost{_port_suffix}",
+    f"http://127.0.0.1{_port_suffix}",
 ]
-if _PORTAL_PROTO == 'https':
+if _PORTAL_PROTO == "https":
     _default_origins += [
-        f'https://localhost{_port_suffix}',
-        f'https://127.0.0.1{_port_suffix}',
+        f"https://localhost{_port_suffix}",
+        f"https://127.0.0.1{_port_suffix}",
     ]
-if _PORTAL_HOST and _PORTAL_HOST not in ('*', 'localhost', '127.0.0.1'):
-    _default_origins.append(f'{_PORTAL_PROTO}://{_PORTAL_HOST}{_port_suffix}')
+if _PORTAL_HOST and _PORTAL_HOST not in ("*", "localhost", "127.0.0.1"):
+    _default_origins.append(f"{_PORTAL_PROTO}://{_PORTAL_HOST}{_port_suffix}")
 
 
 # CORS — restrict to portal origin only
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = os.environ.get(
-    'CORS_ALLOWED_ORIGINS',
-    ','.join(_default_origins),
-).split(',')
+    "CORS_ALLOWED_ORIGINS",
+    ",".join(_default_origins),
+).split(",")
 CORS_ALLOW_CREDENTIALS = True
 
 # Session / CSRF
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = 'Lax'
-SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
 CSRF_COOKIE_HTTPONLY = False  # JS needs to read it
-CSRF_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'false').lower() == 'true'
-SESSION_COOKIE_AGE = 28800            # 8 hours (sliding window with SAVE_EVERY_REQUEST)
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", "false").lower() == "true"
+SESSION_COOKIE_AGE = 28800  # 8 hours (sliding window with SAVE_EVERY_REQUEST)
 SESSION_SAVE_EVERY_REQUEST = True
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-X_FRAME_OPTIONS = 'DENY'
+X_FRAME_OPTIONS = "DENY"
 CSRF_TRUSTED_ORIGINS = os.environ.get(
-    'CSRF_TRUSTED_ORIGINS',
-    ','.join(_default_origins),
-).split(',')
+    "CSRF_TRUSTED_ORIGINS",
+    ",".join(_default_origins),
+).split(",")
 
-ROOT_URLCONF = 'wireghost_web.urls'
+ROOT_URLCONF = "wireghost_web.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'wireghost_web.wsgi.application'
+WSGI_APPLICATION = "wireghost_web.wsgi.application"
 
 
 # Database
@@ -141,26 +148,27 @@ try:
     import MySQLdb  # noqa: F401
 except ImportError:
     import pymysql
+
     pymysql.install_as_MySQLdb()
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('MYSQL_DATABASE', 'wireghost'),
-        'USER': os.environ.get('MYSQL_USER', 'wireghost'),
-        'PASSWORD': os.environ.get('MYSQL_PASSWORD', 'wireghost_pass'),
-        'HOST': os.environ.get('MYSQL_HOST', '127.0.0.1'),
-        'PORT': os.environ.get('MYSQL_PORT', '3306'),
-        'CONN_MAX_AGE': 600,
+    "default": {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": os.environ.get("MYSQL_DATABASE", "wireghost"),
+        "USER": os.environ.get("MYSQL_USER", "wireghost"),
+        "PASSWORD": os.environ.get("MYSQL_PASSWORD", "wireghost_pass"),
+        "HOST": os.environ.get("MYSQL_HOST", "127.0.0.1"),
+        "PORT": os.environ.get("MYSQL_PORT", "3306"),
+        "CONN_MAX_AGE": 600,
     }
 }
 
 # Also keep SQLite as fallback for development without MySQL
-if 'test' in sys.argv or not os.environ.get('MYSQL_HOST'):
+if "test" in sys.argv or not os.environ.get("MYSQL_HOST"):
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
         }
     }
 
@@ -170,16 +178,16 @@ if 'test' in sys.argv or not os.environ.get('MYSQL_HOST'):
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -187,9 +195,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -199,43 +207,47 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'web']
-SILENCED_SYSTEM_CHECKS = ['staticfiles.W004', 'security.W008']
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [BASE_DIR / "web"]
+SILENCED_SYSTEM_CHECKS = ["staticfiles.W004", "security.W008"]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Cache (Redis — shared across gunicorn workers for rate limiting and permission caching)
 CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
     }
 }
 # In test runs, substitute a local in-memory cache so tests don't depend on a live Redis.
-if 'test' in sys.argv:
+if "test" in sys.argv:
     CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'wireghost-tests',
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "wireghost-tests",
         }
     }
 
 # Celery
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://:wireghost_redis_secret@localhost:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://:wireghost_redis_secret@localhost:6379/0')
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL", "redis://:wireghost_redis_secret@localhost:6379/0"
+)
+CELERY_RESULT_BACKEND = os.environ.get(
+    "CELERY_RESULT_BACKEND", "redis://:wireghost_redis_secret@localhost:6379/0"
+)
 
 # Email — MFA OTP delivery
-EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
-EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
-EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
-EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'true').lower() == 'true'
-EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Wire_Ghost <noreply@wireghost.local>')
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Wire_Ghost <noreply@wireghost.local>")
 
 # MFA
 MFA_OTP_TTL = 300
@@ -246,86 +258,92 @@ MFA_HOURLY_EMAIL_CAP = 10
 
 # REST Framework
 REST_FRAMEWORK = {
-    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 50,
-    'DEFAULT_AUTHENTICATION_CLASSES': [
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
+    "DEFAULT_AUTHENTICATION_CLASSES": [
         # Header token wins when Authorization: Token is present — clients
         # using programmatic access never need a cookie.
-        'scanner.authentication.TokenHeaderAuth',
+        "scanner.authentication.TokenHeaderAuth",
         # Full CSRF-enforcing session auth for the SPA. Login / csrf /
         # setup-admin opt OUT per-endpoint via @authentication_classes([
         # CsrfExemptAuth]) because those endpoints *acquire* the session
         # and can't require a CSRF token that doesn't exist yet.
-        'rest_framework.authentication.SessionAuthentication',
+        "rest_framework.authentication.SessionAuthentication",
     ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
     ],
-    'DEFAULT_RENDERER_CLASSES': [
-        'rest_framework.renderers.JSONRenderer',
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
     ],
-    'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.UserRateThrottle',
-        'rest_framework.throttling.AnonRateThrottle',
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
     ],
-    'DEFAULT_THROTTLE_RATES': {
-        'user': '120/min',
-        'anon': '30/min',
+    "DEFAULT_THROTTLE_RATES": {
+        "user": "120/min",
+        "anon": "30/min",
     },
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Wire_Ghost API',
-    'DESCRIPTION': 'Vulnerability scanning platform REST API',
-    'VERSION': '2.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,
-    'SCHEMA': None,
-    'SERVERS': [
-        {'url': f'{_PORTAL_PROTO}://{_PORTAL_HOST}:{_PORTAL_PORT}',
-         'description': 'Wire_Ghost instance'},
+    "TITLE": "Wire_Ghost API",
+    "DESCRIPTION": "Vulnerability scanning platform REST API",
+    "VERSION": "2.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "SCHEMA": None,
+    "SERVERS": [
+        {
+            "url": f"{_PORTAL_PROTO}://{_PORTAL_HOST}:{_PORTAL_PORT}",
+            "description": "Wire_Ghost instance",
+        },
     ],
 }
 
 # Logging — RotatingFileHandler writes to /app/logs which is bind-mounted
 # to $WIREGHOST_LOG_DIR/api on the host via docker-compose.yml.
-LOG_DIR = os.environ.get('WIREGHOST_LOG_FILE_DIR', '/app/logs')
+LOG_DIR = os.environ.get("WIREGHOST_LOG_FILE_DIR", "/app/logs")
 try:
     os.makedirs(LOG_DIR, exist_ok=True)
     _LOG_DIR_OK = os.access(LOG_DIR, os.W_OK)
 except OSError:
     _LOG_DIR_OK = False
 
-_APP_LOG_LEVEL = os.environ.get('WIREGHOST_LOG_LEVEL', 'INFO').upper()
+_APP_LOG_LEVEL = os.environ.get("WIREGHOST_LOG_LEVEL", "INFO").upper()
 
 _LOG_HANDLERS = {
-    'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'},
+    "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
 }
 if _LOG_DIR_OK:
-    _LOG_HANDLERS['file'] = {
-        'class': 'logging.handlers.RotatingFileHandler',
-        'filename': os.path.join(LOG_DIR, 'django.log'),
-        'maxBytes': 10 * 1024 * 1024,
-        'backupCount': 5,
-        'formatter': 'verbose',
-        'encoding': 'utf-8',
+    _LOG_HANDLERS["file"] = {
+        "class": "logging.handlers.RotatingFileHandler",
+        "filename": os.path.join(LOG_DIR, "django.log"),
+        "maxBytes": 10 * 1024 * 1024,
+        "backupCount": 5,
+        "formatter": "verbose",
+        "encoding": "utf-8",
     }
 
 _ACTIVE_HANDLERS = list(_LOG_HANDLERS.keys())
 
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {'format': '{asctime} {levelname:7s} {name}: {message}', 'style': '{'},
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {"format": "{asctime} {levelname:7s} {name}: {message}", "style": "{"},
     },
-    'handlers': _LOG_HANDLERS,
-    'loggers': {
-        'django': {'handlers': _ACTIVE_HANDLERS, 'level': 'INFO', 'propagate': False},
-        'django.server': {'handlers': _ACTIVE_HANDLERS, 'level': 'INFO', 'propagate': False},
-        'django.request': {'handlers': _ACTIVE_HANDLERS, 'level': 'WARNING', 'propagate': False},
-        'scanner': {'handlers': _ACTIVE_HANDLERS, 'level': _APP_LOG_LEVEL, 'propagate': False},
-        'wireghost_web': {'handlers': _ACTIVE_HANDLERS, 'level': _APP_LOG_LEVEL, 'propagate': False},
-        'celery': {'handlers': _ACTIVE_HANDLERS, 'level': 'INFO', 'propagate': False},
+    "handlers": _LOG_HANDLERS,
+    "loggers": {
+        "django": {"handlers": _ACTIVE_HANDLERS, "level": "INFO", "propagate": False},
+        "django.server": {"handlers": _ACTIVE_HANDLERS, "level": "INFO", "propagate": False},
+        "django.request": {"handlers": _ACTIVE_HANDLERS, "level": "WARNING", "propagate": False},
+        "scanner": {"handlers": _ACTIVE_HANDLERS, "level": _APP_LOG_LEVEL, "propagate": False},
+        "wireghost_web": {
+            "handlers": _ACTIVE_HANDLERS,
+            "level": _APP_LOG_LEVEL,
+            "propagate": False,
+        },
+        "celery": {"handlers": _ACTIVE_HANDLERS, "level": "INFO", "propagate": False},
     },
 }

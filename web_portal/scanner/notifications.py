@@ -24,23 +24,23 @@ from typing import Optional
 import redis as redis_lib
 from django.conf import settings
 
-log = logging.getLogger('scanner.notifications')
+log = logging.getLogger("scanner.notifications")
 
-TELEGRAM_API = 'https://api.telegram.org'
+TELEGRAM_API = "https://api.telegram.org"
 
 # Telegram chat IDs are signed integers (channels are negative, e.g. -100…)
 # or @username references (≥5 chars per Telegram's rules).
-_CHAT_ID_RE = re.compile(r'^-?\d+$|^@[\w]{5,}$')
+_CHAT_ID_RE = re.compile(r"^-?\d+$|^@[\w]{5,}$")
 
 # Event-type → UserPreference attribute name. When present, a User's toggle
 # for that event must be truthy for their DM to fire. Shared-channel delivery
 # ignores user prefs and respects only the site-wide configuration.
 _EVENT_PREF_FIELD = {
-    'scan.complete':       'notif_scan_complete',
-    'scan.failed':         'notif_scan_failed',
-    'critical.discovered': 'notif_critical_finding',
-    'report.ready':        'notif_report_ready',
-    'digest.weekly':       'notif_weekly_digest',
+    "scan.complete": "notif_scan_complete",
+    "scan.failed": "notif_scan_failed",
+    "critical.discovered": "notif_critical_finding",
+    "report.ready": "notif_report_ready",
+    "digest.weekly": "notif_weekly_digest",
 }
 
 
@@ -50,11 +50,17 @@ class NotificationError(Exception):
 
 def _validate_chat_id(chat_id: str) -> None:
     if not chat_id or not _CHAT_ID_RE.match(chat_id):
-        raise NotificationError(f'invalid chat_id: {chat_id!r}')
+        raise NotificationError(f"invalid chat_id: {chat_id!r}")
 
 
-def send_telegram(chat_id: str, text: str, *, bot_token: str, timeout: float = 5.0,
-                   reply_markup: Optional[dict] = None) -> dict:
+def send_telegram(
+    chat_id: str,
+    text: str,
+    *,
+    bot_token: str,
+    timeout: float = 5.0,
+    reply_markup: Optional[dict] = None,
+) -> dict:
     """POST sendMessage to Telegram. Returns ``{'ok': bool, 'error': str|None}``.
 
     Never raises on network / API errors — returns the error in the dict so
@@ -63,113 +69,113 @@ def send_telegram(chat_id: str, text: str, *, bot_token: str, timeout: float = 5
     (e.g. blank token, malformed chat_id).
     """
     if not bot_token:
-        raise NotificationError('bot_token not configured')
+        raise NotificationError("bot_token not configured")
     _validate_chat_id(chat_id)
 
-    url = f'{TELEGRAM_API}/bot{bot_token}/sendMessage'
+    url = f"{TELEGRAM_API}/bot{bot_token}/sendMessage"
     body = {
-        'chat_id': chat_id,
-        'text': text,
-        'parse_mode': 'HTML',
-        'disable_web_page_preview': True,
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
     }
     if reply_markup:
-        body['reply_markup'] = reply_markup
-    payload = json.dumps(body).encode('utf-8')
-    req = urllib.request.Request(url, data=payload, method='POST')
-    req.add_header('Content-Type', 'application/json')
+        body["reply_markup"] = reply_markup
+    payload = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode('utf-8', errors='replace'))
-            return {'ok': bool(body.get('ok')), 'error': body.get('description')}
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return {"ok": bool(body.get("ok")), "error": body.get("description")}
     except urllib.error.HTTPError as e:
         try:
-            body = json.loads(e.read().decode('utf-8', errors='replace'))
-            desc = body.get('description') or f'HTTP {e.code}'
+            body = json.loads(e.read().decode("utf-8", errors="replace"))
+            desc = body.get("description") or f"HTTP {e.code}"
         except Exception:
-            desc = f'HTTP {e.code}'
-        log.warning('telegram sendMessage failed: chat_id=%s status=%s %s',
-                    chat_id, e.code, desc)
-        return {'ok': False, 'error': desc}
+            desc = f"HTTP {e.code}"
+        log.warning("telegram sendMessage failed: chat_id=%s status=%s %s", chat_id, e.code, desc)
+        return {"ok": False, "error": desc}
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        log.warning('telegram sendMessage network error: chat_id=%s %s', chat_id, e)
-        return {'ok': False, 'error': f'network error: {e}'}
+        log.warning("telegram sendMessage network error: chat_id=%s %s", chat_id, e)
+        return {"ok": False, "error": f"network error: {e}"}
     except Exception as e:
-        log.exception('telegram sendMessage unexpected error: chat_id=%s', chat_id)
-        return {'ok': False, 'error': str(e)}
+        log.exception("telegram sendMessage unexpected error: chat_id=%s", chat_id)
+        return {"ok": False, "error": str(e)}
 
 
 # ─── Message rendering ───────────────────────────────────────────────────
+
 
 def _render(event_type: str, *, scan=None, extra: Optional[dict] = None) -> str:
     """HTML message body for an event."""
     e = _html.escape
     extra = extra or {}
-    if event_type == 'scan.complete':
+    if event_type == "scan.complete":
         return (
-            f'✅ <b>Scan complete</b> — {e(scan.name)}\n'
-            f'<b>Target:</b> <code>{e(scan.target)}</code>\n'
-            f'<b>Hosts:</b> {scan.hosts_count}  <b>Findings:</b> {scan.findings_count}  '
-            f'(🔴 {scan.critical_count} / 🟠 {scan.high_count} / 🟡 {scan.medium_count})\n'
-            f'<b>Duration:</b> {scan.duration_seconds}s'
+            f"✅ <b>Scan complete</b> — {e(scan.name)}\n"
+            f"<b>Target:</b> <code>{e(scan.target)}</code>\n"
+            f"<b>Hosts:</b> {scan.hosts_count}  <b>Findings:</b> {scan.findings_count}  "
+            f"(🔴 {scan.critical_count} / 🟠 {scan.high_count} / 🟡 {scan.medium_count})\n"
+            f"<b>Duration:</b> {scan.duration_seconds}s"
         )
-    if event_type == 'scan.failed':
-        err = (scan.error_message or 'unknown error')[:200]
+    if event_type == "scan.failed":
+        err = (scan.error_message or "unknown error")[:200]
         return (
-            f'❌ <b>Scan failed</b> — {e(scan.name)}\n'
-            f'<b>Target:</b> <code>{e(scan.target)}</code>\n'
-            f'<b>Error:</b> {e(err)}'
+            f"❌ <b>Scan failed</b> — {e(scan.name)}\n"
+            f"<b>Target:</b> <code>{e(scan.target)}</code>\n"
+            f"<b>Error:</b> {e(err)}"
         )
-    if event_type == 'critical.discovered':
-        count = extra.get('count', scan.critical_count if scan else 0)
+    if event_type == "critical.discovered":
+        count = extra.get("count", scan.critical_count if scan else 0)
         return (
-            f'🚨 <b>Critical findings discovered</b> — {e(scan.name) if scan else "unknown scan"}\n'
-            f'{count} critical-severity finding(s).\n'
-            f'<b>Target:</b> <code>{e(scan.target) if scan else "?"}</code>'
+            f"🚨 <b>Critical findings discovered</b> — {e(scan.name) if scan else 'unknown scan'}\n"
+            f"{count} critical-severity finding(s).\n"
+            f"<b>Target:</b> <code>{e(scan.target) if scan else '?'}</code>"
         )
-    if event_type == 'update.available':
-        current = e(extra.get('current', '?'))
-        latest = e(extra.get('latest', '?'))
-        url = extra.get('url', '')
+    if event_type == "update.available":
+        current = e(extra.get("current", "?"))
+        latest = e(extra.get("latest", "?"))
+        url = extra.get("url", "")
         return (
-            f'\U0001f4e6 <b>Wire_Ghost update available</b>\n'
-            f'<b>Current:</b> <code>{current}</code>\n'
-            f'<b>Latest:</b> <code>{latest}</code>\n'
-            + (f'<b>Release:</b> {e(url)}' if url else '')
+            f"\U0001f4e6 <b>Wire_Ghost update available</b>\n"
+            f"<b>Current:</b> <code>{current}</code>\n"
+            f"<b>Latest:</b> <code>{latest}</code>\n" + (f"<b>Release:</b> {e(url)}" if url else "")
         )
-    return f'Wire_Ghost event: {e(event_type)}'
+    return f"Wire_Ghost event: {e(event_type)}"
 
 
 def _render_keyboard(event_type: str, *, scan=None, extra: Optional[dict] = None) -> Optional[list]:
     """Inline keyboard rows as JSON-serializable list for notification messages."""
-    if not scan or not hasattr(scan, 'id'):
+    if not scan or not hasattr(scan, "id"):
         return None
     sid = str(scan.id)[:8]
-    if event_type == 'scan.complete':
+    if event_type == "scan.complete":
         return [
-            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
-            [{'text': '🛡 Findings', 'callback_data': f'sf:{sid}:0'}],
-            [{'text': '📄 Report', 'callback_data': f'sr:{sid}'}],
+            [{"text": "📋 View Scan", "callback_data": f"sd:{sid}"}],
+            [{"text": "🛡 Findings", "callback_data": f"sf:{sid}:0"}],
+            [{"text": "📄 Report", "callback_data": f"sr:{sid}"}],
         ]
-    if event_type == 'scan.failed':
+    if event_type == "scan.failed":
         return [
-            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
-            [{'text': '🔍 Scans', 'callback_data': 'sl:0'}],
+            [{"text": "📋 View Scan", "callback_data": f"sd:{sid}"}],
+            [{"text": "🔍 Scans", "callback_data": "sl:0"}],
         ]
-    if event_type == 'critical.discovered':
+    if event_type == "critical.discovered":
         return [
-            [{'text': '🚨 View Findings', 'callback_data': f'sf:{sid}:0:critical'}],
-            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
+            [{"text": "🚨 View Findings", "callback_data": f"sf:{sid}:0:critical"}],
+            [{"text": "📋 View Scan", "callback_data": f"sd:{sid}"}],
         ]
-    if event_type == 'report.ready':
+    if event_type == "report.ready":
         return [
-            [{'text': '📋 View Scan', 'callback_data': f'sd:{sid}'}],
+            [{"text": "📋 View Scan", "callback_data": f"sd:{sid}"}],
         ]
     return None
 
 
 # ─── Fan-out ─────────────────────────────────────────────────────────────
+
 
 def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
     """Dispatch a notification to shared + creator-DM targets, fail-silent.
@@ -179,59 +185,66 @@ def notify(event_type: str, *, scan=None, extra: Optional[dict] = None) -> None:
     """
     try:
         from scanner.models import SiteConfig, UserPreference
+
         cfg = SiteConfig.get()
         if not cfg.telegram_bot_token:
             return
         text = _render(event_type, scan=scan, extra=extra)
         keyboard = _render_keyboard(event_type, scan=scan, extra=extra)
-        inline_kb = {'inline_keyboard': keyboard} if keyboard else None
+        inline_kb = {"inline_keyboard": keyboard} if keyboard else None
         bot_token = cfg.telegram_bot_token
 
         # Shared channel — fires regardless of user prefs when configured.
         if cfg.telegram_shared_chat_id:
             try:
-                send_telegram(cfg.telegram_shared_chat_id, text,
-                              bot_token=bot_token, reply_markup=inline_kb)
+                send_telegram(
+                    cfg.telegram_shared_chat_id, text, bot_token=bot_token, reply_markup=inline_kb
+                )
             except NotificationError as e:
-                log.warning('skipping shared channel: %s', e)
+                log.warning("skipping shared channel: %s", e)
 
         # Creator DM — optional, respects per-user enable flag + event toggle.
-        creator = getattr(scan, 'created_by', None)
+        creator = getattr(scan, "created_by", None)
         if creator is not None:
             try:
                 prefs = UserPreference.for_user(creator)
             except Exception:
-                log.warning('Failed to load notification prefs for user=%s', creator.username, exc_info=True)
+                log.warning(
+                    "Failed to load notification prefs for user=%s", creator.username, exc_info=True
+                )
                 prefs = None
             pref_field = _EVENT_PREF_FIELD.get(event_type)
-            if (prefs
+            if (
+                prefs
                 and prefs.telegram_enabled
                 and prefs.telegram_chat_id
-                and (pref_field is None or getattr(prefs, pref_field, True))):
+                and (pref_field is None or getattr(prefs, pref_field, True))
+            ):
                 try:
-                    send_telegram(prefs.telegram_chat_id, text,
-                                  bot_token=bot_token, reply_markup=inline_kb)
+                    send_telegram(
+                        prefs.telegram_chat_id, text, bot_token=bot_token, reply_markup=inline_kb
+                    )
                 except NotificationError as e:
-                    log.warning('skipping DM for user=%s: %s', creator.username, e)
+                    log.warning("skipping DM for user=%s: %s", creator.username, e)
 
         # Publish to Redis pub/sub for bot-enhanced delivery (inline buttons, file attachments)
         try:
-            broker_url = getattr(settings, 'CELERY_BROKER_URL', '')
+            broker_url = getattr(settings, "CELERY_BROKER_URL", "")
             if broker_url:
                 r = redis_lib.Redis.from_url(broker_url)
                 pub_data = {
-                    'event': event_type,
-                    'text': text,
+                    "event": event_type,
+                    "text": text,
                 }
                 if keyboard:
-                    pub_data['reply_markup'] = keyboard
-                if scan and event_type == 'report.ready':
-                    has_docx = scan.reports.filter(format='docx').exists()
+                    pub_data["reply_markup"] = keyboard
+                if scan and event_type == "report.ready":
+                    has_docx = scan.reports.filter(format="docx").exists()
                     if has_docx:
-                        pub_data['has_report'] = True
-                        pub_data['scan_id'] = str(scan.id)
-                r.publish('wireghost:bot:notify', json.dumps(pub_data))
+                        pub_data["has_report"] = True
+                        pub_data["scan_id"] = str(scan.id)
+                r.publish("wireghost:bot:notify", json.dumps(pub_data))
         except Exception:
-            log.warning('Redis pub/sub publish failed', exc_info=True)
+            log.warning("Redis pub/sub publish failed", exc_info=True)
     except Exception:
-        log.exception('notify() dispatch error event=%s', event_type)
+        log.exception("notify() dispatch error event=%s", event_type)

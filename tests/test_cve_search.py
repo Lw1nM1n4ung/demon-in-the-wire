@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp  # ensure aiohttp is in sys.modules so patches resolve
+import aiohttp  # noqa: F401 — ensure aiohttp is in sys.modules so patches resolve
 import pytest
 
 from wireghost.config import ScanConfig

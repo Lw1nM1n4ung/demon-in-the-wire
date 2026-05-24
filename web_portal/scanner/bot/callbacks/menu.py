@@ -5,14 +5,14 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from scanner.bot.formatting import esc, severity_line, time_ago
 from scanner.bot.menus import main_menu_kb
-from scanner.models import Finding, Scan, ScheduledScan, User
+from scanner.models import Finding, Scan, ScheduledScan
 
-HTML = 'HTML'
+HTML = "HTML"
 
 
 async def handle(query, user, rest, context):
-    action = rest[0] if rest else 'dash'
-    if action == 'dash':
+    action = rest[0] if rest else "dash"
+    if action == "dash":
         await _dashboard(query, user)
     else:
         await _main_menu(query, user)
@@ -21,60 +21,67 @@ async def handle(query, user, rest, context):
 async def _main_menu(query, user):
     kb = main_menu_kb(user.role)
     await query.edit_message_text(
-        '<b>🔰 Wire_Ghost Control Panel</b>\n'
-        '━━━━━━━━━━━━━━━━━━━━━━\n'
-        'Select a category:',
-        reply_markup=kb, parse_mode=HTML,
+        "<b>🔰 Wire_Ghost Control Panel</b>\n━━━━━━━━━━━━━━━━━━━━━━\nSelect a category:",
+        reply_markup=kb,
+        parse_mode=HTML,
     )
 
 
 async def _dashboard(query, user):
     def _q():
-        active = Scan.objects.filter(status='running').count()
-        pending = Scan.objects.filter(status='pending').count()
-        completed = Scan.objects.filter(status='completed').count()
-        failed = Scan.objects.filter(status='failed').count()
+        active = Scan.objects.filter(status="running").count()
+        pending = Scan.objects.filter(status="pending").count()
+        completed = Scan.objects.filter(status="completed").count()
+        failed = Scan.objects.filter(status="failed").count()
         totals = Finding.objects.count()
         sev = {}
-        for s in ('critical', 'high', 'medium', 'low', 'info'):
+        for s in ("critical", "high", "medium", "low", "info"):
             sev[s] = Finding.objects.filter(severity=s).count()
-        last = Scan.objects.filter(status='completed').order_by('-completed_at').first()
-        nxt = ScheduledScan.objects.filter(enabled=True, next_run__isnull=False).order_by('next_run').first()
+        last = Scan.objects.filter(status="completed").order_by("-completed_at").first()
+        nxt = (
+            ScheduledScan.objects.filter(enabled=True, next_run__isnull=False)
+            .order_by("next_run")
+            .first()
+        )
         return active, pending, completed, failed, totals, sev, last, nxt
 
-    active, pending, completed, failed, totals, sev, last_scan, next_sched = await sync_to_async(_q)()
+    active, pending, completed, failed, totals, sev, last_scan, next_sched = await sync_to_async(
+        _q
+    )()
 
     lines = [
-        '<b>📊 Wire_Ghost Dashboard</b>',
-        '━━━━━━━━━━━━━━━━━━━━',
-        '',
-        '<b>Scans</b>',
-        f'  🔄 Running: {active}   ⏳ Pending: {pending}',
-        f'  ✅ Completed: {completed}   ❌ Failed: {failed}',
-        '',
-        f'<b>Findings</b> ({totals} total)',
-        f'  {severity_line(critical=sev["critical"], high=sev["high"], medium=sev["medium"], low=sev["low"])}',
-        '',
-        '<b>Timeline</b>',
+        "<b>📊 Wire_Ghost Dashboard</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "<b>Scans</b>",
+        f"  🔄 Running: {active}   ⏳ Pending: {pending}",
+        f"  ✅ Completed: {completed}   ❌ Failed: {failed}",
+        "",
+        f"<b>Findings</b> ({totals} total)",
+        f"  {severity_line(critical=sev['critical'], high=sev['high'], medium=sev['medium'], low=sev['low'])}",
+        "",
+        "<b>Timeline</b>",
     ]
     if last_scan:
-        lines.append(f'  📅 Last scan: {time_ago(last_scan.completed_at)}')
+        lines.append(f"  📅 Last scan: {time_ago(last_scan.completed_at)}")
     if next_sched:
-        lines.append(f'  ⏭ Next scheduled: {esc(next_sched.target[:30])}')
+        lines.append(f"  ⏭ Next scheduled: {esc(next_sched.target[:30])}")
 
-    kb = InlineKeyboardMarkup([
+    kb = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton('🔄 Refresh', callback_data='mn:dash'),
-            InlineKeyboardButton('🔍 Scans', callback_data='sl:0'),
-        ],
-        [
-            InlineKeyboardButton('🛡 Findings', callback_data='fl:all:0'),
-            InlineKeyboardButton('💻 Assets', callback_data='al:0'),
-        ],
-        [InlineKeyboardButton('⬅ Menu', callback_data='mn')],
-    ])
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="mn:dash"),
+                InlineKeyboardButton("🔍 Scans", callback_data="sl:0"),
+            ],
+            [
+                InlineKeyboardButton("🛡 Findings", callback_data="fl:all:0"),
+                InlineKeyboardButton("💻 Assets", callback_data="al:0"),
+            ],
+            [InlineKeyboardButton("⬅ Menu", callback_data="mn")],
+        ]
+    )
 
-    await query.edit_message_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
+    await query.edit_message_text("\n".join(lines), reply_markup=kb, parse_mode=HTML)
 
 
 async def handle_help(query, user, rest, context):
@@ -82,41 +89,45 @@ async def handle_help(query, user, rest, context):
     from scanner.bot.auth import check_perm_cached
 
     lines = [
-        '🛡 <b>Wire_Ghost Bot</b>',
-        '━━━━━━━━━━━━━━━━━━━━━━━━━',
-        '',
-        '<b>📊 Information</b>',
-        '  📊 Dashboard — live stats overview',
-        '  🔍 Scans — browse &amp; manage scans',
-        '  🛡 Findings — filter by severity',
-        '  💻 Assets — top assets by risk',
-        '',
-        '<b>🔗 Account</b>',
-        '  <code>/link &lt;code&gt;</code> — Link Telegram account',
-        '  <code>/unlink</code> — Unlink account',
+        "🛡 <b>Wire_Ghost Bot</b>",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "<b>📊 Information</b>",
+        "  📊 Dashboard — live stats overview",
+        "  🔍 Scans — browse &amp; manage scans",
+        "  🛡 Findings — filter by severity",
+        "  💻 Assets — top assets by risk",
+        "",
+        "<b>🔗 Account</b>",
+        "  <code>/link &lt;code&gt;</code> — Link Telegram account",
+        "  <code>/unlink</code> — Unlink account",
     ]
 
     if user:
-        has_write = await sync_to_async(check_perm_cached)(user, 'scan:write')
+        has_write = await sync_to_async(check_perm_cached)(user, "scan:write")
         if has_write:
-            lines.extend([
-                '',
-                '<b>⚡ Operations</b>',
-                '  ➕ New Scan — launch from menu',
-                '  📅 Schedules — manage recurring scans',
-                '  📄 Report — generate from scan detail',
-            ])
+            lines.extend(
+                [
+                    "",
+                    "<b>⚡ Operations</b>",
+                    "  ➕ New Scan — launch from menu",
+                    "  📅 Schedules — manage recurring scans",
+                    "  📄 Report — generate from scan detail",
+                ]
+            )
 
-    if user and user.role == 'owner':
-        lines.extend([
-            '',
-            '<b>👑 Administration</b>',
-            '  👥 Users — accounts &amp; link status',
-            '  🏥 Health — system resources',
-            '  ⚙️ Config — site configuration',
-        ])
+    if user and user.role == "owner":
+        lines.extend(
+            [
+                "",
+                "<b>👑 Administration</b>",
+                "  👥 Users — accounts &amp; link status",
+                "  🏥 Health — system resources",
+                "  ⚙️ Config — site configuration",
+            ]
+        )
 
-    lines.extend(['', '<i>Navigate everything from the menu buttons above.</i>'])
+    lines.extend(["", "<i>Navigate everything from the menu buttons above.</i>"])
 
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton('⬅ Menu', callback_data='mn')]])
-    await query.edit_message_text('\n'.join(lines), reply_markup=kb, parse_mode=HTML)
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Menu", callback_data="mn")]])
+    await query.edit_message_text("\n".join(lines), reply_markup=kb, parse_mode=HTML)

@@ -12,11 +12,12 @@ class IdleTimeoutMiddleware:
     def __call__(self, request):
         if request.user.is_authenticated:
             now = timezone.now().timestamp()
-            last = request.session.get('_last_activity')
+            last = request.session.get("_last_activity")
             if last and (now - last) > IDLE_TIMEOUT:
                 logout(request)
                 return JsonResponse(
-                    {'error': 'Session expired due to inactivity'}, status=401,
+                    {"error": "Session expired due to inactivity"},
+                    status=401,
                 )
-            request.session['_last_activity'] = now
+            request.session["_last_activity"] = now
         return self.get_response(request)
