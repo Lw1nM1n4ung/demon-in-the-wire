@@ -37,7 +37,10 @@ _PORT_FALLBACK: dict[int, str] = {
 
 
 async def enumerate_netexec(
-    host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    sem: asyncio.Semaphore,
 ) -> list[Finding]:
     """Run nxc against a host for each supported protocol with open ports."""
     async with sem:
@@ -78,7 +81,10 @@ async def enumerate_netexec(
 
 
 async def _run_proto(
-    proto: str, ip: str, config: ScanConfig, vuln_dir: Path,
+    proto: str,
+    ip: str,
+    config: ScanConfig,
+    vuln_dir: Path,
 ) -> list[Finding]:
     """Run nxc commands for a single protocol and parse the output."""
     findings: list[Finding] = []
@@ -86,8 +92,21 @@ async def _run_proto(
 
     if proto == "smb":
         result = await run_tool(
-            ["nxc", "smb", ip, "-u", "", "-p", "", "--no-bruteforce",
-             "--shares", "--users", "--pass-pol", "--timeout", "30"],
+            [
+                "nxc",
+                "smb",
+                ip,
+                "-u",
+                "",
+                "-p",
+                "",
+                "--no-bruteforce",
+                "--shares",
+                "--users",
+                "--pass-pol",
+                "--timeout",
+                "30",
+            ],
             timeout=timeout,
             label=f"nxc smb {ip}",
         )
@@ -97,8 +116,20 @@ async def _run_proto(
         findings.extend(parse_netexec_output(output, host_ip=ip, protocol="smb"))
 
         result = await run_tool(
-            ["nxc", "smb", ip, "-u", "", "-p", "", "--no-bruteforce",
-             "-M", "ms17-010", "--timeout", "30"],
+            [
+                "nxc",
+                "smb",
+                ip,
+                "-u",
+                "",
+                "-p",
+                "",
+                "--no-bruteforce",
+                "-M",
+                "ms17-010",
+                "--timeout",
+                "30",
+            ],
             timeout=timeout,
             label=f"nxc smb ms17-010 {ip}",
         )

@@ -1,9 +1,11 @@
 """Parser for naabu JSON output (JSONL: one object per line)."""
+
 from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
 from wireghost.models.scan import Host, Port
+
 
 def parse_naabu_json(json_path: Path) -> list[Host]:
     """Parse naabu JSONL output into Host objects.

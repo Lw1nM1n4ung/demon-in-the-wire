@@ -11,10 +11,24 @@ from wireghost.models.severity import Severity
 @dataclass
 class Finding:
     source: Literal[
-        "nmap_vuln", "nuclei", "nuclei_external", "nettacker", "searchsploit",
-        "service_enum", "wpscan", "enum4linux", "nikto", "netexec",
-        "sslscan", "snmp_enum", "nfs_enum", "ldap_enum", "katana",
-        "msf_scan", "getsploit",
+        "nmap_vuln",
+        "nuclei",
+        "nuclei_external",
+        "nettacker",
+        "searchsploit",
+        "service_enum",
+        "wpscan",
+        "enum4linux",
+        "nikto",
+        "netexec",
+        "sslscan",
+        "snmp_enum",
+        "nfs_enum",
+        "ldap_enum",
+        "katana",
+        "msf_scan",
+        "getsploit",
+        "nvd",
     ]
     host: str
     port: str
@@ -30,9 +44,9 @@ class Finding:
     raw_output: str = ""
     references: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
-    request: str = ""       # HTTP request sent
-    response: str = ""      # HTTP response received
+    request: str = ""  # HTTP request sent
+    response: str = ""  # HTTP response received
     curl_command: str = ""  # curl to reproduce
-    cvss: str = ""          # CVSS score/metrics
-    cwe: str = ""           # CWE ID
-    cve: str = ""           # CVE ID
+    cvss: str = ""  # CVSS score/metrics
+    cwe: str = ""  # CWE ID
+    cve: str = ""  # CVE ID

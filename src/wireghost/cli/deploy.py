@@ -18,33 +18,21 @@ console = Console(stderr=True)
 
 @app.callback(invoke_without_command=True)
 def deploy_cmd(
-    target: str = typer.Option(
-        ..., "--target", help="Target host IP or hostname for deployment"
-    ),
-    user: str = typer.Option(
-        "root", "--user", "-u", help="SSH user"
-    ),
-    ssh_key: Optional[Path] = typer.Option(
-        None, "--ssh-key", "-i", help="Path to SSH private key"
-    ),
+    target: str = typer.Option(..., "--target", help="Target host IP or hostname for deployment"),
+    user: str = typer.Option("root", "--user", "-u", help="SSH user"),
+    ssh_key: Optional[Path] = typer.Option(None, "--ssh-key", "-i", help="Path to SSH private key"),
     ssh_password: Optional[str] = typer.Option(
         None, "--password", "-p", help="SSH password (prompt if omitted and no key)"
     ),
-    ssh_port: int = typer.Option(
-        22, "--port", "-P", help="SSH port"
-    ),
-    mode: str = typer.Option(
-        "docker", "--mode", "-m", help="Install mode: 'docker' or 'host'"
-    ),
+    ssh_port: int = typer.Option(22, "--port", "-P", help="SSH port"),
+    mode: str = typer.Option("docker", "--mode", "-m", help="Install mode: 'docker' or 'host'"),
     with_msf: bool = typer.Option(
         False, "--with-msf", help="Include Metasploit Framework (~1.5GB extra)"
     ),
     web_host: Optional[str] = typer.Option(
         None, "--web-host", help="Portal hostname (defaults to target IP)"
     ),
-    web_port: int = typer.Option(
-        443, "--web-port", help="Portal HTTPS port"
-    ),
+    web_port: int = typer.Option(443, "--web-port", help="Portal HTTPS port"),
     bundle: Optional[Path] = typer.Option(
         None, "--bundle", "-b", help="Use pre-built offline bundle (skip build)"
     ),
@@ -98,7 +86,8 @@ def deploy_cmd(
 
     if not ssh_key and not ssh_password:
         import getpass
-        console.print(f"[dim]No SSH key or password provided. Prompting for password...[/]")
+
+        console.print("[dim]No SSH key or password provided. Prompting for password...[/]")
         cfg.ssh_password = getpass.getpass(f"SSH password for {user}@{target}: ")
 
     # ── Check mode ──────────────────────────────────────────────────
@@ -113,14 +102,16 @@ def deploy_cmd(
 
     # ── Deploy ──────────────────────────────────────────────────────
     console.print()
-    console.print(Panel.fit(
-        f"[bold]Target:[/] {user}@{target}:{ssh_port}\n"
-        f"[bold]Mode:[/] {mode}\n"
-        f"[bold]Metasploit:[/] {'yes' if with_msf else 'no'}\n"
-        f"[bold]Bundle:[/] {bundle or 'auto-build'}",
-        title="Wire_Ghost Remote Deploy",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Target:[/] {user}@{target}:{ssh_port}\n"
+            f"[bold]Mode:[/] {mode}\n"
+            f"[bold]Metasploit:[/] {'yes' if with_msf else 'no'}\n"
+            f"[bold]Bundle:[/] {bundle or 'auto-build'}",
+            title="Wire_Ghost Remote Deploy",
+            border_style="cyan",
+        )
+    )
 
     with Progress(
         SpinnerColumn(),
@@ -140,17 +131,19 @@ def _print_result(result: DeployResult, cfg: DeployConfig) -> None:
     console.print()
 
     if result.success:
-        console.print(Panel.fit(
-            f"[bold green]Deployment successful![/]\n\n"
-            f"[bold]Host:[/]      {result.host}\n"
-            f"[bold]Duration:[/]  {result.duration:.0f}s\n"
-            f"[bold]Setup URL:[/] [cyan]{result.setup_url}[/]\n"
-            f"[bold]Login URL:[/] [cyan]{result.login_url}[/]\n\n"
-            f"[dim]Open the Setup URL in your browser to create the admin account.[/]\n"
-            f"[dim]Accept the self-signed certificate warning if prompted.[/]",
-            title="Deploy Complete",
-            border_style="green",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]Deployment successful![/]\n\n"
+                f"[bold]Host:[/]      {result.host}\n"
+                f"[bold]Duration:[/]  {result.duration:.0f}s\n"
+                f"[bold]Setup URL:[/] [cyan]{result.setup_url}[/]\n"
+                f"[bold]Login URL:[/] [cyan]{result.login_url}[/]\n\n"
+                f"[dim]Open the Setup URL in your browser to create the admin account.[/]\n"
+                f"[dim]Accept the self-signed certificate warning if prompted.[/]",
+                title="Deploy Complete",
+                border_style="green",
+            )
+        )
 
         # Print last ~20 lines of remote output for context
         if result.output:
@@ -159,13 +152,14 @@ def _print_result(result: DeployResult, cfg: DeployConfig) -> None:
             for line in result.output.splitlines()[-20:]:
                 console.print(f"  [dim]{line}[/]")
     else:
-        console.print(Panel.fit(
-            f"[bold red]Deployment failed![/]\n\n"
-            f"[bold]Errors:[/]\n" +
-            "\n".join(f"  - {e}" for e in result.errors),
-            title="Deploy Failed",
-            border_style="red",
-        ))
+        console.print(
+            Panel.fit(
+                "[bold red]Deployment failed![/]\n\n"
+                "[bold]Errors:[/]\n" + "\n".join(f"  - {e}" for e in result.errors),
+                title="Deploy Failed",
+                border_style="red",
+            )
+        )
         if result.output:
             console.print()
             console.print("[dim]Remote output:[/]")

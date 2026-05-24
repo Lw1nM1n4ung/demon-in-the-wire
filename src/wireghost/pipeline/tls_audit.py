@@ -35,7 +35,10 @@ def _get_tls_ports(host: Host) -> list:
 
 
 async def audit_tls(
-    host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    sem: asyncio.Semaphore,
 ) -> list[Finding]:
     """Run sslscan on every TLS port detected on *host*."""
     if config.skip_tls_audit:
@@ -62,8 +65,12 @@ async def audit_tls(
             if xml_path.exists():
                 findings.extend(parse_sslscan(xml_path, host.ip, port.number))
             elif result.returncode != 0:
-                log.warning("[%s] sslscan failed on port %d (rc=%d) with no XML output",
-                            host.ip, port.number, result.returncode)
+                log.warning(
+                    "[%s] sslscan failed on port %d (rc=%d) with no XML output",
+                    host.ip,
+                    port.number,
+                    result.returncode,
+                )
 
     log.info("[%s] TLS audit: %d finding(s)", host.ip, len(findings))
     return findings

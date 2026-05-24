@@ -1,4 +1,5 @@
 """Parser for WPScan JSON output."""
+
 from __future__ import annotations
 
 import json
@@ -40,13 +41,18 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
     if wp_ver and isinstance(wp_ver, dict):
         ver_num = wp_ver.get("number", "")
         if ver_num:
-            findings.append(Finding(
-                source="wpscan", host=host_ip, port=port, protocol="tcp",
-                severity=Severity.INFO,
-                title=f"WordPress Version: {ver_num}",
-                description=f"WordPress {ver_num} detected at {target_url}",
-                full_url=target_url,
-            ))
+            findings.append(
+                Finding(
+                    source="wpscan",
+                    host=host_ip,
+                    port=port,
+                    protocol="tcp",
+                    severity=Severity.INFO,
+                    title=f"WordPress Version: {ver_num}",
+                    description=f"WordPress {ver_num} detected at {target_url}",
+                    full_url=target_url,
+                )
+            )
             # Version vulnerabilities
             for vuln in wp_ver.get("vulnerabilities", []):
                 findings.append(_vuln_to_finding(vuln, host_ip, target_url, port))
@@ -57,15 +63,22 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
         for name, info in plugins.items():
             ver = info.get("version", {})
             ver_num = ver.get("number", "") if isinstance(ver, dict) else ""
-            findings.append(Finding(
-                source="wpscan", host=host_ip, port=port, protocol="tcp",
-                severity=Severity.INFO,
-                title=f"WP Plugin: {name}" + (f" {ver_num}" if ver_num else ""),
-                description=f"WordPress plugin '{name}' detected.",
-                full_url=target_url,
-            ))
+            findings.append(
+                Finding(
+                    source="wpscan",
+                    host=host_ip,
+                    port=port,
+                    protocol="tcp",
+                    severity=Severity.INFO,
+                    title=f"WP Plugin: {name}" + (f" {ver_num}" if ver_num else ""),
+                    description=f"WordPress plugin '{name}' detected.",
+                    full_url=target_url,
+                )
+            )
             for vuln in info.get("vulnerabilities", []):
-                findings.append(_vuln_to_finding(vuln, host_ip, target_url, port, context=f"Plugin: {name}"))
+                findings.append(
+                    _vuln_to_finding(vuln, host_ip, target_url, port, context=f"Plugin: {name}")
+                )
 
     # Themes
     themes = data.get("themes", {}) or data.get("main_theme", {})
@@ -76,41 +89,64 @@ def parse_wpscan_json(json_path: Path, host_ip: str = "") -> list[Finding]:
         for name, info in themes.items():
             if not isinstance(info, dict):
                 continue
-            findings.append(Finding(
-                source="wpscan", host=host_ip, port=port, protocol="tcp",
-                severity=Severity.INFO,
-                title=f"WP Theme: {name}",
-                description=f"WordPress theme '{name}' detected.",
-                full_url=target_url,
-            ))
+            findings.append(
+                Finding(
+                    source="wpscan",
+                    host=host_ip,
+                    port=port,
+                    protocol="tcp",
+                    severity=Severity.INFO,
+                    title=f"WP Theme: {name}",
+                    description=f"WordPress theme '{name}' detected.",
+                    full_url=target_url,
+                )
+            )
             for vuln in info.get("vulnerabilities", []):
-                findings.append(_vuln_to_finding(vuln, host_ip, target_url, port, context=f"Theme: {name}"))
+                findings.append(
+                    _vuln_to_finding(vuln, host_ip, target_url, port, context=f"Theme: {name}")
+                )
 
     # Users
     users = data.get("users", {})
     if isinstance(users, dict):
         for username, info in users.items():
-            findings.append(Finding(
-                source="wpscan", host=host_ip, port=port, protocol="tcp",
-                severity=Severity.MEDIUM,
-                title=f"WP User: {username}",
-                description=f"WordPress user '{username}' enumerated.",
-                full_url=target_url,
-            ))
+            findings.append(
+                Finding(
+                    source="wpscan",
+                    host=host_ip,
+                    port=port,
+                    protocol="tcp",
+                    severity=Severity.MEDIUM,
+                    title=f"WP User: {username}",
+                    description=f"WordPress user '{username}' enumerated.",
+                    full_url=target_url,
+                )
+            )
 
     # Interesting findings
     for item in data.get("interesting_findings", []):
         if isinstance(item, dict):
             url = item.get("url", "")
             entry_type = item.get("type", "")
-            findings.append(Finding(
-                source="wpscan", host=host_ip, port=port, protocol="tcp",
-                severity=Severity.LOW,
-                title=f"WP: {entry_type}" if entry_type else "WP: Interesting finding",
-                description=item.get("to_s", url),
-                full_url=url,
-                references=[r.get("url", "") for r in item.get("references", {}).get("url", []) if isinstance(r, dict)] if isinstance(item.get("references"), dict) else [],
-            ))
+            findings.append(
+                Finding(
+                    source="wpscan",
+                    host=host_ip,
+                    port=port,
+                    protocol="tcp",
+                    severity=Severity.LOW,
+                    title=f"WP: {entry_type}" if entry_type else "WP: Interesting finding",
+                    description=item.get("to_s", url),
+                    full_url=url,
+                    references=[
+                        r.get("url", "")
+                        for r in item.get("references", {}).get("url", [])
+                        if isinstance(r, dict)
+                    ]
+                    if isinstance(item.get("references"), dict)
+                    else [],
+                )
+            )
 
     return findings
 
@@ -131,7 +167,10 @@ def _vuln_to_finding(vuln: dict, host_ip: str, url: str, port: str, context: str
         cve = ", ".join(f"CVE-{c}" for c in cves)
 
     return Finding(
-        source="wpscan", host=host_ip, port=port, protocol="tcp",
+        source="wpscan",
+        host=host_ip,
+        port=port,
+        protocol="tcp",
         severity=Severity.HIGH,
         title=f"WP Vuln: {title}",
         description=vuln.get("description", title),

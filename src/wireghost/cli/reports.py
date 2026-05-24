@@ -1,4 +1,5 @@
 """wireghost report — report generation and download."""
+
 from __future__ import annotations
 
 import subprocess
@@ -17,15 +18,11 @@ app = typer.Typer(name="report", help="Report generation and download")
 @app.command("generate")
 def generate_report(
     scan_dir: Path = typer.Argument(..., help="Path to scan output directory"),
-    output_dir: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Output directory"
-    ),
+    output_dir: Optional[Path] = typer.Option(None, "--output", "-o", help="Output directory"),
     formats: str = typer.Option(
         "html,docx,xlsx", "--formats", "-f", help="Comma-separated formats"
     ),
-    title: str = typer.Option(
-        "Security Assessment Summary Report", "--title", help="Report title"
-    ),
+    title: str = typer.Option("Security Assessment Summary Report", "--title", help="Report title"),
 ) -> None:
     """Generate reports from a local scan directory."""
     cmd = [sys.executable, "-m", "wireghost", "report", str(scan_dir)]
@@ -45,9 +42,7 @@ def generate_report(
 def download_report(
     scan_id: str = typer.Argument(..., help="Portal scan UUID"),
     format: str = typer.Option("docx", "--format", help="docx, html, or xlsx"),
-    output_dir: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Output directory"
-    ),
+    output_dir: Optional[Path] = typer.Option(None, "--output", "-o", help="Output directory"),
 ) -> None:
     """Download a report from a portal-managed scan."""
     client = get_client()

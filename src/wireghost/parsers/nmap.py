@@ -69,7 +69,7 @@ def parse_nmap_xml(xml_path: Path) -> list[Host]:
                     protocol=protocol,
                     state=state,
                     service=service,
-                    service_source='nmap' if service else '',
+                    service_source="nmap" if service else "",
                 )
             )
 
@@ -79,9 +79,7 @@ def parse_nmap_xml(xml_path: Path) -> list[Host]:
         if os_match is not None:
             os_info = os_match.get("name", "")
 
-        hosts.append(
-            Host(ip=ip, hostname=hostname, status=status, ports=ports, os=os_info)
-        )
+        hosts.append(Host(ip=ip, hostname=hostname, status=status, ports=ports, os=os_info))
 
     return hosts
 
@@ -115,21 +113,29 @@ def parse_nmap_vuln_xml(xml_path: Path) -> list[Finding]:
                 sid_lower = script_id.lower()
 
                 # Skip error/negative results
-                if any(skip in out_lower for skip in (
-                    "couldn't find any",
-                    "couldn\\'t find a file",
-                    "error: script execution failed",
-                    "error: missing a param",
-                    "not vulnerable",
-                    "no vuln",
-                    "might be redirecting",
-                )):
+                if any(
+                    skip in out_lower
+                    for skip in (
+                        "couldn't find any",
+                        "couldn\\'t find a file",
+                        "error: script execution failed",
+                        "error: missing a param",
+                        "not vulnerable",
+                        "no vuln",
+                        "might be redirecting",
+                    )
+                ):
                     continue
 
                 # Skip pure info scripts (not vulnerabilities)
                 _INFO_SCRIPTS = {
-                    "ssh-hostkey", "ssh-publickey-acceptance", "ssh-auth-methods",
-                    "ssl-cert", "ssl-date", "http-title", "http-server-header",
+                    "ssh-hostkey",
+                    "ssh-publickey-acceptance",
+                    "ssh-auth-methods",
+                    "ssl-cert",
+                    "ssl-date",
+                    "http-title",
+                    "http-server-header",
                     "irc-botnet-channels",
                 }
                 if sid_lower in _INFO_SCRIPTS:
@@ -189,7 +195,4 @@ def generate_vuln_command(xml_path: Path, output_base: Path) -> str | None:
     port_csv = ",".join(str(p) for p in sorted(all_ports))
     ip_list = " ".join(all_ips)
 
-    return (
-        f"nmap --script=vuln -p {port_csv} "
-        f"-oX {output_base} {ip_list}"
-    )
+    return f"nmap --script=vuln -p {port_csv} -oX {output_base} {ip_list}"

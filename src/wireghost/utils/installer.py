@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import platform
 import shutil
 import subprocess
@@ -55,7 +54,9 @@ def _install_apt(package: str) -> bool:
     try:
         result = subprocess.run(
             ["sudo", "apt-get", "install", "-y", package],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0:
             console.print(f"  [green]Installed {package}[/]")
@@ -101,6 +102,7 @@ def _install_pd_binary(tool_name: str, repo: str) -> bool:
             urllib.request.urlretrieve(asset_url, str(zip_path))
 
             import zipfile
+
             with zipfile.ZipFile(zip_path) as zf:
                 # Find the binary in the zip
                 for name in zf.namelist():
@@ -133,7 +135,9 @@ def _install_pip(package: str) -> bool:
     try:
         result = subprocess.run(
             ["pip", "install", "--quiet", package],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0:
             console.print(f"  [green]Installed {package}[/]")
@@ -153,9 +157,7 @@ def install_missing_tools(tools: list[str]) -> list[str]:
     if not missing:
         return []
 
-    console.print(
-        f"\n[bold yellow]Missing tools:[/] {', '.join(missing)}"
-    )
+    console.print(f"\n[bold yellow]Missing tools:[/] {', '.join(missing)}")
     console.print("[bold]Attempting auto-install...[/]\n")
 
     still_missing: list[str] = []
@@ -177,9 +179,7 @@ def install_missing_tools(tools: list[str]) -> list[str]:
     # Verify installs actually worked (hash cache may be stale)
     final_missing = [t for t in tools if shutil.which(t) is None]
     if final_missing:
-        console.print(
-            f"\n[bold red]Still missing after install:[/] {', '.join(final_missing)}"
-        )
+        console.print(f"\n[bold red]Still missing after install:[/] {', '.join(final_missing)}")
     else:
         console.print("\n[bold green]All tools installed successfully![/]")
 

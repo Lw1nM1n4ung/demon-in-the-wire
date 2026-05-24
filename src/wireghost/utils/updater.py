@@ -25,7 +25,10 @@ def _run(cmd: list[str], label: str, timeout: int = 120) -> bool:
     console.print(f"  [cyan]{label}[/]")
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         if result.returncode == 0:
             # Print last meaningful line of output
@@ -39,10 +42,10 @@ def _run(cmd: list[str], label: str, timeout: int = 120) -> bool:
             console.print(f"    [dim]{result.stderr.strip()[:150]}[/]")
         return False
     except FileNotFoundError:
-        console.print(f"    [yellow]Not installed, skipping[/]")
+        console.print("    [yellow]Not installed, skipping[/]")
         return False
     except subprocess.TimeoutExpired:
-        console.print(f"    [yellow]Timed out[/]")
+        console.print("    [yellow]Timed out[/]")
         return False
 
 
@@ -102,16 +105,21 @@ def update_tools() -> None:
                             zf.extract(name, tmp)
                             extracted = Path(tmp) / name
                             # Try /usr/local/bin first, fall back to ~/.local/bin
-                            for dest_dir in [Path("/usr/local/bin"), Path.home() / ".local" / "bin"]:
+                            for dest_dir in [
+                                Path("/usr/local/bin"),
+                                Path.home() / ".local" / "bin",
+                            ]:
                                 dest = dest_dir / tool_name
                                 try:
                                     subprocess.run(
                                         ["cp", str(extracted), str(dest)],
-                                        check=True, capture_output=True,
+                                        check=True,
+                                        capture_output=True,
                                     )
                                     subprocess.run(
                                         ["chmod", "+x", str(dest)],
-                                        check=True, capture_output=True,
+                                        check=True,
+                                        capture_output=True,
                                     )
                                     ver = data.get("tag_name", "latest")
                                     console.print(f"    [green]Updated to {ver}[/]")
@@ -121,11 +129,13 @@ def update_tools() -> None:
                                     try:
                                         subprocess.run(
                                             ["sudo", "cp", str(extracted), str(dest)],
-                                            check=True, capture_output=True,
+                                            check=True,
+                                            capture_output=True,
                                         )
                                         subprocess.run(
                                             ["sudo", "chmod", "+x", str(dest)],
-                                            check=True, capture_output=True,
+                                            check=True,
+                                            capture_output=True,
                                         )
                                         ver = data.get("tag_name", "latest")
                                         console.print(f"    [green]Updated to {ver}[/]")
@@ -150,7 +160,6 @@ def update_feeds() -> None:
         _run(["searchsploit", "-u"], "searchsploit database", timeout=120)
 
 
-
 def update_self() -> None:
     """Update wireghost from GitHub."""
     console.print("\n[bold]Updating wireghost...[/]")
@@ -158,7 +167,8 @@ def update_self() -> None:
     # Find the repo root
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         console.print("  [yellow]Not a git repo, skipping self-update[/]")
@@ -182,6 +192,7 @@ def update_self() -> None:
     # Show new version
     try:
         from wireghost import __version__
+
         console.print(f"  [green]wireghost {__version__}[/]")
     except Exception:
         pass

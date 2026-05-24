@@ -54,9 +54,7 @@ _PARTITION_THRESHOLD = 23
 # TCP ports probed during enhanced discovery (nmap -PS<ports>).
 # These are high-value ports whose mere presence indicates a live host —
 # SSH, SMB, RDP, databases, web alternates, WinRM.
-_TCP_DISCOVERY_PORTS = (
-    "22,25,53,111,135,139,445,1433,3306,3389,5432,5985,6379,8080,8443,9090,9200"
-)
+_TCP_DISCOVERY_PORTS = "22,25,53,111,135,139,445,1433,3306,3389,5432,5985,6379,8080,8443,9090,9200"
 
 # UDP ports probed during enhanced discovery (nmap -PU<ports>).
 # UDP ping bypasses firewalls that drop TCP SYN and ICMP but allow UDP
@@ -98,8 +96,8 @@ def _partition_target(target: str) -> list[str]:
     - Hostnames → returned as-is
     """
     # Multi-target support: split on commas and/or whitespace
-    if re.search(r'[,\s]', target) and '/' in target:
-        parts = re.split(r'[,\s]+', target.strip())
+    if re.search(r"[,\s]", target) and "/" in target:
+        parts = re.split(r"[,\s]+", target.strip())
         parts = [p for p in parts if p]
         if len(parts) > 1:
             all_subnets: list[str] = []
@@ -114,7 +112,8 @@ def _partition_target(target: str) -> list[str]:
                     deduped.append(s)
             log.info(
                 "Multi-target: %d part(s) → %d unique /24 subnet(s)",
-                len(parts), len(deduped),
+                len(parts),
+                len(deduped),
             )
             return deduped
 
@@ -215,7 +214,8 @@ async def _scan_subnet(
         async def _run_nmap() -> None:
             if enhanced:
                 nmap_args = [
-                    "nmap", "-sn",
+                    "nmap",
+                    "-sn",
                     "-PS" + _TCP_DISCOVERY_PORTS,
                     "-PU" + _UDP_DISCOVERY_PORTS,
                     subnet,
@@ -224,7 +224,8 @@ async def _scan_subnet(
                 nmap_args = ["nmap", "-sn", subnet]
 
             result = await run_tool(
-                nmap_args, timeout=timeout,
+                nmap_args,
+                timeout=timeout,
                 label=f"nmap -sn {subnet}",
             )
             if result.returncode == 0:
@@ -255,10 +256,16 @@ async def _scan_subnet(
             _run_fping(),
         ]
         if run_arp and (has_arpscan or has_netdiscover):
-            tasks.append(_arp_scan_subnet(
-                subnet, timeout, live_ips, mac_vendor,
-                has_arpscan, has_netdiscover,
-            ))
+            tasks.append(
+                _arp_scan_subnet(
+                    subnet,
+                    timeout,
+                    live_ips,
+                    mac_vendor,
+                    has_arpscan,
+                    has_netdiscover,
+                )
+            )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for result in results:
@@ -269,11 +276,7 @@ async def _scan_subnet(
         # have not yet modified live_ips/mac_vendor, so each subnet only
         # reports its own discoveries.
         new_ips = live_ips - before_ips
-        new_mac = {
-            ip: mac_vendor[ip]
-            for ip in mac_vendor
-            if ip not in before_mac_keys
-        }
+        new_mac = {ip: mac_vendor[ip] for ip in mac_vendor if ip not in before_mac_keys}
 
     return new_ips, new_mac
 
@@ -311,7 +314,8 @@ async def _dns_sweep_subnet(
 
 
 async def discover_hosts(
-    config: ScanConfig, tree: OutputTree,
+    config: ScanConfig,
+    tree: OutputTree,
     on_progress: "Callable[[str, int, int], None] | None" = None,
     on_subnet_complete: "Callable[[list[str], dict[str, tuple[str, str]]], None] | None" = None,
 ) -> tuple[list[str], dict[str, tuple[str, str]]]:
@@ -370,7 +374,8 @@ async def discover_hosts(
     if enhanced:
         log.info(
             "Enhanced discovery: TCP ports=%s UDP ports=%s",
-            _TCP_DISCOVERY_PORTS, _UDP_DISCOVERY_PORTS,
+            _TCP_DISCOVERY_PORTS,
+            _UDP_DISCOVERY_PORTS,
         )
 
     live_ips: set[str] = set()
@@ -393,9 +398,17 @@ async def discover_hosts(
     async def _tracked_scan_subnet(subnet: str, idx: int) -> None:
         nonlocal subnets_done
         new_ips, new_mac = await _scan_subnet(
-            subnet, timeout, live_ips, mac_vendor, fping_unreachable,
+            subnet,
+            timeout,
+            live_ips,
+            mac_vendor,
+            fping_unreachable,
             semaphore,
-            idx, total, run_arp, has_arpscan, has_netdiscover,
+            idx,
+            total,
+            run_arp,
+            has_arpscan,
+            has_netdiscover,
             enhanced=enhanced,
         )
         subnets_done += 1
@@ -430,9 +443,7 @@ async def discover_hosts(
     if dns_hostnames:
         dns_file = tree.live_host_dir / "dns_sweep.txt"
         dns_file.write_text(
-            "\n".join(
-                f"{ip}\t{dns_hostnames[ip]}" for ip in sorted(dns_hostnames)
-            ) + "\n",
+            "\n".join(f"{ip}\t{dns_hostnames[ip]}" for ip in sorted(dns_hostnames)) + "\n",
             encoding="utf-8",
         )
         log.info("Passive DNS sweep: %d PTR record(s) found", len(dns_hostnames))
@@ -463,7 +474,8 @@ async def discover_hosts(
             sorted_fpx = sorted(new_fpx_unreachable, key=_ip_sort_key)
             fpx_txt = tree.live_host_dir / "fping_unreachable.txt"
             fpx_txt.write_text(
-                "\n".join(sorted_fpx) + "\n", encoding="utf-8",
+                "\n".join(sorted_fpx) + "\n",
+                encoding="utf-8",
             )
             log.info(
                 "fping unreachable: %d firewalled host(s) added to scan targets",

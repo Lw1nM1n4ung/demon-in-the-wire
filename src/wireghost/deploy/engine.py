@@ -49,10 +49,14 @@ class DeployResult:
 def _ssh_opts(config: DeployConfig) -> list[str]:
     """Build common SSH options list."""
     opts = [
-        "-o", "ConnectTimeout=10",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ServerAliveInterval=30",
-        "-p", str(config.ssh_port),
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ServerAliveInterval=30",
+        "-p",
+        str(config.ssh_port),
     ]
     if config.ssh_key:
         opts.extend(["-i", str(config.ssh_key)])
@@ -231,7 +235,8 @@ def deploy(config: DeployConfig) -> DeployResult:
     # ── Step 0: Verify SSH ──────────────────────────────────────────
     if not check_ssh(config):
         return DeployResult(
-            success=False, host=config.target_host,
+            success=False,
+            host=config.target_host,
             errors=["SSH connection failed"],
             duration=time.monotonic() - t0,
         )
@@ -243,7 +248,8 @@ def deploy(config: DeployConfig) -> DeployResult:
             bundle_path = build_bundle(config, output_dir=Path(tmpdir))
         elif not bundle_path.exists():
             return DeployResult(
-                success=False, host=config.target_host,
+                success=False,
+                host=config.target_host,
                 errors=[f"Bundle not found: {bundle_path}"],
                 duration=time.monotonic() - t0,
             )
@@ -251,7 +257,8 @@ def deploy(config: DeployConfig) -> DeployResult:
         # ── Step 2: Transfer ────────────────────────────────────────────
         if not _scp_transfer(config, bundle_path):
             return DeployResult(
-                success=False, host=config.target_host,
+                success=False,
+                host=config.target_host,
                 errors=["SCP transfer failed"],
                 duration=time.monotonic() - t0,
             )
@@ -274,10 +281,7 @@ def deploy(config: DeployConfig) -> DeployResult:
             f"{env} sudo bash install.sh {host_flag} {msf_flag}"
         )
     else:
-        remote_cmd = (
-            f"cd /opt/{bundle_name} && "
-            f"{env} sudo bash install.sh {host_flag} {msf_flag}"
-        )
+        remote_cmd = f"cd /opt/{bundle_name} && {env} sudo bash install.sh {host_flag} {msf_flag}"
 
     log.info("Running remote installer on %s ...", config.target_host)
     rc, stdout, stderr = _run_ssh(

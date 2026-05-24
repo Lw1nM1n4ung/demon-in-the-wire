@@ -13,6 +13,7 @@ from wireghost.models.finding import Finding
 from wireghost.models.report import ScanReport
 from wireghost.models.scan import Host
 from wireghost.pipeline.cms_scan import scan_cms
+from wireghost.pipeline.cve_search import scan_cve_search
 from wireghost.pipeline.discovery import discover_hosts
 from wireghost.pipeline.ldap_enum import enumerate_ldap
 from wireghost.pipeline.msf_scan import scan_msf
@@ -101,8 +102,9 @@ async def run_pipeline(
     # Truncate long multi-target names to avoid ENAMETOOLONG (255-char limit)
     if len(target_name) > 200:
         import hashlib
+
         tag = hashlib.sha256(target_name.encode()).hexdigest()[:8]
-        target_name = target_name[:200] + '_' + tag
+        target_name = target_name[:200] + "_" + tag
     tree = build_output_tree(config.output_dir, target_name)
 
     log.info("Starting Wire_Ghost scan against %s", config.target)
@@ -116,7 +118,18 @@ async def run_pipeline(
 
     # Log availability of optional fallback scanners
     import shutil
-    for tool in ("naabu", "masscan", "sslscan", "showmount", "snmpget", "snmpwalk", "katana", "ldapsearch", "msfconsole"):
+
+    for tool in (
+        "naabu",
+        "masscan",
+        "sslscan",
+        "showmount",
+        "snmpget",
+        "snmpwalk",
+        "katana",
+        "ldapsearch",
+        "msfconsole",
+    ):
         if shutil.which(tool):
             log.info("Optional scanner available: %s", tool)
         else:
@@ -126,13 +139,13 @@ async def run_pipeline(
     # Midpoints of the frontend progress segments so the weighted average
     # approximates actual work done.
     _PHASE_WEIGHTS: dict[str, int] = {
-        "discovery": 9,    # 3-15% midpoint
-        "portscan": 27,    # 15-40% midpoint
-        "webdetect": 46,   # 40-52% midpoint
-        "webcrawl": 58,    # 52-64% midpoint
-        "vulnscan": 67,    # 64-70% midpoint
-        "enumeration": 77, # 70-90% midpoint
-        "reports": 94,     # 90-98% midpoint
+        "discovery": 9,  # 3-15% midpoint
+        "portscan": 27,  # 15-40% midpoint
+        "webdetect": 46,  # 40-52% midpoint
+        "webcrawl": 58,  # 52-64% midpoint
+        "vulnscan": 67,  # 64-70% midpoint
+        "enumeration": 77,  # 70-90% midpoint
+        "reports": 94,  # 90-98% midpoint
     }
 
     # --- Phase 2: Discovery ---
@@ -152,7 +165,8 @@ async def run_pipeline(
     if on_progress:
         on_progress("discovery", 0, 0)
     live_ips, mac_vendor_map, dns_hostnames = await discover_hosts(
-        config, tree,
+        config,
+        tree,
         on_progress=_discovery_progress,
         on_subnet_complete=on_subnet_complete,
     )
@@ -206,7 +220,8 @@ async def run_pipeline(
     # --- Per-host pipeline (1 host = 1 full pipeline, all in parallel) ---
     log.info(
         "Launching per-host pipelines: %d host(s), parallelism=%d",
-        total_hosts, config.parallelism,
+        total_hosts,
+        config.parallelism,
     )
     # Initial progress: all hosts at discovery (weight 9 ≈ 9%)
     if on_progress:
@@ -293,12 +308,20 @@ async def run_pipeline(
         await _advance_host_phase(ip, "enumeration")
 
         enum_names = [
-            "cms", "service_enum", "smb", "netexec", "tls",
-            "snmp", "nfs", "ldap",
+            "cms",
+            "service_enum",
+            "smb",
+            "netexec",
+            "tls",
+            "snmp",
+            "nfs",
+            "ldap",
         ]
         findings: list[Finding] = (
-            list(crawl_findings) + list(screenshot_findings)
-            + list(vuln_findings) + list(msf_findings)
+            list(crawl_findings)
+            + list(screenshot_findings)
+            + list(vuln_findings)
+            + list(msf_findings)
         )
         for name, result in zip(enum_names, enum_results):
             if isinstance(result, Exception):
@@ -309,9 +332,28 @@ async def run_pipeline(
 
         findings = _dedup_findings(findings)
 
+        # NVD CVE search (second pass): now that enumeration findings exist,
+        # re-run with full finding list to catch versions from enum4linux,
+        # NetExec, SNMP, TLS, LDAP, CMS, and service_enum tools.
+        nvd_findings = await scan_cve_search(host, findings, config)
+        if nvd_findings:
+            # Avoid duplicate CVEs already covered by findings from other tools
+            existing_cves = {f.cve for f in findings if f.cve}
+            for nf in nvd_findings:
+                if nf.cve not in existing_cves:
+                    findings.append(nf)
+            log.info(
+                "[%s] NVD second pass: %d new CVE(s)",
+                ip,
+                len([n for n in nvd_findings if n.cve not in existing_cves]),
+            )
+
         log.info(
             "[%s] Pipeline done: %d port(s), %d endpoint(s), %d finding(s)",
-            ip, len(host.open_ports), len(host.web_endpoints), len(findings),
+            ip,
+            len(host.open_ports),
+            len(host.web_endpoints),
+            len(findings),
         )
         if on_host_complete:
             on_host_complete(host, findings)

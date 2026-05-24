@@ -52,45 +52,51 @@ def parse_sslscan(xml_path: Path, host_ip: str, port: int) -> list[Finding]:
                 weak_ciphers.append(f"{sslversion} {cipher_name} ({bits}bit)")
 
         if weak_ciphers:
-            findings.append(Finding(
-                source="sslscan",
-                host=host_ip,
-                port=port_str,
-                protocol="tcp",
-                severity=Severity.HIGH,
-                title=f"Weak TLS ciphers accepted ({len(weak_ciphers)})",
-                description="Weak or deprecated ciphers:\n" + "\n".join(weak_ciphers),
-            ))
+            findings.append(
+                Finding(
+                    source="sslscan",
+                    host=host_ip,
+                    port=port_str,
+                    protocol="tcp",
+                    severity=Severity.HIGH,
+                    title=f"Weak TLS ciphers accepted ({len(weak_ciphers)})",
+                    description="Weak or deprecated ciphers:\n" + "\n".join(weak_ciphers),
+                )
+            )
 
         # --- Deprecated protocol support ---
         for protocol_tag in ("sslv2", "sslv3"):
             el = ssltest.find(protocol_tag)
             if el is not None and el.get("enabled", "0") == "1":
                 proto_name = protocol_tag.upper().replace("V", "v")
-                findings.append(Finding(
-                    source="sslscan",
-                    host=host_ip,
-                    port=port_str,
-                    protocol="tcp",
-                    severity=Severity.HIGH,
-                    title=f"Deprecated protocol {proto_name} enabled",
-                    description=f"{proto_name} is enabled and should be disabled.",
-                ))
+                findings.append(
+                    Finding(
+                        source="sslscan",
+                        host=host_ip,
+                        port=port_str,
+                        protocol="tcp",
+                        severity=Severity.HIGH,
+                        title=f"Deprecated protocol {proto_name} enabled",
+                        description=f"{proto_name} is enabled and should be disabled.",
+                    )
+                )
 
         # --- Certificate checks ---
         for cert in ssltest.iter("certificate"):
             # Self-signed
             self_signed = cert.find("self-signed")
             if self_signed is not None and self_signed.text == "true":
-                findings.append(Finding(
-                    source="sslscan",
-                    host=host_ip,
-                    port=port_str,
-                    protocol="tcp",
-                    severity=Severity.MEDIUM,
-                    title="Self-signed TLS certificate",
-                    description="The server presents a self-signed certificate.",
-                ))
+                findings.append(
+                    Finding(
+                        source="sslscan",
+                        host=host_ip,
+                        port=port_str,
+                        protocol="tcp",
+                        severity=Severity.MEDIUM,
+                        title="Self-signed TLS certificate",
+                        description="The server presents a self-signed certificate.",
+                    )
+                )
 
             # Expiry
             not_after = cert.find("not-valid-after")
@@ -98,46 +104,57 @@ def parse_sslscan(xml_path: Path, host_ip: str, port: int) -> list[Finding]:
                 try:
                     expiry = datetime.strptime(not_after.text.strip(), "%b %d %H:%M:%S %Y %Z")
                     if expiry < datetime.now():
-                        findings.append(Finding(
-                            source="sslscan",
-                            host=host_ip,
-                            port=port_str,
-                            protocol="tcp",
-                            severity=Severity.MEDIUM,
-                            title="Expired TLS certificate",
-                            description=f"Certificate expired on {not_after.text.strip()}",
-                        ))
+                        findings.append(
+                            Finding(
+                                source="sslscan",
+                                host=host_ip,
+                                port=port_str,
+                                protocol="tcp",
+                                severity=Severity.MEDIUM,
+                                title="Expired TLS certificate",
+                                description=f"Certificate expired on {not_after.text.strip()}",
+                            )
+                        )
                 except ValueError:
-                    log.debug("Could not parse cert expiry date %r for %s:%d", not_after.text, host_ip, port)
+                    log.debug(
+                        "Could not parse cert expiry date %r for %s:%d",
+                        not_after.text,
+                        host_ip,
+                        port,
+                    )
 
             # Weak signature
             sig_algo = cert.find("signature-algorithm")
             if sig_algo is not None and sig_algo.text:
                 algo = sig_algo.text.strip().lower()
                 if "md5" in algo or ("sha1" in algo and "sha1with" in algo):
-                    findings.append(Finding(
-                        source="sslscan",
-                        host=host_ip,
-                        port=port_str,
-                        protocol="tcp",
-                        severity=Severity.MEDIUM,
-                        title=f"Weak certificate signature algorithm: {sig_algo.text.strip()}",
-                        description="The certificate uses a weak hash algorithm for its signature.",
-                    ))
+                    findings.append(
+                        Finding(
+                            source="sslscan",
+                            host=host_ip,
+                            port=port_str,
+                            protocol="tcp",
+                            severity=Severity.MEDIUM,
+                            title=f"Weak certificate signature algorithm: {sig_algo.text.strip()}",
+                            description="The certificate uses a weak hash algorithm for its signature.",
+                        )
+                    )
 
         # --- Heartbleed ---
         for hb in ssltest.iter("heartbleed"):
             if hb.get("vulnerable", "0") == "1":
                 sslver = hb.get("sslversion", "")
-                findings.append(Finding(
-                    source="sslscan",
-                    host=host_ip,
-                    port=port_str,
-                    protocol="tcp",
-                    severity=Severity.CRITICAL,
-                    title=f"Heartbleed vulnerability ({sslver})",
-                    description="The server is vulnerable to the Heartbleed bug (CVE-2014-0160).",
-                    cve="CVE-2014-0160",
-                ))
+                findings.append(
+                    Finding(
+                        source="sslscan",
+                        host=host_ip,
+                        port=port_str,
+                        protocol="tcp",
+                        severity=Severity.CRITICAL,
+                        title=f"Heartbleed vulnerability ({sslver})",
+                        description="The server is vulnerable to the Heartbleed bug (CVE-2014-0160).",
+                        cve="CVE-2014-0160",
+                    )
+                )
 
     return findings

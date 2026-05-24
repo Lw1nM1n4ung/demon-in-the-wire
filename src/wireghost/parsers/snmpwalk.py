@@ -20,8 +20,12 @@ def parse_snmpwalk(stdout: str) -> dict[str, str]:
     """
     results: dict[str, str] = {}
     interesting_prefixes = (
-        _SYS_DESCR, _SYS_CONTACT, _SYS_NAME, _SYS_LOCATION,
-        _IF_DESCR, _IF_PHYS_ADDR,
+        _SYS_DESCR,
+        _SYS_CONTACT,
+        _SYS_NAME,
+        _SYS_LOCATION,
+        _IF_DESCR,
+        _IF_PHYS_ADDR,
     )
 
     for line in stdout.strip().splitlines():

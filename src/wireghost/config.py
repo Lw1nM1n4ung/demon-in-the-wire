@@ -33,9 +33,7 @@ class ScanConfig:
     # followed by --script=vuln on a /24 can blow past the generic 1 h),
     # so it gets 1.5 h by default. Other tools stay on tool_timeout.
     nmap_timeout: float = 5400.0
-    report_formats: list[str] = field(
-        default_factory=lambda: ["html", "docx", "xlsx"]
-    )
+    report_formats: list[str] = field(default_factory=lambda: ["html", "docx", "xlsx"])
     report_title: str = "Security Assessment Summary Report"
     verbose: bool = False
     logo_path: Path | None = None
@@ -62,6 +60,7 @@ class ScanConfig:
     skip_brute_force: bool = False
     msf_metadata_path: str = "/opt/msf/modules_metadata_base.json"
     vulners_api_key: str = ""
+    nvd_api_key: str = ""
     # Use extended TCP port list + UDP ping for host discovery. When False,
     # falls back to nmap -sn defaults (ICMP + TCP:80,443 only).
     enhanced_discovery: bool = True
@@ -175,6 +174,7 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "skip_brute_force": "skip_brute_force",
         "msf_metadata_path": "msf_metadata_path",
         "vulners_api_key": "vulners_api_key",
+        "nvd_api_key": "nvd_api_key",
         "enhanced_discovery": "enhanced_discovery",
         "skip_passive_dns": "skip_passive_dns",
         "skip_fingerprintx": "skip_fingerprintx",
@@ -222,6 +222,7 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_SKIP_BRUTE_FORCE": ("skip_brute_force", bool),
         "WIREGHOST_MSF_METADATA_PATH": ("msf_metadata_path", str),
         "WIREGHOST_VULNERS_API_KEY": ("vulners_api_key", str),
+        "WIREGHOST_NVD_API_KEY": ("nvd_api_key", str),
         "WIREGHOST_ENHANCED_DISCOVERY": ("enhanced_discovery", bool),
         "WIREGHOST_SKIP_PASSIVE_DNS": ("skip_passive_dns", bool),
         "WIREGHOST_SKIP_FINGERPRINTX": ("skip_fingerprintx", bool),

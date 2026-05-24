@@ -34,7 +34,10 @@ def _has_nfs(host: Host) -> bool:
 
 
 async def enumerate_nfs(
-    host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    sem: asyncio.Semaphore,
 ) -> list[Finding]:
     """Run showmount -e if NFS-related services are detected on *host*."""
     if config.skip_nfs_enum:

@@ -2,25 +2,54 @@ name: CI
 
 on:
   push:
+    branches: [main, master, rewrite-v2]
   pull_request:
+    branches: [main, master, rewrite-v2]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  # ── Fast Fail Gate: Lint ──────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - uses: astral-sh/ruff-action@v1
+        with:
+          args: check --output-format=github
+
+      - uses: astral-sh/ruff-action@v1
+        with:
+          args: format --check --diff
+
+  # ── Core Test Matrix ──────────────────────────────────────────────
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
 
       - name: Install Python dependencies
         run: |
@@ -31,48 +60,133 @@ jobs:
         run: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci
 
       - name: Run pytest
-        run: python -m pytest tests -q
+        run: python -m pytest tests/ -q --tb=short
 
       - name: Run Django scanner tests
         run: |
           cd web_portal
           DJANGO_SECRET_KEY=ci-secret python manage.py test scanner --verbosity=1
 
-      - name: Run frontend JS tests
+      - name: Run frontend JS unit tests
         run: node tests/test_frontend_js.js
 
-      - name: Run topology JS tests
+      - name: Run topology JS unit tests
         run: node tests/test_topology_js.js
 
-      - name: Run installer tests
+      - name: Run installer shell tests
         run: bash tests/test_installers.sh
 
-  security:
+  # ── SAST + Supply-Chain Security ──────────────────────────────────
+  security-scan:
+    name: Security Scan (SAST + Deps)
+    needs: lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]' -r web_portal/requirements.txt
+
+      - name: Run Semgrep SAST
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: auto
+        continue-on-error: true
+
+      - name: Dependency audit (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit --audit-level high
+        continue-on-error: true
+
+      - name: GitHub secret scanning
+        uses: advanced-security/secret-scanning@v1
+        continue-on-error: true
+        with:
+          # Scan source files for secrets; results appear in repo Security tab
+          filter: '*'
+
+  # ── Docker Build + Trivy ──────────────────────────────────────────
+  docker-security:
+    name: Docker Build + Trivy
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build worker image
-        run: docker build -f web_portal/Dockerfile -t wireghost:worker-test .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web_portal/Dockerfile
+          tags: wireghost:worker-test
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build web image
-        run: docker build -f web_portal/Dockerfile.web -t wireghost:web-test .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web_portal/Dockerfile.web
+          tags: wireghost:web-test
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build CLI scanner image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: wireghost:cli-test
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Trivy scan worker
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'wireghost:worker-test'
-          format: 'table'
-          severity: 'HIGH,CRITICAL'
+          image-ref: wireghost:worker-test
+          format: table
+          severity: HIGH,CRITICAL
           exit-code: '0'
-          trivyignores: '.trivyignore'
+          trivyignores: .trivyignore
 
       - name: Trivy scan web
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'wireghost:web-test'
-          format: 'table'
-          severity: 'HIGH,CRITICAL'
+          image-ref: wireghost:web-test
+          format: table
+          severity: HIGH,CRITICAL
           exit-code: '0'
-          trivyignores: '.trivyignore'
+          trivyignores: .trivyignore
+
+      - name: Trivy scan CLI
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: wireghost:cli-test
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+          trivyignores: .trivyignore
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          path: .
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+          trivyignores: .trivyignore

@@ -31,12 +31,11 @@ async def check_tools(tools: list[str]) -> None:
         still_missing = missing
     else:
         from wireghost.utils.installer import install_missing_tools
+
         still_missing = install_missing_tools(missing)
 
     if still_missing:
-        raise ToolMissing(
-            f"Required tool(s) not found: {', '.join(still_missing)}"
-        )
+        raise ToolMissing(f"Required tool(s) not found: {', '.join(still_missing)}")
 
 
 @dataclass
@@ -76,9 +75,7 @@ async def run_tool(
     )
 
     try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.communicate()
@@ -92,8 +89,6 @@ async def run_tool(
     if proc.returncode == 0:
         console.log(f"[bold green]Done:[/] {display}")
     else:
-        console.log(
-            f"[bold red]Failed:[/] {display} (rc={proc.returncode})"
-        )
+        console.log(f"[bold red]Failed:[/] {display} (rc={proc.returncode})")
 
     return RunResult(returncode=proc.returncode, stdout=stdout, stderr=stderr)

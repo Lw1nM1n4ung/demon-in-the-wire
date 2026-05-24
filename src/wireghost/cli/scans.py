@@ -1,4 +1,5 @@
 """wireghost scans — portal-managed scan operations."""
+
 from __future__ import annotations
 
 import typer
@@ -19,9 +20,7 @@ _json_mode: bool = False
 
 @app.callback()
 def scans_callback(
-    json_output: bool = typer.Option(
-        False, "--json", help="Machine-readable JSON output"
-    ),
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable JSON output"),
 ) -> None:
     global _json_mode
     _json_mode = json_output
@@ -50,8 +49,13 @@ def list_scans(
             return
         echo_table(
             "Portal Scans",
-            [("id", "ID"), ("target", "Target"), ("status", "Status"),
-             ("finding_count", "Findings"), ("created_at", "Created")],
+            [
+                ("id", "ID"),
+                ("target", "Target"),
+                ("status", "Status"),
+                ("finding_count", "Findings"),
+                ("created_at", "Created"),
+            ],
             results,
         )
     except Exception as e:
@@ -72,18 +76,20 @@ def show_scan(
         if check_json_flag(json_output=_json_mode):
             echo_json(data)
             return
-        echo_keyvalue([
-            ("ID:", data.get("id")),
-            ("Target:", data.get("target")),
-            ("Status:", data.get("status")),
-            ("Title:", data.get("title", "—")),
-            ("Policy:", data.get("policy", "—")),
-            ("Findings:", str(data.get("finding_count", 0))),
-            ("Hosts:", str(data.get("host_count", 0))),
-            ("Created:", data.get("created_at", "—")),
-            ("Started:", data.get("started_at", "—")),
-            ("Completed:", data.get("completed_at", "—")),
-        ])
+        echo_keyvalue(
+            [
+                ("ID:", data.get("id")),
+                ("Target:", data.get("target")),
+                ("Status:", data.get("status")),
+                ("Title:", data.get("title", "—")),
+                ("Policy:", data.get("policy", "—")),
+                ("Findings:", str(data.get("finding_count", 0))),
+                ("Hosts:", str(data.get("host_count", 0))),
+                ("Created:", data.get("created_at", "—")),
+                ("Started:", data.get("started_at", "—")),
+                ("Completed:", data.get("completed_at", "—")),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
@@ -95,9 +101,7 @@ def scan_findings(
     severity: str = typer.Option(
         "", "--severity", help="Filter: critical, high, medium, low, info"
     ),
-    source: str = typer.Option(
-        "", "--source", help="Filter: nuclei, nmap_vuln, msf_scan, ..."
-    ),
+    source: str = typer.Option("", "--source", help="Filter: nuclei, nmap_vuln, msf_scan, ..."),
 ) -> None:
     """List findings for a scan."""
     client = get_client()
@@ -116,8 +120,14 @@ def scan_findings(
             return
         echo_table(
             f"Findings for {scan_id[:8]}...",
-            [("id", "ID"), ("severity", "Severity"), ("source", "Source"),
-             ("title", "Title"), ("host", "Host"), ("port", "Port")],
+            [
+                ("id", "ID"),
+                ("severity", "Severity"),
+                ("source", "Source"),
+                ("title", "Title"),
+                ("host", "Host"),
+                ("port", "Port"),
+            ],
             results,
         )
     except Exception as e:
@@ -141,8 +151,13 @@ def scan_hosts(
             return
         echo_table(
             f"Hosts for {scan_id[:8]}...",
-            [("ip", "IP"), ("hostname", "Hostname"), ("os", "OS"),
-             ("open_ports", "Open Ports"), ("status", "Status")],
+            [
+                ("ip", "IP"),
+                ("hostname", "Hostname"),
+                ("os", "OS"),
+                ("open_ports", "Open Ports"),
+                ("status", "Status"),
+            ],
             results,
         )
     except Exception as e:

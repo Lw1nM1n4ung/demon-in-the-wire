@@ -27,9 +27,16 @@ async def _probe_communities(ip: str) -> str | None:
     for community in _DEFAULT_COMMUNITIES:
         result = await run_tool(
             [
-                "snmpget", "-v2c", "-c", community,
-                "-t", "3", "-r", "0",
-                ip, ".1.3.6.1.2.1.1.1.0",
+                "snmpget",
+                "-v2c",
+                "-c",
+                community,
+                "-t",
+                "3",
+                "-r",
+                "0",
+                ip,
+                ".1.3.6.1.2.1.1.1.0",
             ],
             timeout=5,
             label=f"snmpget probe {ip} ({community})",
@@ -40,45 +47,54 @@ async def _probe_communities(ip: str) -> str | None:
 
 
 def _build_findings(
-    host_ip: str, community: str, walk_stdout: str,
+    host_ip: str,
+    community: str,
+    walk_stdout: str,
 ) -> list[Finding]:
     """Build Finding objects from SNMP probe + walk results."""
     findings: list[Finding] = []
 
-    findings.append(Finding(
-        source="snmp_enum",
-        host=host_ip,
-        port="161",
-        protocol="udp",
-        severity=Severity.HIGH,
-        title=f"SNMP default community string: '{community}'",
-        description=(
-            f"SNMP agent on {host_ip} accepts the community string '{community}'. "
-            "An attacker can enumerate system information, network interfaces, "
-            "routing tables, and installed software."
-        ),
-    ))
+    findings.append(
+        Finding(
+            source="snmp_enum",
+            host=host_ip,
+            port="161",
+            protocol="udp",
+            severity=Severity.HIGH,
+            title=f"SNMP default community string: '{community}'",
+            description=(
+                f"SNMP agent on {host_ip} accepts the community string '{community}'. "
+                "An attacker can enumerate system information, network interfaces, "
+                "routing tables, and installed software."
+            ),
+        )
+    )
 
     if walk_stdout:
         oid_map = parse_snmpwalk(walk_stdout)
         sys_info = extract_system_info(oid_map)
         if sys_info:
             info_lines = [f"{k}: {v}" for k, v in sys_info.items()]
-            findings.append(Finding(
-                source="snmp_enum",
-                host=host_ip,
-                port="161",
-                protocol="udp",
-                severity=Severity.INFO,
-                title="SNMP system information exposed",
-                description="\n".join(info_lines),
-            ))
+            findings.append(
+                Finding(
+                    source="snmp_enum",
+                    host=host_ip,
+                    port="161",
+                    protocol="udp",
+                    severity=Severity.INFO,
+                    title="SNMP system information exposed",
+                    description="\n".join(info_lines),
+                )
+            )
 
     return findings
 
 
 async def enumerate_snmp(
-    host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    sem: asyncio.Semaphore,
 ) -> list[Finding]:
     """Blind SNMP probe on *host* followed by full walk if community found."""
     if config.skip_snmp_enum:

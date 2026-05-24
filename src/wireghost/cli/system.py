@@ -1,4 +1,5 @@
 """wireghost system — system operations."""
+
 from __future__ import annotations
 
 import typer
@@ -26,12 +27,14 @@ def system_stats() -> None:
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("CPU %:", str(data.get("cpu_percent", "—"))),
-            ("Memory:", data.get("memory", "—")),
-            ("Disk:", data.get("disk", "—")),
-            ("Uptime:", data.get("uptime", "—")),
-        ])
+        echo_keyvalue(
+            [
+                ("CPU %:", str(data.get("cpu_percent", "—"))),
+                ("Memory:", data.get("memory", "—")),
+                ("Disk:", data.get("disk", "—")),
+                ("Uptime:", data.get("uptime", "—")),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
@@ -51,8 +54,13 @@ def system_processes() -> None:
             return
         echo_table(
             "Container Processes",
-            [("name", "Name"), ("pid", "PID"), ("cpu", "CPU%"),
-             ("mem", "Mem%"), ("status", "Status")],
+            [
+                ("name", "Name"),
+                ("pid", "PID"),
+                ("cpu", "CPU%"),
+                ("mem", "Mem%"),
+                ("status", "Status"),
+            ],
             results,
         )
     except Exception as e:
@@ -98,8 +106,7 @@ def system_audit(
             return
         echo_table(
             "Audit Log",
-            [("timestamp", "Time"), ("user", "User"), ("action", "Action"),
-             ("detail", "Detail")],
+            [("timestamp", "Time"), ("user", "User"), ("action", "Action"), ("detail", "Detail")],
             results,
         )
     except Exception as e:
@@ -111,14 +118,19 @@ def system_audit(
 def system_update(
     tools: bool = typer.Option(False, "--tools", help="Update security tools"),
     feeds: bool = typer.Option(False, "--feeds", help="Update vulnerability feeds"),
-    self_update: bool = typer.Option(False, "--self", help="Update wireghost itself (git pull + pip install)"),
-    all_update: bool = typer.Option(False, "--all", help="Update everything: tools, feeds, and wireghost (local)"),
+    self_update: bool = typer.Option(
+        False, "--self", help="Update wireghost itself (git pull + pip install)"
+    ),
+    all_update: bool = typer.Option(
+        False, "--all", help="Update everything: tools, feeds, and wireghost (local)"
+    ),
 ) -> None:
     """Check for or apply updates."""
     # --all runs everything locally via updater.py
     if all_update:
         try:
             from wireghost.utils.updater import update_all
+
             update_all()
         except Exception as e:
             console.print(f"[bold red]Error:[/] {e}")
@@ -129,6 +141,7 @@ def system_update(
     if self_update:
         try:
             from wireghost.utils.updater import update_self
+
             update_self()
         except Exception as e:
             console.print(f"[bold red]Error:[/] {e}")
@@ -146,11 +159,13 @@ def system_update(
             if check_json_flag():
                 echo_json(data)
                 return
-            echo_keyvalue([
-                ("Current version:", data.get("current", "—")),
-                ("Latest version:", data.get("latest", "—")),
-                ("Update available:", str(data.get("update_available", False))),
-            ])
+            echo_keyvalue(
+                [
+                    ("Current version:", data.get("current", "—")),
+                    ("Latest version:", data.get("latest", "—")),
+                    ("Update available:", str(data.get("update_available", False))),
+                ]
+            )
         except Exception as e:
             console.print(f"[bold red]Error:[/] {e}")
             raise typer.Exit(code=1)
@@ -183,11 +198,13 @@ def system_feeds() -> None:
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("Nuclei templates:", data.get("nuclei_templates", "—")),
-            ("SearchSploit:", data.get("searchsploit_db", "—")),
-            ("MSF metadata:", data.get("msf_metadata", "—")),
-        ])
+        echo_keyvalue(
+            [
+                ("Nuclei templates:", data.get("nuclei_templates", "—")),
+                ("SearchSploit:", data.get("searchsploit_db", "—")),
+                ("MSF metadata:", data.get("msf_metadata", "—")),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)

@@ -27,6 +27,7 @@ log = logging.getLogger("wireghost")
 # Module descriptor
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MsfModule:
     path: str
@@ -41,16 +42,26 @@ class MsfModule:
 _SERVICE_MODULES: dict[str, list[MsfModule]] = {
     "ssh": [
         MsfModule("auxiliary/scanner/ssh/ssh_version", Severity.INFO),
-        MsfModule("auxiliary/scanner/ssh/ssh_enumusers", Severity.MEDIUM,
-                  {"USER_FILE": "/opt/metasploit-framework/data/wordlists/unix_users.txt",
-                   "THRESHOLD": "10"}),
+        MsfModule(
+            "auxiliary/scanner/ssh/ssh_enumusers",
+            Severity.MEDIUM,
+            {
+                "USER_FILE": "/opt/metasploit-framework/data/wordlists/unix_users.txt",
+                "THRESHOLD": "10",
+            },
+        ),
     ],
     "microsoft-ds": [
         MsfModule("auxiliary/scanner/smb/smb_version", Severity.INFO),
         MsfModule("auxiliary/scanner/smb/smb_ms17_010", Severity.CRITICAL),
-        MsfModule("auxiliary/scanner/smb/smb_login", Severity.HIGH,
-                  {"BLANK_PASSWORDS": "true", "USER_AS_PASS": "false",
-                   }),
+        MsfModule(
+            "auxiliary/scanner/smb/smb_login",
+            Severity.HIGH,
+            {
+                "BLANK_PASSWORDS": "true",
+                "USER_AS_PASS": "false",
+            },
+        ),
     ],
     "netbios-ssn": [
         MsfModule("auxiliary/scanner/smb/smb_version", Severity.INFO),
@@ -62,35 +73,59 @@ _SERVICE_MODULES: dict[str, list[MsfModule]] = {
     ],
     "http": [
         MsfModule("auxiliary/scanner/http/http_version", Severity.INFO),
-        MsfModule("auxiliary/scanner/http/tomcat_mgr_login", Severity.CRITICAL,
-                  {"BLANK_PASSWORDS": "true", "STOP_ON_SUCCESS": "true",
-                   "HttpUsername": "tomcat", "HttpPassword": "tomcat"}),
+        MsfModule(
+            "auxiliary/scanner/http/tomcat_mgr_login",
+            Severity.CRITICAL,
+            {
+                "BLANK_PASSWORDS": "true",
+                "STOP_ON_SUCCESS": "true",
+                "HttpUsername": "tomcat",
+                "HttpPassword": "tomcat",
+            },
+        ),
         MsfModule("auxiliary/scanner/http/jboss_vulnscan", Severity.HIGH),
         MsfModule("auxiliary/scanner/http/jenkins_enum", Severity.MEDIUM),
     ],
     "https": [
         MsfModule("auxiliary/scanner/http/http_version", Severity.INFO),
-        MsfModule("auxiliary/scanner/http/tomcat_mgr_login", Severity.CRITICAL,
-                  {"BLANK_PASSWORDS": "true", "STOP_ON_SUCCESS": "true",
-                   "SSL": "true", "HttpUsername": "tomcat", "HttpPassword": "tomcat"}),
+        MsfModule(
+            "auxiliary/scanner/http/tomcat_mgr_login",
+            Severity.CRITICAL,
+            {
+                "BLANK_PASSWORDS": "true",
+                "STOP_ON_SUCCESS": "true",
+                "SSL": "true",
+                "HttpUsername": "tomcat",
+                "HttpPassword": "tomcat",
+            },
+        ),
     ],
     "http-proxy": [
         MsfModule("auxiliary/scanner/http/http_version", Severity.INFO),
     ],
     "mysql": [
         MsfModule("auxiliary/scanner/mysql/mysql_version", Severity.INFO),
-        MsfModule("auxiliary/scanner/mysql/mysql_login", Severity.HIGH,
-                  {"BLANK_PASSWORDS": "true", "USERNAME": "root"}),
+        MsfModule(
+            "auxiliary/scanner/mysql/mysql_login",
+            Severity.HIGH,
+            {"BLANK_PASSWORDS": "true", "USERNAME": "root"},
+        ),
     ],
     "postgresql": [
         MsfModule("auxiliary/scanner/postgres/postgres_version", Severity.INFO),
-        MsfModule("auxiliary/scanner/postgres/postgres_login", Severity.HIGH,
-                  {"BLANK_PASSWORDS": "true", "USERNAME": "postgres"}),
+        MsfModule(
+            "auxiliary/scanner/postgres/postgres_login",
+            Severity.HIGH,
+            {"BLANK_PASSWORDS": "true", "USERNAME": "postgres"},
+        ),
     ],
     "ms-sql-s": [
         MsfModule("auxiliary/scanner/mssql/mssql_ping", Severity.INFO),
-        MsfModule("auxiliary/scanner/mssql/mssql_login", Severity.HIGH,
-                  {"BLANK_PASSWORDS": "true", "USERNAME": "sa"}),
+        MsfModule(
+            "auxiliary/scanner/mssql/mssql_login",
+            Severity.HIGH,
+            {"BLANK_PASSWORDS": "true", "USERNAME": "sa"},
+        ),
     ],
     "ms-wbt-server": [
         MsfModule("auxiliary/scanner/rdp/rdp_scanner", Severity.INFO),
@@ -106,16 +141,20 @@ _SERVICE_MODULES: dict[str, list[MsfModule]] = {
         MsfModule("auxiliary/scanner/redis/redis_server", Severity.HIGH),
     ],
     "mongodb": [
-        MsfModule("auxiliary/scanner/mongodb/mongodb_login", Severity.HIGH,
-                  {"BLANK_PASSWORDS": "true"}),
+        MsfModule(
+            "auxiliary/scanner/mongodb/mongodb_login", Severity.HIGH, {"BLANK_PASSWORDS": "true"}
+        ),
     ],
     "smtp": [
         MsfModule("auxiliary/scanner/smtp/smtp_version", Severity.INFO),
         MsfModule("auxiliary/scanner/smtp/smtp_enum", Severity.MEDIUM),
     ],
     "ldap": [
-        MsfModule("auxiliary/scanner/ldap/ldap_search", Severity.MEDIUM,
-                  {"BASE_DN": "", "ANONYMOUS_LOGIN": "true"}),
+        MsfModule(
+            "auxiliary/scanner/ldap/ldap_search",
+            Severity.MEDIUM,
+            {"BASE_DN": "", "ANONYMOUS_LOGIN": "true"},
+        ),
     ],
     "nfs": [
         MsfModule("auxiliary/scanner/nfs/nfsmount", Severity.HIGH),
@@ -195,11 +234,13 @@ def _lookup_metadata_modules(
 
         matched = mod_services & service_names
         seen_paths.add(fullname)
-        modules.append(MsfModule(
-            path=fullname,
-            severity=severity,
-            options={"_rport": str(mod.get("rport", "")), "_services": ",".join(matched)},
-        ))
+        modules.append(
+            MsfModule(
+                path=fullname,
+                severity=severity,
+                options={"_rport": str(mod.get("rport", "")), "_services": ",".join(matched)},
+            )
+        )
 
     return modules
 
@@ -208,8 +249,10 @@ def _lookup_metadata_modules(
 # Module selection (static + dynamic, deduplicated)
 # ---------------------------------------------------------------------------
 
+
 def _select_modules(
-    host: Host, config: ScanConfig,
+    host: Host,
+    config: ScanConfig,
 ) -> list[tuple[MsfModule, int]]:
     """Return (module, port_number) pairs for this host."""
     selected: list[tuple[MsfModule, int]] = []
@@ -230,7 +273,11 @@ def _select_modules(
 
     dynamic = _lookup_metadata_modules(service_names, config.msf_metadata_path)
     for mod in dynamic:
-        mod_services = set(mod.options.get("_services", "").split(",")) if mod.options.get("_services") else service_names
+        mod_services = (
+            set(mod.options.get("_services", "").split(","))
+            if mod.options.get("_services")
+            else service_names
+        )
         for port in host.open_ports:
             svc = port.service_name
             if not svc or svc not in mod_services:
@@ -247,6 +294,7 @@ def _select_modules(
 # ---------------------------------------------------------------------------
 # RC script generation
 # ---------------------------------------------------------------------------
+
 
 def _build_rc_script(
     host_ip: str,
@@ -283,6 +331,7 @@ def _build_rc_script(
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 async def scan_msf(
     host: Host,
     config: ScanConfig,
@@ -312,7 +361,9 @@ async def scan_msf(
 
         log.info(
             "[%s] MSF scan: %d module(s) across %d port(s)",
-            host.ip, len(modules), len({p for _, p in modules}),
+            host.ip,
+            len(modules),
+            len({p for _, p in modules}),
         )
 
         result = await run_tool(
@@ -332,7 +383,9 @@ async def scan_msf(
 
         if not output.strip():
             if result.returncode != 0:
-                log.warning("[%s] msfconsole produced no output (rc=%d)", host.ip, result.returncode)
+                log.warning(
+                    "[%s] msfconsole produced no output (rc=%d)", host.ip, result.returncode
+                )
             return []
 
         findings = parse_msf_output(output, host.ip)

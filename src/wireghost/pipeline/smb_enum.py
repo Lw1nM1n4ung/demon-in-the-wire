@@ -33,7 +33,10 @@ def _has_smb(host: Host) -> bool:
 
 
 async def enumerate_smb(
-    host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    sem: asyncio.Semaphore,
 ) -> list[Finding]:
     """Run enum4linux against a host if it has SMB services detected."""
     async with sem:

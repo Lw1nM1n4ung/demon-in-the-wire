@@ -1,4 +1,5 @@
 """wireghost tokens — API token management."""
+
 from __future__ import annotations
 
 import typer
@@ -28,8 +29,7 @@ def list_tokens() -> None:
             return
         echo_table(
             "API Tokens",
-            [("id", "ID"), ("name", "Name"), ("last_used", "Last Used"),
-             ("created_at", "Created")],
+            [("id", "ID"), ("name", "Name"), ("last_used", "Last Used"), ("created_at", "Created")],
             results,
         )
     except Exception as e:
@@ -50,7 +50,7 @@ def create_token(
         token = data.get("token") or data.get("key", "")
         console.print(f"[bold green]Token created:[/] {data.get('name', name)}")
         if token:
-            console.print(f"[bold]Token value (save this — it won't be shown again):[/]")
+            console.print("[bold]Token value (save this — it won't be shown again):[/]")
             console.print(token)
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")

@@ -1,4 +1,5 @@
 """wireghost auth — login, logout, whoami."""
+
 from __future__ import annotations
 
 import typer
@@ -12,13 +13,9 @@ console = Console(stderr=True)
 
 @app.command()
 def login(
-    portal_url: str = typer.Option(
-        "", "--portal", "-p", help="Portal URL (default: prompts)"
-    ),
+    portal_url: str = typer.Option("", "--portal", "-p", help="Portal URL (default: prompts)"),
     username: str = typer.Option("", "--username", "-u", help="Username"),
-    password: str = typer.Option(
-        "", "--password", "-P", help="Password (warning: shell history)"
-    ),
+    password: str = typer.Option("", "--password", "-P", help="Password (warning: shell history)"),
     mfa_code: str = typer.Option("", "--mfa", help="MFA code if required"),
 ) -> None:
     """Login to a Wire_Ghost portal (interactive)."""

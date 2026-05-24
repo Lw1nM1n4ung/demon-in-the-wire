@@ -1,4 +1,5 @@
 """wireghost users — user management."""
+
 from __future__ import annotations
 
 import typer
@@ -29,8 +30,14 @@ def list_users() -> None:
             return
         echo_table(
             "Users",
-            [("id", "ID"), ("username", "Username"), ("role", "Role"),
-             ("email", "Email"), ("status", "Status"), ("last_login", "Last Login")],
+            [
+                ("id", "ID"),
+                ("username", "Username"),
+                ("role", "Role"),
+                ("email", "Email"),
+                ("status", "Status"),
+                ("last_login", "Last Login"),
+            ],
             results,
         )
     except Exception as e:
@@ -51,16 +58,18 @@ def show_user(
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("ID:", data.get("id")),
-            ("Username:", data.get("username", "—")),
-            ("Name:", data.get("name", "—")),
-            ("Role:", data.get("role", "—")),
-            ("Email:", data.get("email", "—")),
-            ("Status:", data.get("status", "—")),
-            ("Last login:", data.get("last_login", "—")),
-            ("Created:", data.get("created_at", "—")),
-        ])
+        echo_keyvalue(
+            [
+                ("ID:", data.get("id")),
+                ("Username:", data.get("username", "—")),
+                ("Name:", data.get("name", "—")),
+                ("Role:", data.get("role", "—")),
+                ("Email:", data.get("email", "—")),
+                ("Status:", data.get("status", "—")),
+                ("Last login:", data.get("last_login", "—")),
+                ("Created:", data.get("created_at", "—")),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
@@ -78,12 +87,19 @@ def create_user(
     """Create a new user."""
     client = get_client()
     import getpass
+
     password = getpass.getpass("Password: ")
 
     try:
-        resp = client.post("/auth/users/create/", json={
-            "username": username, "role": role, "email": email, "password": password,
-        })
+        resp = client.post(
+            "/auth/users/create/",
+            json={
+                "username": username,
+                "role": role,
+                "email": email,
+                "password": password,
+            },
+        )
         resp.raise_for_status()
         data = resp.json()
         console.print(f"[bold green]User created:[/] {data.get('username', '?')}")
@@ -152,9 +168,12 @@ def reset_password(
 
     client = get_client()
     try:
-        resp = client.post(f"/auth/users/{username}/reset-password/", json={
-            "password": new_password,
-        })
+        resp = client.post(
+            f"/auth/users/{username}/reset-password/",
+            json={
+                "password": new_password,
+            },
+        )
         if resp.status_code == 404:
             console.print(
                 "[bold yellow]API endpoint not available.[/] "

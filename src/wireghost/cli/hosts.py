@@ -1,4 +1,5 @@
 """wireghost hosts — host information."""
+
 from __future__ import annotations
 
 import typer
@@ -35,8 +36,13 @@ def list_hosts(
             return
         echo_table(
             "Hosts",
-            [("ip", "IP"), ("hostname", "Hostname"), ("os", "OS"),
-             ("open_ports", "Ports"), ("status", "Status")],
+            [
+                ("ip", "IP"),
+                ("hostname", "Hostname"),
+                ("os", "OS"),
+                ("open_ports", "Ports"),
+                ("status", "Status"),
+            ],
             results,
         )
     except Exception as e:
@@ -61,14 +67,16 @@ def show_host(
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("IP:", data.get("ip")),
-            ("Hostname:", data.get("hostname", "—")),
-            ("OS:", data.get("os", "—")),
-            ("Status:", data.get("status", "—")),
-            ("Open Ports:", str(data.get("open_ports", 0))),
-            ("MAC:", data.get("mac", "—")),
-        ])
+        echo_keyvalue(
+            [
+                ("IP:", data.get("ip")),
+                ("Hostname:", data.get("hostname", "—")),
+                ("OS:", data.get("os", "—")),
+                ("Status:", data.get("status", "—")),
+                ("Open Ports:", str(data.get("open_ports", 0))),
+                ("MAC:", data.get("mac", "—")),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)

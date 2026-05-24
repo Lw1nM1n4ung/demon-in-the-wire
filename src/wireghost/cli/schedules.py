@@ -1,4 +1,5 @@
 """wireghost schedules — CRUD for scheduled scans."""
+
 from __future__ import annotations
 
 import typer
@@ -29,8 +30,14 @@ def list_schedules() -> None:
             return
         echo_table(
             "Scheduled Scans",
-            [("id", "ID"), ("name", "Name"), ("target", "Target"),
-             ("cron", "Cron"), ("enabled", "Enabled"), ("next_run", "Next Run")],
+            [
+                ("id", "ID"),
+                ("name", "Name"),
+                ("target", "Target"),
+                ("cron", "Cron"),
+                ("enabled", "Enabled"),
+                ("next_run", "Next Run"),
+            ],
             results,
         )
     except Exception as e:
@@ -51,16 +58,18 @@ def show_schedule(
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("ID:", data.get("id")),
-            ("Name:", data.get("name", "—")),
-            ("Target:", data.get("target", "—")),
-            ("Cron:", data.get("cron", "—")),
-            ("Policy:", data.get("policy", "—")),
-            ("Enabled:", str(data.get("enabled", False))),
-            ("Next run:", data.get("next_run", "—")),
-            ("Last run:", data.get("last_run", "—")),
-        ])
+        echo_keyvalue(
+            [
+                ("ID:", data.get("id")),
+                ("Name:", data.get("name", "—")),
+                ("Target:", data.get("target", "—")),
+                ("Cron:", data.get("cron", "—")),
+                ("Policy:", data.get("policy", "—")),
+                ("Enabled:", str(data.get("enabled", False))),
+                ("Next run:", data.get("next_run", "—")),
+                ("Last run:", data.get("last_run", "—")),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)

@@ -1,4 +1,5 @@
 """wireghost notify — notification configuration."""
+
 from __future__ import annotations
 
 import typer
@@ -21,12 +22,14 @@ def notify_config() -> None:
             echo_json(data)
             return
         token = data.get("telegram_bot_token", "")
-        echo_keyvalue([
-            ("Telegram bot:", token[:20] + "..." if token else "—"),
-            ("Enabled:", str(data.get("enabled", False))),
-            ("On findings:", str(data.get("on_finding", False))),
-            ("On scan complete:", str(data.get("on_scan_complete", False))),
-        ])
+        echo_keyvalue(
+            [
+                ("Telegram bot:", token[:20] + "..." if token else "—"),
+                ("Enabled:", str(data.get("enabled", False))),
+                ("On findings:", str(data.get("on_finding", False))),
+                ("On scan complete:", str(data.get("on_scan_complete", False))),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
@@ -34,9 +37,7 @@ def notify_config() -> None:
 
 @app.command("test")
 def notify_test(
-    channel: str = typer.Option(
-        "telegram", "--channel", help="telegram or email"
-    ),
+    channel: str = typer.Option("telegram", "--channel", help="telegram or email"),
 ) -> None:
     """Send a test notification."""
     client = get_client()

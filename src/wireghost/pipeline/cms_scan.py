@@ -1,10 +1,10 @@
 """CMS-specific scanning -- auto-triggered by technology detection."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import shutil
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wireghost.models.finding import Finding
@@ -19,19 +19,27 @@ if TYPE_CHECKING:
 log = logging.getLogger("wireghost")
 
 
-async def _run_wpscan(url: str, host_ip: str, config: ScanConfig, tree: OutputTree) -> list[Finding]:
+async def _run_wpscan(
+    url: str, host_ip: str, config: ScanConfig, tree: OutputTree
+) -> list[Finding]:
     """Run WPScan against a WordPress URL."""
     vuln_dir = tree.host_vuln_dir(host_ip)
     json_out = vuln_dir / "wpscan.json"
 
     result = await run_tool(
         [
-            "wpscan", "--url", url,
-            "--enumerate", "ap,at,u",
-            "--plugins-detection", "mixed",
-            "--format", "json",
+            "wpscan",
+            "--url",
+            url,
+            "--enumerate",
+            "ap,at,u",
+            "--plugins-detection",
+            "mixed",
+            "--format",
+            "json",
             "--no-banner",
-            "-o", str(json_out),
+            "-o",
+            str(json_out),
         ],
         timeout=int(config.tool_timeout),
         label=f"wpscan {host_ip}",
@@ -48,7 +56,10 @@ async def _run_wpscan(url: str, host_ip: str, config: ScanConfig, tree: OutputTr
 
 
 async def scan_cms(
-    host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    sem: asyncio.Semaphore,
 ) -> list[Finding]:
     """Run CMS-specific scanners based on detected technologies.
 

@@ -1,4 +1,5 @@
 """wireghost support-bundle — diagnostic bundle generation."""
+
 from __future__ import annotations
 
 import typer
@@ -11,9 +12,7 @@ app = typer.Typer(name="support-bundle", help="Generate support diagnostic bundl
 
 @app.callback(invoke_without_command=True)
 def support_bundle(
-    output: str = typer.Option(
-        "", "--output", "-o", help="Output path for bundle"
-    ),
+    output: str = typer.Option("", "--output", "-o", help="Output path for bundle"),
 ) -> None:
     """Generate a support diagnostic bundle (Owner only)."""
     del output  # reserved for future local export

@@ -1,4 +1,5 @@
 """wireghost dashboard — stats and screenshots."""
+
 from __future__ import annotations
 
 import typer
@@ -26,16 +27,18 @@ def dashboard_stats() -> None:
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("Total scans:", str(data.get("total_scans", 0))),
-            ("Running scans:", str(data.get("running_scans", 0))),
-            ("Total hosts:", str(data.get("total_hosts", 0))),
-            ("Total findings:", str(data.get("total_findings", 0))),
-            ("Critical:", str(data.get("critical_findings", 0))),
-            ("High:", str(data.get("high_findings", 0))),
-            ("Medium:", str(data.get("medium_findings", 0))),
-            ("Low:", str(data.get("low_findings", 0))),
-        ])
+        echo_keyvalue(
+            [
+                ("Total scans:", str(data.get("total_scans", 0))),
+                ("Running scans:", str(data.get("running_scans", 0))),
+                ("Total hosts:", str(data.get("total_hosts", 0))),
+                ("Total findings:", str(data.get("total_findings", 0))),
+                ("Critical:", str(data.get("critical_findings", 0))),
+                ("High:", str(data.get("high_findings", 0))),
+                ("Medium:", str(data.get("medium_findings", 0))),
+                ("Low:", str(data.get("low_findings", 0))),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
@@ -61,8 +64,7 @@ def dashboard_screenshots(
             return
         echo_table(
             "Screenshots",
-            [("id", "ID"), ("url", "URL"), ("host", "Host"),
-             ("port", "Port"), ("title", "Title")],
+            [("id", "ID"), ("url", "URL"), ("host", "Host"), ("port", "Port"), ("title", "Title")],
             results,
         )
     except Exception as e:

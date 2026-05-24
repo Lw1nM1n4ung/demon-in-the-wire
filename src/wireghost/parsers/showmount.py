@@ -28,14 +28,16 @@ def parse_showmount(stdout: str, host_ip: str) -> list[Finding]:
         world_open = allowed in ("*", "(everyone)", "")
         severity = Severity.HIGH if world_open else Severity.MEDIUM
 
-        findings.append(Finding(
-            source="nfs_enum",
-            host=host_ip,
-            port="2049",
-            protocol="tcp",
-            severity=severity,
-            title=f"NFS export: {export_path} ({allowed or '*'})",
-            description=f"NFS share {export_path} is exported to {allowed or 'everyone'}",
-        ))
+        findings.append(
+            Finding(
+                source="nfs_enum",
+                host=host_ip,
+                port="2049",
+                protocol="tcp",
+                severity=severity,
+                title=f"NFS export: {export_path} ({allowed or '*'})",
+                description=f"NFS share {export_path} is exported to {allowed or 'everyone'}",
+            )
+        )
 
     return findings

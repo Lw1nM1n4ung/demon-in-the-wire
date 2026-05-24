@@ -30,16 +30,16 @@ class TestResolvePath(TestCase):
 
     def test_traversal_attack_blocked(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            secret = Path(tmpdir).parent / 'secret.txt'
+            root = Path(tmpdir)
+            scan_dir = root / 'scans'
+            scan_dir.mkdir()
+            secret = root / 'secret.txt'
             secret.write_text('secret')
-            try:
-                ss = MagicMock()
-                ss.scan.output_dir = tmpdir
-                ss.filename = '../secret.txt'
-                result = resolve_path(ss)
-                self.assertIsNone(result)
-            finally:
-                secret.unlink(missing_ok=True)
+            ss = MagicMock()
+            ss.scan.output_dir = str(scan_dir)
+            ss.filename = '../secret.txt'
+            result = resolve_path(ss)
+            self.assertIsNone(result)
 
     def test_absolute_path_in_filename_blocked(self):
         with tempfile.TemporaryDirectory() as tmpdir:

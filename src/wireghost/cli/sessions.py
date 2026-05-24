@@ -1,4 +1,5 @@
 """wireghost sessions — session management."""
+
 from __future__ import annotations
 
 import typer
@@ -28,8 +29,12 @@ def list_sessions() -> None:
             return
         echo_table(
             "Active Sessions",
-            [("session_key", "Key"), ("user", "User"), ("ip", "IP"),
-             ("last_activity", "Last Activity")],
+            [
+                ("session_key", "Key"),
+                ("user", "User"),
+                ("ip", "IP"),
+                ("last_activity", "Last Activity"),
+            ],
             results,
         )
     except Exception as e:

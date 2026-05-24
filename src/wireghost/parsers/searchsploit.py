@@ -139,18 +139,20 @@ def parse_searchsploit_json(json_path: Path, host_ip: str = "") -> list[Finding]
                     cve = code
                     break
 
-            findings.append(Finding(
-                source="searchsploit",
-                host=host_ip,
-                port="",
-                protocol="tcp",
-                severity=severity,
-                title=f"Exploit: {title}",
-                description="\n".join(desc_parts),
-                template_id=f"EDB-{edb_id}" if edb_id else "",
-                cve=cve,
-                references=refs,
-                tags=[exploit_type, platform] if exploit_type else [],
-            ))
+            findings.append(
+                Finding(
+                    source="searchsploit",
+                    host=host_ip,
+                    port="",
+                    protocol="tcp",
+                    severity=severity,
+                    title=f"Exploit: {title}",
+                    description="\n".join(desc_parts),
+                    template_id=f"EDB-{edb_id}" if edb_id else "",
+                    cve=cve,
+                    references=refs,
+                    tags=[exploit_type, platform] if exploit_type else [],
+                )
+            )
 
     return findings

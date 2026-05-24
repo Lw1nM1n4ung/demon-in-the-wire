@@ -49,9 +49,7 @@ async def screenshot_host(
 
     out_dir = tree.host_screenshots_dir(host.ip)
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False
-    ) as url_file:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as url_file:
         url_file.write("\n".join(host.web_endpoints))
         url_path = url_file.name
 
@@ -59,14 +57,23 @@ async def screenshot_host(
         async with sem:
             await run_tool(
                 [
-                    "gowitness", "scan", "file",
-                    "-f", url_path,
-                    "--screenshot-path", str(out_dir),
-                    "--timeout", "10",
-                    "--delay", "2",
-                    "--chrome-window-x", "1280",
-                    "--chrome-window-y", "720",
-                    "--screenshot-format", "png",
+                    "gowitness",
+                    "scan",
+                    "file",
+                    "-f",
+                    url_path,
+                    "--screenshot-path",
+                    str(out_dir),
+                    "--timeout",
+                    "10",
+                    "--delay",
+                    "2",
+                    "--chrome-window-x",
+                    "1280",
+                    "--chrome-window-y",
+                    "720",
+                    "--screenshot-format",
+                    "png",
                 ],
                 timeout=int(config.tool_timeout),
                 label=f"gowitness:{host.ip}",
@@ -78,7 +85,7 @@ async def screenshot_host(
         Path(url_path).unlink(missing_ok=True)
 
     # Fetch real HTTP status codes for the screenshot URLs
-    ss_urls = [u for u in host.web_endpoints if u.startswith('http')]
+    ss_urls = [u for u in host.web_endpoints if u.startswith("http")]
     status_map = await _fetch_status_codes(ss_urls)
 
     for png in out_dir.glob("*.png"):
@@ -101,9 +108,7 @@ async def screenshot_host(
             sc.filename = str(dst.relative_to(tree.base))
 
     if host.screenshots:
-        log.info(
-            "[%s] Captured %d screenshot(s)", host.ip, len(host.screenshots)
-        )
+        log.info("[%s] Captured %d screenshot(s)", host.ip, len(host.screenshots))
 
 
 def _match_url(png_name: str, urls: list[str]) -> str | None:

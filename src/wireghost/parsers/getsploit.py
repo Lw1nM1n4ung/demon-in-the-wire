@@ -13,13 +13,30 @@ def _classify_exploit_severity(title: str, vuln_id: str) -> Severity:
     t = title.lower()
 
     # Remote code execution / buffer overflow → critical
-    if any(kw in t for kw in ("remote code", "rce", "buffer overflow",
-                                "command injection", "eternalblue", "bluekeep")):
+    if any(
+        kw in t
+        for kw in (
+            "remote code",
+            "rce",
+            "buffer overflow",
+            "command injection",
+            "eternalblue",
+            "bluekeep",
+        )
+    ):
         return Severity.CRITICAL
 
     # Known critical CVE patterns in titles
-    if any(cve in t for cve in ("cve-2019-0708", "cve-2017-0144", "cve-2021-44228",
-                                  "cve-2022-22965", "cve-2023-34362")):
+    if any(
+        cve in t
+        for cve in (
+            "cve-2019-0708",
+            "cve-2017-0144",
+            "cve-2021-44228",
+            "cve-2022-22965",
+            "cve-2023-34362",
+        )
+    ):
         return Severity.CRITICAL
 
     # Metasploit exploits → high (they're weaponized)
@@ -39,8 +56,17 @@ def _classify_exploit_severity(title: str, vuln_id: str) -> Severity:
         return Severity.MEDIUM
 
     # Webapps, SQLi, XSS → medium
-    if any(kw in t for kw in ("sql injection", "xss", "cross-site", "path traversal",
-                                "directory traversal", "file inclusion")):
+    if any(
+        kw in t
+        for kw in (
+            "sql injection",
+            "xss",
+            "cross-site",
+            "path traversal",
+            "directory traversal",
+            "file inclusion",
+        )
+    ):
         return Severity.MEDIUM
 
     # Info disclosure → low
@@ -102,7 +128,8 @@ def parse_getsploit_json(output: str, host_ip: str = "") -> list[Finding]:
         refs: list[str] = []
         cve = ""
         import re
-        for cve_match in re.finditer(r'(CVE-\d{4}-\d{4,})', title, re.IGNORECASE):
+
+        for cve_match in re.finditer(r"(CVE-\d{4}-\d{4,})", title, re.IGNORECASE):
             cve_id = cve_match.group(1).upper()
             refs.append(cve_id)
             refs.append(f"https://nvd.nist.gov/vuln/detail/{cve_id}")
@@ -125,18 +152,20 @@ def parse_getsploit_json(output: str, host_ip: str = "") -> list[Finding]:
         elif vuln_id.startswith("1337DAY-ID:"):
             source_label = "0day"
 
-        findings.append(Finding(
-            source="getsploit",
-            host=host_ip,
-            port="",
-            protocol="tcp",
-            severity=severity,
-            title=f"Exploit ({source_label}): {title[:120]}",
-            description=f"Vulners ID: {vuln_id}\nURL: {url}",
-            template_id=vuln_id,
-            cve=cve,
-            references=refs,
-            tags=[source_label],
-        ))
+        findings.append(
+            Finding(
+                source="getsploit",
+                host=host_ip,
+                port="",
+                protocol="tcp",
+                severity=severity,
+                title=f"Exploit ({source_label}): {title[:120]}",
+                description=f"Vulners ID: {vuln_id}\nURL: {url}",
+                template_id=vuln_id,
+                cve=cve,
+                references=refs,
+                tags=[source_label],
+            )
+        )
 
     return findings

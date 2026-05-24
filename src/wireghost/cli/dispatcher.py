@@ -1,11 +1,11 @@
 """Wire_Ghost CLI — thin dispatcher that mounts domain apps."""
+
 from __future__ import annotations
 
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -23,9 +23,7 @@ console = Console(stderr=True)
 
 @app.callback(invoke_without_command=True)
 def main(
-    version: bool = typer.Option(
-        False, "--version", "-V", help="Show version and exit"
-    ),
+    version: bool = typer.Option(False, "--version", "-V", help="Show version and exit"),
 ) -> None:
     """Wire_Ghost — automated security scanning toolkit."""
     if version:
@@ -57,8 +55,7 @@ def _config_init() -> None:
     dest = Path("wireghost.yml")
     if dest.exists():
         console.print(
-            "[bold yellow]wireghost.yml already exists.[/] "
-            "Remove it first to re-initialize."
+            "[bold yellow]wireghost.yml already exists.[/] Remove it first to re-initialize."
         )
         raise typer.Exit(code=1)
 
@@ -78,8 +75,8 @@ def _config_init() -> None:
     else:
         dest.write_text(
             "# Wire_Ghost configuration\n"
-            "# target: \"192.168.1.0/24\"\n"
-            "output_dir: \"./output\"\n"
+            '# target: "192.168.1.0/24"\n'
+            'output_dir: "./output"\n'
             "parallelism: 10\n"
             "version_detect: true\n"
             "os_detect: true\n"
@@ -141,61 +138,75 @@ def report_deprecated(
 @app.command("update", hidden=True)
 def update_deprecated() -> None:
     """[DEPRECATED] Use 'wireghost system update' instead."""
-    console.print(
-        "[bold yellow]Deprecated:[/] 'wireghost update' → use "
-        "'wireghost system update'"
-    )
+    console.print("[bold yellow]Deprecated:[/] 'wireghost update' → use 'wireghost system update'")
 
 
 # ── Mount domain apps ─────────────────────────────────────────────────
 
 from wireghost.cli.auth import app as auth_app
+
 app.add_typer(auth_app, name="auth", help="Authentication")
 
 from wireghost.cli.scan import app as scan_app
+
 app.add_typer(scan_app, name="scan", help="Run a local scan pipeline")
 
 from wireghost.cli.scans import app as scans_app
+
 app.add_typer(scans_app, name="scans", help="Manage portal scans")
 
 from wireghost.cli.hosts import app as hosts_app
+
 app.add_typer(hosts_app, name="hosts", help="Host information")
 
 from wireghost.cli.findings import app as findings_app
+
 app.add_typer(findings_app, name="findings", help="View and triage findings")
 
 from wireghost.cli.policies import app as policies_app
+
 app.add_typer(policies_app, name="policies", help="Manage scan policies")
 
 from wireghost.cli.schedules import app as schedules_app
+
 app.add_typer(schedules_app, name="schedules", help="Manage scan schedules")
 
 from wireghost.cli.exploits import app as exploits_app
+
 app.add_typer(exploits_app, name="exploits", help="View exploit matches")
 
 from wireghost.cli.users import app as users_app
+
 app.add_typer(users_app, name="users", help="User management")
 
 from wireghost.cli.tokens import app as tokens_app
+
 app.add_typer(tokens_app, name="tokens", help="API token management")
 
 from wireghost.cli.sessions import app as sessions_app
+
 app.add_typer(sessions_app, name="sessions", help="Session management")
 
 from wireghost.cli.system import app as system_app
+
 app.add_typer(system_app, name="system", help="System operations")
 
 from wireghost.cli.reports import app as reports_app
+
 app.add_typer(reports_app, name="report", help="Report generation and download")
 
 from wireghost.cli.notifications import app as notifications_app
+
 app.add_typer(notifications_app, name="notify", help="Notification configuration")
 
 from wireghost.cli.dashboard import app as dashboard_app
+
 app.add_typer(dashboard_app, name="dashboard", help="Dashboard stats and screenshots")
 
 from wireghost.cli.support import app as support_app
+
 app.add_typer(support_app, name="support-bundle", help="Generate support diagnostic bundle")
 
 from wireghost.cli.deploy import app as deploy_app
+
 app.add_typer(deploy_app, name="deploy", help="Deploy to a remote host via SSH")

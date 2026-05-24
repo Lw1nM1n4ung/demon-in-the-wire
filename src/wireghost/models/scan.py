@@ -79,9 +79,9 @@ class Port:
 
 @dataclass
 class WebTech:
-    name: str       # e.g. "Apache", "nginx", "WordPress"
-    version: str    # e.g. "2.4.49", "1.24"
-    url: str = ""   # which endpoint detected it
+    name: str  # e.g. "Apache", "nginx", "WordPress"
+    version: str  # e.g. "2.4.49", "1.24"
+    url: str = ""  # which endpoint detected it
 
 
 @dataclass

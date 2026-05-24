@@ -30,6 +30,28 @@ wireghost = "wireghost.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/wireghost"]
 
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "F",     # pyflakes (catches undefined names, unused imports, etc.)
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "B",     # flake8-bugbear (common bug patterns)
+    "RUF100", # flag unused noqa directives
+]
+ignore = [
+    "E402",  # module-import-not-at-top-of-file (lazy/conditional imports are intentional)
+    "E501",  # line too long
+    "E731",  # lambda-assignment
+    "B007",  # unused-loop-control-variable (loop variables intentionally unused)
+    "B008",  # function-call-in-default-argument
+    "B904",  # raise-without-from-inside-except (existing pattern)
+    "B905",  # zip-without-explicit-strict
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

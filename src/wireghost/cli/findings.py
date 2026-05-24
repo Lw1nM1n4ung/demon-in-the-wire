@@ -1,4 +1,5 @@
 """wireghost findings — view and triage findings."""
+
 from __future__ import annotations
 
 import typer
@@ -21,9 +22,7 @@ def list_findings(
     severity: str = typer.Option(
         "", "--severity", help="Filter: critical, high, medium, low, info"
     ),
-    source: str = typer.Option(
-        "", "--source", help="Filter: nuclei, nmap_vuln, msf_scan, ..."
-    ),
+    source: str = typer.Option("", "--source", help="Filter: nuclei, nmap_vuln, msf_scan, ..."),
     search: str = typer.Option("", "--search", help="Full-text search"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
 ) -> None:
@@ -48,8 +47,14 @@ def list_findings(
             return
         echo_table(
             "Findings",
-            [("id", "ID"), ("severity", "Severity"), ("source", "Source"),
-             ("title", "Title"), ("host", "Host"), ("port", "Port")],
+            [
+                ("id", "ID"),
+                ("severity", "Severity"),
+                ("source", "Source"),
+                ("title", "Title"),
+                ("host", "Host"),
+                ("port", "Port"),
+            ],
             results,
         )
     except Exception as e:
@@ -70,18 +75,20 @@ def show_finding(
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("ID:", data.get("id")),
-            ("Title:", data.get("title", "—")),
-            ("Severity:", str(data.get("severity", "—"))),
-            ("Source:", data.get("source", "—")),
-            ("Host:", data.get("host", "—")),
-            ("Port:", str(data.get("port", ""))),
-            ("CVE:", data.get("cve", "—")),
-            ("Description:", data.get("description", "—")),
-            ("Template:", data.get("template_id", "—")),
-            ("False Positive:", str(data.get("false_positive", False))),
-        ])
+        echo_keyvalue(
+            [
+                ("ID:", data.get("id")),
+                ("Title:", data.get("title", "—")),
+                ("Severity:", str(data.get("severity", "—"))),
+                ("Source:", data.get("source", "—")),
+                ("Host:", data.get("host", "—")),
+                ("Port:", str(data.get("port", ""))),
+                ("CVE:", data.get("cve", "—")),
+                ("Description:", data.get("description", "—")),
+                ("Template:", data.get("template_id", "—")),
+                ("False Positive:", str(data.get("false_positive", False))),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)

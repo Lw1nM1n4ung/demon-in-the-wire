@@ -47,14 +47,20 @@ async def run_nikto(
 
         cmd = [
             "nikto",
-            "-h", url,
-            "-o", str(out_file),
-            "-Format", "json",
-            "-timeout", "15",
-            "-maxtime", "1200s",
+            "-h",
+            url,
+            "-o",
+            str(out_file),
+            "-Format",
+            "json",
+            "-timeout",
+            "15",
+            "-maxtime",
+            "1200s",
             "-nointeractive",
             "-no404",
-            "-Tuning", "1234589ab",
+            "-Tuning",
+            "1234589ab",
         ]
 
         await run_tool(

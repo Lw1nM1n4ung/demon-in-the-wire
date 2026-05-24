@@ -33,25 +33,29 @@ def _parse_null_session(output: str, host: str, findings: list[Finding]) -> None
     if re.search(r"Attempting to make a null session", output, re.I):
         if re.search(r"\[E\].*Could(n.t| not) (establish|connect|create)", output, re.I):
             return
-        if re.search(r"\[\+\].*Server allows sessions using username", output, re.I) or \
-           re.search(r"\[\+\].*Got a positive name list", output, re.I):
-            findings.append(Finding(
-                source="enum4linux",
-                host=host,
-                port="445",
-                protocol="tcp",
-                severity=Severity.HIGH,
-                title="SMB Null Session Allowed",
-                description="The target allows anonymous (null) SMB sessions, "
-                            "enabling unauthenticated enumeration of users, shares, and system info.",
-                tags=["smb", "null-session", "misconfiguration"],
-            ))
+        if re.search(r"\[\+\].*Server allows sessions using username", output, re.I) or re.search(
+            r"\[\+\].*Got a positive name list", output, re.I
+        ):
+            findings.append(
+                Finding(
+                    source="enum4linux",
+                    host=host,
+                    port="445",
+                    protocol="tcp",
+                    severity=Severity.HIGH,
+                    title="SMB Null Session Allowed",
+                    description="The target allows anonymous (null) SMB sessions, "
+                    "enabling unauthenticated enumeration of users, shares, and system info.",
+                    tags=["smb", "null-session", "misconfiguration"],
+                )
+            )
 
 
 def _parse_os_info(output: str, host: str, findings: list[Finding]) -> None:
     m = re.search(
         r"OS information on\s+\S+.*?\n(.*?)(?=\n=====|\n\[[\+E\*\]].*Enumerating|\Z)",
-        output, re.S | re.I,
+        output,
+        re.S | re.I,
     )
     if not m:
         return
@@ -64,16 +68,18 @@ def _parse_os_info(output: str, host: str, findings: list[Finding]) -> None:
         desc = f"Detected OS: {os_str}"
         if sv_str:
             desc += f"\nSamba/Server version: {sv_str}"
-        findings.append(Finding(
-            source="enum4linux",
-            host=host,
-            port="445",
-            protocol="tcp",
-            severity=Severity.INFO,
-            title=f"SMB OS Detection: {os_str}",
-            description=desc,
-            tags=["smb", "os-detection"],
-        ))
+        findings.append(
+            Finding(
+                source="enum4linux",
+                host=host,
+                port="445",
+                protocol="tcp",
+                severity=Severity.INFO,
+                title=f"SMB OS Detection: {os_str}",
+                description=desc,
+                tags=["smb", "os-detection"],
+            )
+        )
 
 
 def _parse_users(output: str, host: str, findings: list[Finding]) -> None:
@@ -86,24 +92,27 @@ def _parse_users(output: str, host: str, findings: list[Finding]) -> None:
     if not users:
         return
 
-    findings.append(Finding(
-        source="enum4linux",
-        host=host,
-        port="445",
-        protocol="tcp",
-        severity=Severity.MEDIUM,
-        title=f"SMB User Enumeration — {len(users)} user(s) found",
-        description="Enumerated users via RID cycling / querydispinfo:\n" +
-                    "\n".join(f"  - {u}" for u in users),
-        tags=["smb", "user-enumeration"],
-    ))
+    findings.append(
+        Finding(
+            source="enum4linux",
+            host=host,
+            port="445",
+            protocol="tcp",
+            severity=Severity.MEDIUM,
+            title=f"SMB User Enumeration — {len(users)} user(s) found",
+            description="Enumerated users via RID cycling / querydispinfo:\n"
+            + "\n".join(f"  - {u}" for u in users),
+            tags=["smb", "user-enumeration"],
+        )
+    )
 
 
 def _parse_shares(output: str, host: str, findings: list[Finding]) -> None:
     shares: list[dict[str, str]] = []
     for m in re.finditer(
         r"^\s*(//\S+|\\\\[^\s]+)\s+(Mapping:\s*(\S+))?\s*(Type:\s*(\S+))?",
-        output, re.M,
+        output,
+        re.M,
     ):
         name = m.group(1).strip()
         mapping = m.group(3) or ""
@@ -122,16 +131,18 @@ def _parse_shares(output: str, host: str, findings: list[Finding]) -> None:
     sev = Severity.MEDIUM if accessible else Severity.LOW
 
     desc_lines = [f"  {s['name']}  (Mapping: {s['mapping']}, Type: {s['type']})" for s in shares]
-    findings.append(Finding(
-        source="enum4linux",
-        host=host,
-        port="445",
-        protocol="tcp",
-        severity=sev,
-        title=f"SMB Share Enumeration — {len(shares)} share(s) found",
-        description="Enumerated network shares:\n" + "\n".join(desc_lines),
-        tags=["smb", "share-enumeration"],
-    ))
+    findings.append(
+        Finding(
+            source="enum4linux",
+            host=host,
+            port="445",
+            protocol="tcp",
+            severity=sev,
+            title=f"SMB Share Enumeration — {len(shares)} share(s) found",
+            description="Enumerated network shares:\n" + "\n".join(desc_lines),
+            tags=["smb", "share-enumeration"],
+        )
+    )
 
 
 def _parse_groups(output: str, host: str, findings: list[Finding]) -> None:
@@ -144,27 +155,31 @@ def _parse_groups(output: str, host: str, findings: list[Finding]) -> None:
     if not groups:
         return
 
-    findings.append(Finding(
-        source="enum4linux",
-        host=host,
-        port="445",
-        protocol="tcp",
-        severity=Severity.LOW,
-        title=f"SMB Group Enumeration — {len(groups)} group(s) found",
-        description="Enumerated groups:\n" + "\n".join(f"  - {g}" for g in groups),
-        tags=["smb", "group-enumeration"],
-    ))
+    findings.append(
+        Finding(
+            source="enum4linux",
+            host=host,
+            port="445",
+            protocol="tcp",
+            severity=Severity.LOW,
+            title=f"SMB Group Enumeration — {len(groups)} group(s) found",
+            description="Enumerated groups:\n" + "\n".join(f"  - {g}" for g in groups),
+            tags=["smb", "group-enumeration"],
+        )
+    )
 
 
 def _parse_password_policy(output: str, host: str, findings: list[Finding]) -> None:
     m = re.search(
         r"Password Info for Domain.*?\n(.*?)(?=\n=====|\n\[\*\]|\Z)",
-        output, re.S | re.I,
+        output,
+        re.S | re.I,
     )
     if not m:
         m = re.search(
             r"password policy.*?\n(.*?)(?=\n=====|\n\[\*\]|\Z)",
-            output, re.S | re.I,
+            output,
+            re.S | re.I,
         )
     if not m:
         return
@@ -190,13 +205,15 @@ def _parse_password_policy(output: str, host: str, findings: list[Finding]) -> N
             sev = Severity.MEDIUM
 
     desc_lines = [f"  {k}: {v}" for k, v in policies.items()]
-    findings.append(Finding(
-        source="enum4linux",
-        host=host,
-        port="445",
-        protocol="tcp",
-        severity=sev,
-        title="SMB Password Policy Enumeration",
-        description="Retrieved domain password policy:\n" + "\n".join(desc_lines),
-        tags=["smb", "password-policy"],
-    ))
+    findings.append(
+        Finding(
+            source="enum4linux",
+            host=host,
+            port="445",
+            protocol="tcp",
+            severity=sev,
+            title="SMB Password Policy Enumeration",
+            description="Retrieved domain password policy:\n" + "\n".join(desc_lines),
+            tags=["smb", "password-policy"],
+        )
+    )

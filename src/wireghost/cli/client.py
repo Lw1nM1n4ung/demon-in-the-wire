@@ -1,5 +1,6 @@
 # src/wireghost/cli/client.py
 """WireGhostClient — HTTP API client with auth caching."""
+
 from __future__ import annotations
 
 import json
@@ -31,8 +32,7 @@ class WireGhostClient:
         insecure: bool = False,
     ):
         self.base_url = (
-            base_url
-            or os.environ.get("WIREGHOST_API_URL", "https://localhost:18443")
+            base_url or os.environ.get("WIREGHOST_API_URL", "https://localhost:18443")
         ).rstrip("/")
         self._verify = not insecure and not self.base_url.startswith("https://localhost")
         self._session = httpx.Client(timeout=30, verify=self._verify)

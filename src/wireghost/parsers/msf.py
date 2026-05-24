@@ -16,17 +16,30 @@ _RESULT_LINE = re.compile(
 )
 
 _CRITICAL_KEYWORDS = {
-    "vulnerable", "ms17-010", "bluekeep", "cve-2019-0708",
-    "unauthenticated", "no authentication", "none auth",
-    "rce", "remote code execution",
+    "vulnerable",
+    "ms17-010",
+    "bluekeep",
+    "cve-2019-0708",
+    "unauthenticated",
+    "no authentication",
+    "none auth",
+    "rce",
+    "remote code execution",
 }
 _HIGH_KEYWORDS = {
-    "anonymous", "login successful", "default credential",
-    "blank password", "open access", "world readable",
+    "anonymous",
+    "login successful",
+    "default credential",
+    "blank password",
+    "open access",
+    "world readable",
 }
 _NOISE_PREFIXES = (
-    "scanned ", "connecting to ", "auxiliary module execution completed",
-    "scanning target", "discover_host",
+    "scanned ",
+    "connecting to ",
+    "auxiliary module execution completed",
+    "scanning target",
+    "discover_host",
 )
 
 
@@ -80,9 +93,19 @@ def parse_msf_output(output: str, host_ip: str) -> list[Finding]:
         elif level == "!":
             severity = Severity.MEDIUM
         else:
-            if not any(kw in message.lower() for kw in
-                       ("version", "detected", "running", "server",
-                        "os:", "build:", "domain:", "name:")):
+            if not any(
+                kw in message.lower()
+                for kw in (
+                    "version",
+                    "detected",
+                    "running",
+                    "server",
+                    "os:",
+                    "build:",
+                    "domain:",
+                    "name:",
+                )
+            ):
                 continue
             severity = Severity.INFO
 
@@ -93,16 +116,18 @@ def parse_msf_output(output: str, host_ip: str) -> list[Finding]:
             continue
         seen.add(dedup_key)
 
-        findings.append(Finding(
-            source="msf_scan",
-            host=ip,
-            port=port,
-            protocol="tcp",
-            severity=severity,
-            title=f"MSF {mod_short}: {message[:100]}",
-            description=message,
-            template_id=current_module,
-            raw_output=line,
-        ))
+        findings.append(
+            Finding(
+                source="msf_scan",
+                host=ip,
+                port=port,
+                protocol="tcp",
+                severity=severity,
+                title=f"MSF {mod_short}: {message[:100]}",
+                description=message,
+                template_id=current_module,
+                raw_output=line,
+            )
+        )
 
     return findings

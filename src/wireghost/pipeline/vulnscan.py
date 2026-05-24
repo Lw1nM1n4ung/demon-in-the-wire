@@ -14,6 +14,7 @@ from wireghost.parsers.getsploit import parse_getsploit_json
 from wireghost.parsers.nmap import parse_nmap_vuln_xml
 from wireghost.parsers.nuclei import parse_nuclei_json
 from wireghost.parsers.searchsploit import parse_searchsploit_json
+from wireghost.pipeline.cve_search import scan_cve_search
 from wireghost.pipeline.nikto_scan import run_nikto
 from wireghost.utils.process import run_tool
 
@@ -55,20 +56,24 @@ async def run_nuclei(
 
     vuln_dir = tree.host_vuln_dir(host.ip)
     targets_file = vuln_dir / "nuclei_targets.txt"
-    targets_file.write_text(
-        "\n".join(host.web_endpoints) + "\n", encoding="utf-8"
-    )
+    targets_file.write_text("\n".join(host.web_endpoints) + "\n", encoding="utf-8")
 
     base_cmd = [
         "nuclei",
-        "-l", str(targets_file),
+        "-l",
+        str(targets_file),
         "-jsonl",
-        "-rl", "150",
-        "-c", "25",
-        "-timeout", "10",
+        "-rl",
+        "150",
+        "-c",
+        "25",
+        "-timeout",
+        "10",
         "-stats",
-        "-severity", "critical,high,medium,low",
-        "-etags", "brute-force,brute,login,fuzz",
+        "-severity",
+        "critical,high,medium,low",
+        "-etags",
+        "brute-force,brute,login,fuzz",
     ]
 
     template_dirs = _collect_template_dirs(config)
@@ -81,8 +86,14 @@ async def run_nuclei(
 
         if total > batch_size:
             return await _run_nuclei_batched(
-                host, config, tree, vuln_dir, targets_file,
-                base_cmd, all_templates, batch_size,
+                host,
+                config,
+                tree,
+                vuln_dir,
+                targets_file,
+                base_cmd,
+                all_templates,
+                batch_size,
             )
         else:
             # Small enough — single run with -t dirs
@@ -123,14 +134,14 @@ async def _run_nuclei_batched(
 ) -> list[Finding]:
     """Run nuclei in batches to limit memory/CPU usage."""
     total = len(all_templates)
-    batches = [
-        all_templates[i:i + batch_size]
-        for i in range(0, total, batch_size)
-    ]
+    batches = [all_templates[i : i + batch_size] for i in range(0, total, batch_size)]
     num_batches = len(batches)
     log.info(
         "Nuclei %s: %d templates — splitting into %d batches of ~%d",
-        host.ip, total, num_batches, batch_size,
+        host.ip,
+        total,
+        num_batches,
+        batch_size,
     )
 
     all_findings: list[Finding] = []
@@ -138,7 +149,9 @@ async def _run_nuclei_batched(
 
     for idx, batch in enumerate(batches):
         batch_num = idx + 1
-        log.info("Nuclei %s: batch %d/%d (%d templates)", host.ip, batch_num, num_batches, len(batch))
+        log.info(
+            "Nuclei %s: batch %d/%d (%d templates)", host.ip, batch_num, num_batches, len(batch)
+        )
 
         # Write template paths to a file — nuclei -t accepts a file
         batch_file = vuln_dir / f"nuclei_batch_{idx}.txt"
@@ -154,8 +167,13 @@ async def _run_nuclei_batched(
             label=f"nuclei {host.ip} batch {batch_num}/{num_batches}",
         )
         if result.returncode != 0:
-            log.warning("Nuclei batch %d/%d failed for %s (rc=%d)",
-                        batch_num, num_batches, host.ip, result.returncode)
+            log.warning(
+                "Nuclei batch %d/%d failed for %s (rc=%d)",
+                batch_num,
+                num_batches,
+                host.ip,
+                result.returncode,
+            )
 
         # Parse, tag external, and dedup
         findings = parse_nuclei_json(out_file)
@@ -167,7 +185,9 @@ async def _run_nuclei_batched(
                 seen_ids.add(key)
                 all_findings.append(f)
 
-        log.info("Nuclei %s: batch %d/%d — %d finding(s)", host.ip, batch_num, num_batches, len(findings))
+        log.info(
+            "Nuclei %s: batch %d/%d — %d finding(s)", host.ip, batch_num, num_batches, len(findings)
+        )
 
     # Merge all batch outputs into nuclei.json for report engine
     merged = vuln_dir / "nuclei.json"
@@ -177,31 +197,41 @@ async def _run_nuclei_batched(
             if batch_file.exists():
                 out.write(batch_file.read_text(encoding="utf-8"))
 
-    log.info("Nuclei %s: %d total finding(s) from %d batches", host.ip, len(all_findings), num_batches)
+    log.info(
+        "Nuclei %s: %d total finding(s) from %d batches", host.ip, len(all_findings), num_batches
+    )
     return all_findings
 
 
 _SERVICE_SCRIPTS: dict[str, list[str]] = {
-    "ssh":       ["ssh-auth-methods", "ssh2-enum-algos", "ssh-hostkey"],
-    "ms-sql":    ["ms-sql-info", "ms-sql-config", "ms-sql-ntlm-info"],
-    "mysql":     ["mysql-info", "mysql-enum", "mysql-databases"],
-    "rdp":       ["rdp-enum-encryption", "rdp-ntlm-info"],
-    "vnc":       ["vnc-info", "vnc-brute"],
-    "ftp":       ["ftp-anon", "ftp-syst", "ftp-bounce"],
-    "smtp":      ["smtp-commands", "smtp-enum-users", "smtp-open-relay"],
-    "dns":       ["dns-zone-transfer", "dns-brute"],
-    "rmi":       ["rmi-dumpregistry"],
-    "oracle":    ["oracle-tns-version"],
+    "ssh": ["ssh-auth-methods", "ssh2-enum-algos", "ssh-hostkey"],
+    "ms-sql": ["ms-sql-info", "ms-sql-config", "ms-sql-ntlm-info"],
+    "mysql": ["mysql-info", "mysql-enum", "mysql-databases"],
+    "rdp": ["rdp-enum-encryption", "rdp-ntlm-info"],
+    "vnc": ["vnc-info", "vnc-brute"],
+    "ftp": ["ftp-anon", "ftp-syst", "ftp-bounce"],
+    "smtp": ["smtp-commands", "smtp-enum-users", "smtp-open-relay"],
+    "dns": ["dns-zone-transfer", "dns-brute"],
+    "rmi": ["rmi-dumpregistry"],
+    "oracle": ["oracle-tns-version"],
     "memcached": ["memcached-info"],
-    "redis":     ["redis-info"],
-    "mongodb":   ["mongodb-info", "mongodb-databases"],
-    "http":      ["http-enum", "http-methods", "http-title"],
+    "redis": ["redis-info"],
+    "mongodb": ["mongodb-info", "mongodb-databases"],
+    "http": ["http-enum", "http-methods", "http-title"],
 }
 
 
-_BRUTE_SCRIPTS: set[str] = {"vnc-brute", "dns-brute", "http-brute", "ftp-brute",
-                           "smtp-brute", "pop3-brute", "imap-brute",
-                           "telnet-brute", "ssh-brute"}
+_BRUTE_SCRIPTS: set[str] = {
+    "vnc-brute",
+    "dns-brute",
+    "http-brute",
+    "ftp-brute",
+    "smtp-brute",
+    "pop3-brute",
+    "imap-brute",
+    "telnet-brute",
+    "ssh-brute",
+}
 
 
 def _build_script_arg(host: Host, config: ScanConfig | None = None) -> str:
@@ -237,7 +267,6 @@ async def run_nmap_vuln(
         return []
 
     vuln_dir = tree.host_vuln_dir(host.ip)
-    out_base = str(vuln_dir / "nmap_vuln")
     xml_path = vuln_dir / "nmap_vuln.xml"
 
     port_csv = ",".join(str(p.number) for p in open_ports)
@@ -247,9 +276,11 @@ async def run_nmap_vuln(
         [
             "nmap",
             f"--script={script_arg}",
-            "-p", port_csv,
+            "-p",
+            port_csv,
             "-Pn",
-            "-oX", str(xml_path),
+            "-oX",
+            str(xml_path),
             host.ip,
         ],
         timeout=int(config.nmap_timeout or config.tool_timeout),
@@ -274,8 +305,19 @@ def _collect_versions(host: Host) -> list[tuple[str, str]]:
     terms: list[tuple[str, str]] = []
     seen: set[str] = set()
 
-    _SKIP = {"linux", "ubuntu", "debian", "windows", "http", "https", "tcp", "udp",
-             "http-proxy", "unknown", "ppp"}
+    _SKIP = {
+        "linux",
+        "ubuntu",
+        "debian",
+        "windows",
+        "http",
+        "https",
+        "tcp",
+        "udp",
+        "http-proxy",
+        "unknown",
+        "ppp",
+    }
 
     # From nmap -sV — ONLY when version is detected
     for port in host.open_ports:
@@ -286,7 +328,8 @@ def _collect_versions(host: Host) -> list[tuple[str, str]]:
             port_str = str(port.number)
             # Extract major.minor version only (e.g. "9.6" from "9.6p1 Ubuntu 3ubuntu13.15")
             import re
-            ver_match = re.search(r'(\d+\.\d+)', port.service.version)
+
+            ver_match = re.search(r"(\d+\.\d+)", port.service.version)
             if ver_match:
                 short_ver = ver_match.group(1)
                 key = f"{name} {short_ver}"
@@ -302,7 +345,8 @@ def _collect_versions(host: Host) -> list[tuple[str, str]]:
             port_str = ""
             if tech.url:
                 import re
-                m = re.search(r':(\d+)', tech.url)
+
+                m = re.search(r":(\d+)", tech.url)
                 if m:
                     port_str = m.group(1)
             if key not in seen:
@@ -345,6 +389,7 @@ async def run_searchsploit(
 
     # Method 2: Per-version searches (more targeted, with port mapping)
     import json as json_mod
+
     version_tuples = _collect_versions(host)
     combined_exploits: list[dict] = []
     # Track which port each exploit came from
@@ -385,7 +430,12 @@ async def run_searchsploit(
                 seen_edb.add(f.template_id)
                 all_findings.append(f)
 
-    log.info("Searchsploit %s: %d exploit(s) from %d version(s)", host.ip, len(all_findings), len(version_tuples))
+    log.info(
+        "Searchsploit %s: %d exploit(s) from %d version(s)",
+        host.ip,
+        len(all_findings),
+        len(version_tuples),
+    )
     return all_findings
 
 
@@ -440,20 +490,28 @@ async def run_getsploit(
 
     # Save combined results as JSON for traceability
     import json as json_mod
+
     if all_findings:
         combined: list[dict] = []
         for f in all_findings:
-            combined.append({
-                "id": f.template_id,
-                "title": f.title,
-                "port": f.port,
-                "severity": f.severity.value,
-                "references": f.references,
-            })
+            combined.append(
+                {
+                    "id": f.template_id,
+                    "title": f.title,
+                    "port": f.port,
+                    "severity": f.severity.value,
+                    "references": f.references,
+                }
+            )
         json_path = vuln_dir / "getsploit_all.json"
         json_path.write_text(json_mod.dumps(combined, indent=2), encoding="utf-8")
 
-    log.info("Getsploit %s: %d exploit(s) from %d version(s)", host.ip, len(all_findings), len(version_tuples))
+    log.info(
+        "Getsploit %s: %d exploit(s) from %d version(s)",
+        host.ip,
+        len(all_findings),
+        len(version_tuples),
+    )
     return all_findings
 
 
@@ -486,6 +544,10 @@ async def scan_host_vulns(
         # Nikto: web server misconfiguration scanner (if enabled and web endpoints exist)
         if not config.skip_nikto and host.web_endpoints:
             tasks.append(asyncio.create_task(run_nikto(host, config, tree)))
+
+        # NVD CVE search (first pass): uses structured version data from nmap -sV
+        # and httpx. Second pass in orchestrator adds enumeration-tool findings.
+        tasks.append(asyncio.create_task(scan_cve_search(host, [], config)))
 
         if not tasks:
             return []

@@ -26,7 +26,10 @@ def _safe_filename(url: str) -> str:
 
 
 async def crawl_host(
-    host: Host, config: ScanConfig, tree: OutputTree, sem: asyncio.Semaphore,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
+    sem: asyncio.Semaphore,
 ) -> list[Finding]:
     """Spider all web endpoints on *host* with katana.
 
@@ -51,12 +54,17 @@ async def crawl_host(
             out_path = tree.host_web_dir(host.ip) / f"katana_{_safe_filename(endpoint)}.txt"
             result = await run_tool(
                 [
-                    "katana", "-u", endpoint,
-                    "-d", "3",
+                    "katana",
+                    "-u",
+                    endpoint,
+                    "-d",
+                    "3",
                     "-jc",
                     "-kf",
-                    "-ef", "css,png,jpg,gif,svg,woff,woff2,ico,ttf,eot",
-                    "-silent", "-nc",
+                    "-ef",
+                    "css,png,jpg,gif,svg,woff,woff2,ico,ttf,eot",
+                    "-silent",
+                    "-nc",
                 ],
                 timeout=min(120, int(config.tool_timeout)),
                 label=f"katana {endpoint}",
@@ -73,13 +81,15 @@ async def crawl_host(
 
     findings: list[Finding] = []
     if new_urls:
-        findings.append(Finding(
-            source="katana",
-            host=host.ip,
-            port="",
-            protocol="tcp",
-            severity=Severity.INFO,
-            title=f"Web crawl discovered {len(new_urls)} endpoint(s)",
-            description="\n".join(sorted(new_urls)[:50]),
-        ))
+        findings.append(
+            Finding(
+                source="katana",
+                host=host.ip,
+                port="",
+                protocol="tcp",
+                severity=Severity.INFO,
+                title=f"Web crawl discovered {len(new_urls)} endpoint(s)",
+                description="\n".join(sorted(new_urls)[:50]),
+            )
+        )
     return findings

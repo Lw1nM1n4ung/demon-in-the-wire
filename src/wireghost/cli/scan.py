@@ -1,4 +1,5 @@
 """wireghost scan — local pipeline runner with tmux integration."""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,6 +22,7 @@ console = Console(stderr=True)
 def _slugify_target(target: str) -> str:
     """Slugify target for tmux session name: 192.168.1.0/24 → wg-192.168.1.0-24."""
     import re
+
     slug = re.sub(r"[^a-zA-Z0-9./-]", "", target)
     slug = slug.replace("/", "-")
     return f"wg-{slug}"
@@ -36,9 +38,7 @@ def scan(
     output_dir: Optional[Path] = typer.Option(
         None, "--output", "-o", help="Output directory (default: ./output)"
     ),
-    parallelism: int = typer.Option(
-        10, "--parallelism", "-j", help="Max concurrent host scans"
-    ),
+    parallelism: int = typer.Option(10, "--parallelism", "-j", help="Max concurrent host scans"),
     skip_nuclei: bool = typer.Option(False, "--skip-nuclei"),
     skip_vuln: bool = typer.Option(False, "--skip-vuln"),
     skip_screenshots: bool = typer.Option(False, "--skip-screenshots"),
@@ -48,11 +48,13 @@ def scan(
     skip_msf: bool = typer.Option(False, "--skip-msf"),
     skip_getsploit: bool = typer.Option(False, "--skip-getsploit"),
     skip_brute_force: bool = typer.Option(
-        False, "--skip-brute-force",
+        False,
+        "--skip-brute-force",
         help="Exclude brute-force scripts (nmap vnc-brute, dns-brute, etc.)",
     ),
     skip_fingerprintx: bool = typer.Option(
-        False, "--skip-fingerprintx",
+        False,
+        "--skip-fingerprintx",
         help="Skip fingerprintx service identification during port scan",
     ),
     timeout: float = typer.Option(3600.0, "--timeout", "-t", help="Per-tool timeout"),
@@ -71,15 +73,9 @@ def scan(
         None, "--config", "-c", help="Path to wireghost.yml config"
     ),
     no_tmux: bool = typer.Option(False, "--no-tmux", help="Run in foreground (no tmux)"),
-    attach: bool = typer.Option(
-        False, "--attach", help="Attach to a running scan"
-    ),
-    list_sessions: bool = typer.Option(
-        False, "--list", help="List running wg-* tmux sessions"
-    ),
-    kill_target: Optional[str] = typer.Option(
-        None, "--kill", help="Kill a running scan by target"
-    ),
+    attach: bool = typer.Option(False, "--attach", help="Attach to a running scan"),
+    list_sessions: bool = typer.Option(False, "--list", help="List running wg-* tmux sessions"),
+    kill_target: Optional[str] = typer.Option(None, "--kill", help="Kill a running scan by target"),
 ) -> None:
     """Run a full security scan pipeline against a target.
 
@@ -121,9 +117,7 @@ def scan(
         "nuclei_default_templates": nuclei_default_templates,
     }
     if report_formats:
-        overrides["report_formats"] = [
-            f.strip() for f in report_formats.split(",") if f.strip()
-        ]
+        overrides["report_formats"] = [f.strip() for f in report_formats.split(",") if f.strip()]
     if title:
         overrides["report_title"] = title
 
@@ -145,10 +139,17 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
     """Launch a detached tmux session with scan pipeline."""
     python = sys.executable
     cmd_parts = [
-        python, "-m", "wireghost", "scan", "--target", target,
+        python,
+        "-m",
+        "wireghost",
+        "scan",
+        "--target",
+        target,
         "--no-tmux",
-        "-o", str(cfg.output_dir),
-        "-j", str(cfg.parallelism),
+        "-o",
+        str(cfg.output_dir),
+        "-j",
+        str(cfg.parallelism),
     ]
     if cfg.skip_nuclei:
         cmd_parts.append("--skip-nuclei")
@@ -189,7 +190,8 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
     try:
         subprocess.run(
             ["tmux", "kill-session", "-t", session_name],
-            capture_output=True, timeout=5,
+            capture_output=True,
+            timeout=5,
         )
     except Exception:
         pass
@@ -197,21 +199,22 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
     # Create new detached session
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", session_name, "-n", "scan"],
-        check=True, timeout=10,
+        check=True,
+        timeout=10,
     )
 
     # Top pane (80%): scan output
     subprocess.run(
-        ["tmux", "send-keys", "-t", f"{session_name}:scan.0",
-         scan_cmd, "Enter"],
-        check=True, timeout=5,
+        ["tmux", "send-keys", "-t", f"{session_name}:scan.0", scan_cmd, "Enter"],
+        check=True,
+        timeout=5,
     )
 
     # Create bottom pane (20%): status bar
     subprocess.run(
-        ["tmux", "split-window", "-d", "-t", f"{session_name}:scan.0",
-         "-l", "8"],
-        check=True, timeout=5,
+        ["tmux", "split-window", "-d", "-t", f"{session_name}:scan.0", "-l", "8"],
+        check=True,
+        timeout=5,
     )
     status_cmd = (
         f"while true; do "
@@ -221,15 +224,23 @@ def _launch_tmux(session_name: str, target: str, cfg) -> None:
         f"done"
     )
     subprocess.run(
-        ["tmux", "send-keys", "-t", f"{session_name}:scan.1",
-         f"echo 'Wire_Ghost scan: {target}'; {status_cmd}", "Enter"],
-        check=True, timeout=5,
+        [
+            "tmux",
+            "send-keys",
+            "-t",
+            f"{session_name}:scan.1",
+            f"echo 'Wire_Ghost scan: {target}'; {status_cmd}",
+            "Enter",
+        ],
+        check=True,
+        timeout=5,
     )
 
     # Select top pane
     subprocess.run(
         ["tmux", "select-pane", "-t", f"{session_name}:scan.0"],
-        check=True, timeout=5,
+        check=True,
+        timeout=5,
     )
 
     console.print(f"[bold green]Created tmux session: {session_name}[/]")
@@ -264,7 +275,8 @@ def _attach(target: str) -> None:
     # Check if session exists
     result = subprocess.run(
         ["tmux", "has-session", "-t", session_name],
-        capture_output=True, timeout=5,
+        capture_output=True,
+        timeout=5,
     )
     if result.returncode != 0:
         console.print(f"[bold red]Session not found:[/] {session_name}")
@@ -281,7 +293,8 @@ def _kill_session(target: str) -> None:
     try:
         subprocess.run(
             ["tmux", "kill-session", "-t", session_name],
-            check=True, timeout=5,
+            check=True,
+            timeout=5,
         )
         console.print(f"[bold green]Killed session:[/] {session_name}")
     except subprocess.CalledProcessError:
@@ -297,18 +310,19 @@ def _list_sessions() -> None:
 
     result = subprocess.run(
         ["tmux", "list-sessions", "-F", "#{session_name} #{session_created}"],
-        capture_output=True, text=True, timeout=5,
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     sessions = [
-        line.split(" ", 1)
-        for line in result.stdout.strip().split("\n")
-        if line.startswith("wg-")
+        line.split(" ", 1) for line in result.stdout.strip().split("\n") if line.startswith("wg-")
     ]
     if not sessions:
         console.print("[dim]No active wg-* scan sessions[/]")
         return
 
     from wireghost.cli.output import echo_table
+
     echo_table(
         "Active Scan Sessions",
         [("name", "Session"), ("created", "Started")],

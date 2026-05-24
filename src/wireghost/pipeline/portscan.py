@@ -18,6 +18,7 @@ Splitting the two steps means the fallback chain is symmetric (all three
 tools just find ports) and service analysis always happens regardless of
 which tool won the chain.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -98,7 +99,9 @@ _SCANNERS: list[tuple[str, str, str]] = [
 
 
 async def _analyze_services(
-    host: Host, config: ScanConfig, tree: OutputTree,
+    host: Host,
+    config: ScanConfig,
+    tree: OutputTree,
 ) -> Host:
     """Run targeted ``nmap -sV -sC -O`` on discovered open ports.
 
@@ -113,7 +116,9 @@ async def _analyze_services(
     port_csv = ",".join(str(p.number) for p in host.open_ports)
     log.info(
         "[%s] Service analysis on %d port(s): %s",
-        host.ip, len(host.open_ports), port_csv,
+        host.ip,
+        len(host.open_ports),
+        port_csv,
     )
 
     nmap_dir = tree.host_nmap_xml_dir(host.ip)
@@ -147,7 +152,7 @@ async def _analyze_services(
     for p in host.ports:
         if p.number in svc_map:
             p.service = svc_map[p.number]
-            p.service_source = 'nmap'
+            p.service_source = "nmap"
 
     if analyzed.os:
         host.os = analyzed.os
@@ -155,7 +160,9 @@ async def _analyze_services(
     svc_count = sum(1 for p in host.open_ports if p.service is not None)
     log.info(
         "[%s] Service analysis: %d/%d port(s) identified",
-        host.ip, svc_count, len(host.open_ports),
+        host.ip,
+        svc_count,
+        len(host.open_ports),
     )
     return host
 
@@ -180,7 +187,10 @@ async def _run_fingerprintx(
         return {}
 
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", prefix="fpx_", delete=False,
+        mode="w",
+        suffix=".txt",
+        prefix="fpx_",
+        delete=False,
     ) as fh:
         for port in ports:
             fh.write(f"{host_ip}:{port.number}\n")
@@ -195,7 +205,9 @@ async def _run_fingerprintx(
         if result.returncode != 0:
             log.debug(
                 "[%s] fingerprintx exited rc=%d: %s",
-                host_ip, result.returncode, (result.stderr or "")[:200],
+                host_ip,
+                result.returncode,
+                (result.stderr or "")[:200],
             )
             return {}
 
@@ -225,7 +237,8 @@ async def _run_fingerprintx(
 
 
 def _merge_fpx_results(
-    host: Host, fpx_results: dict[int, dict[str, str]],
+    host: Host,
+    fpx_results: dict[int, dict[str, str]],
 ) -> int:
     """Merge fingerprintx results into ``Port.service`` where nmap was uncertain.
 
@@ -261,11 +274,13 @@ def _merge_fpx_results(
             product=fpx_product,
             version=fpx_version,
         )
-        port.service_source = 'fingerprintx'
+        port.service_source = "fingerprintx"
         augmented += 1
         log.debug(
             "[%s] fingerprintx augmented port %d: %s",
-            host.ip, port.number, proto,
+            host.ip,
+            port.number,
+            proto,
         )
     return augmented
 
@@ -313,15 +328,17 @@ async def scan_host(
                 ):
                     fpx_timeout = min(30, int(config.tool_timeout))
                     fpx_results = await _run_fingerprintx(
-                        host.ip, host.open_ports, fpx_timeout,
+                        host.ip,
+                        host.open_ports,
+                        fpx_timeout,
                     )
                     if fpx_results:
                         augmented = _merge_fpx_results(host, fpx_results)
                         if augmented:
                             log.info(
-                                "[%s] fingerprintx augmented %d port(s) "
-                                "nmap could not identify",
-                                host.ip, augmented,
+                                "[%s] fingerprintx augmented %d port(s) nmap could not identify",
+                                host.ip,
+                                augmented,
                             )
 
                 return host

@@ -34,8 +34,7 @@ SEVERITY_COLORS: dict[Severity, tuple[int, int, int]] = {
 }
 
 SEVERITY_HEX: dict[Severity, str] = {
-    sev: "#{:02X}{:02X}{:02X}".format(*rgb)
-    for sev, rgb in SEVERITY_COLORS.items()
+    sev: "#{:02X}{:02X}{:02X}".format(*rgb) for sev, rgb in SEVERITY_COLORS.items()
 }
 
 # --- keyword sets for nmap vuln categorization ---

@@ -1,9 +1,11 @@
 """Parser for masscan XML output."""
+
 from __future__ import annotations
 from defusedxml import ElementTree as ET  # safe XML parser (prevents XXE)
 from collections import defaultdict
 from pathlib import Path
 from wireghost.models.scan import Host, Port
+
 
 def parse_masscan_xml(xml_path: Path) -> list[Host]:
     """Parse masscan XML into Host objects. No service detection -- ports only.
@@ -29,10 +31,12 @@ def parse_masscan_xml(xml_path: Path) -> list[Host]:
             state = state_el.get("state", "open") if state_el is not None else "open"
             if state != "open":
                 continue
-            ip_ports[ip].append(Port(
-                number=int(port_el.get("portid", "0")),
-                protocol=port_el.get("protocol", "tcp"),
-                state="open",
-            ))
+            ip_ports[ip].append(
+                Port(
+                    number=int(port_el.get("portid", "0")),
+                    protocol=port_el.get("protocol", "tcp"),
+                    state="open",
+                )
+            )
 
     return [Host(ip=ip, ports=ports) for ip, ports in sorted(ip_ports.items())]

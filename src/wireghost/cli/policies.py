@@ -1,4 +1,5 @@
 """wireghost policies — CRUD for scan policies."""
+
 from __future__ import annotations
 
 import typer
@@ -29,8 +30,13 @@ def list_policies() -> None:
             return
         echo_table(
             "Scan Policies",
-            [("id", "ID"), ("name", "Name"), ("type", "Type"),
-             ("parallelism", "Parallelism"), ("created_at", "Created")],
+            [
+                ("id", "ID"),
+                ("name", "Name"),
+                ("type", "Type"),
+                ("parallelism", "Parallelism"),
+                ("created_at", "Created"),
+            ],
             results,
         )
     except Exception as e:
@@ -51,17 +57,19 @@ def show_policy(
         if check_json_flag():
             echo_json(data)
             return
-        echo_keyvalue([
-            ("ID:", data.get("id")),
-            ("Name:", data.get("name", "—")),
-            ("Type:", data.get("type", "—")),
-            ("Description:", data.get("description", "—")),
-            ("Parallelism:", str(data.get("parallelism", 10))),
-            ("Timeout:", str(data.get("timeout", 3600))),
-            ("Skip Nuclei:", str(data.get("skip_nuclei", False))),
-            ("Skip Vuln:", str(data.get("skip_vuln", False))),
-            ("Skip Screenshots:", str(data.get("skip_screenshots", False))),
-        ])
+        echo_keyvalue(
+            [
+                ("ID:", data.get("id")),
+                ("Name:", data.get("name", "—")),
+                ("Type:", data.get("type", "—")),
+                ("Description:", data.get("description", "—")),
+                ("Parallelism:", str(data.get("parallelism", 10))),
+                ("Timeout:", str(data.get("timeout", 3600))),
+                ("Skip Nuclei:", str(data.get("skip_nuclei", False))),
+                ("Skip Vuln:", str(data.get("skip_vuln", False))),
+                ("Skip Screenshots:", str(data.get("skip_screenshots", False))),
+            ]
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
@@ -81,12 +89,19 @@ def create_policy(
     """Create a new scan policy."""
     client = get_client()
     try:
-        resp = client.post("/policies/", json={
-            "name": name, "type": type, "description": description,
-            "skip_nuclei": skip_nuclei, "skip_vuln": skip_vuln,
-            "skip_screenshots": skip_screenshots,
-            "parallelism": parallelism, "timeout": timeout,
-        })
+        resp = client.post(
+            "/policies/",
+            json={
+                "name": name,
+                "type": type,
+                "description": description,
+                "skip_nuclei": skip_nuclei,
+                "skip_vuln": skip_vuln,
+                "skip_screenshots": skip_screenshots,
+                "parallelism": parallelism,
+                "timeout": timeout,
+            },
+        )
         resp.raise_for_status()
         data = resp.json()
         console.print(f"[bold green]Policy created:[/] {data.get('id', '?')}")

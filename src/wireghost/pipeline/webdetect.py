@@ -52,18 +52,63 @@ _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=5)
 # Includes naming conventions from BOTH tools:
 #   nmap:        domain, postgresql, ms-sql-s, ms-sql-m, rpcbind
 #   fingerprintx: dns,   postgres,   mssql,              rpc
-_NON_WEB_PROTOCOLS: frozenset[str] = frozenset({
-    "ssh", "smtp", "domain", "dns", "snmp", "ldap", "ldaps", "smb",
-    "netbios-ssn", "microsoft-ds", "mysql", "postgresql", "postgres",
-    "redis", "mongodb", "ftp", "ftp-data", "telnet",
-    "ms-sql-s", "ms-sql-m", "mssql", "oracle-tns", "oracle",
-    "rdp", "ms-wbt-server", "vnc", "nfs", "nfs-oracle",
-    "rpcbind", "rpc", "mountd", "nlockmgr",
-    "pop3", "pop3s", "imap", "imaps", "ntp", "dhcp", "dhcpv6",
-    "tftp", "sip", "sips", "rtsp", "rsync",
-    "ipp", "ipp-ssl", "cups", "jetdirect",
-    "docker", "docker-tls", "kubernetes", "kubelet",
-})
+_NON_WEB_PROTOCOLS: frozenset[str] = frozenset(
+    {
+        "ssh",
+        "smtp",
+        "domain",
+        "dns",
+        "snmp",
+        "ldap",
+        "ldaps",
+        "smb",
+        "netbios-ssn",
+        "microsoft-ds",
+        "mysql",
+        "postgresql",
+        "postgres",
+        "redis",
+        "mongodb",
+        "ftp",
+        "ftp-data",
+        "telnet",
+        "ms-sql-s",
+        "ms-sql-m",
+        "mssql",
+        "oracle-tns",
+        "oracle",
+        "rdp",
+        "ms-wbt-server",
+        "vnc",
+        "nfs",
+        "nfs-oracle",
+        "rpcbind",
+        "rpc",
+        "mountd",
+        "nlockmgr",
+        "pop3",
+        "pop3s",
+        "imap",
+        "imaps",
+        "ntp",
+        "dhcp",
+        "dhcpv6",
+        "tftp",
+        "sip",
+        "sips",
+        "rtsp",
+        "rsync",
+        "ipp",
+        "ipp-ssl",
+        "cups",
+        "jetdirect",
+        "docker",
+        "docker-tls",
+        "kubernetes",
+        "kubelet",
+    }
+)
+
 
 def _should_probe(port: Port) -> tuple[bool, str]:
     """Return (should_probe, reason) for a port.
@@ -93,7 +138,9 @@ async def _try_url(session: aiohttp.ClientSession, url: str) -> bool:
 
 
 async def _detect_technologies(
-    host: Host, tree: OutputTree, timeout: float,
+    host: Host,
+    tree: OutputTree,
+    timeout: float,
 ) -> None:
     """Run httpx -tech-detect on web endpoints to identify technologies."""
     if not host.web_endpoints or not shutil.which("httpx"):
@@ -108,7 +155,21 @@ async def _detect_technologies(
     tech_json = web_dir / "tech_detect.json"
 
     await run_tool(
-        ["httpx", "-l", str(endpoints_file), "-tech-detect", "-sc", "-title", "-server", "-favicon", "-jarm", "-json", "-o", str(tech_json), "-silent"],
+        [
+            "httpx",
+            "-l",
+            str(endpoints_file),
+            "-tech-detect",
+            "-sc",
+            "-title",
+            "-server",
+            "-favicon",
+            "-jarm",
+            "-json",
+            "-o",
+            str(tech_json),
+            "-silent",
+        ],
         timeout=int(timeout),
         label=f"httpx tech {host.ip}",
     )
@@ -135,7 +196,9 @@ async def _detect_technologies(
                     name, version = tech.split(":", 1)
                 else:
                     name, version = tech, ""
-                host.technologies.append(WebTech(name=name.strip(), version=version.strip(), url=url))
+                host.technologies.append(
+                    WebTech(name=name.strip(), version=version.strip(), url=url)
+                )
 
         title = item.get("title", "")
         server = item.get("webserver", "")
@@ -183,11 +246,17 @@ async def probe_host(
         if skipped:
             log.info(
                 "Web detect %s: skipping %d non-web port(s) -- %s",
-                host.ip, len(skipped), "; ".join(skipped[:5]),
+                host.ip,
+                len(skipped),
+                "; ".join(skipped[:5]),
             )
 
         if not candidates:
-            log.info("Web detect %s: no web candidates among %d open port(s)", host.ip, len(host.open_ports))
+            log.info(
+                "Web detect %s: no web candidates among %d open port(s)",
+                host.ip,
+                len(host.open_ports),
+            )
             return
 
         endpoints: list[str] = []
@@ -213,13 +282,16 @@ async def probe_host(
         host.web_endpoints = endpoints
 
         if endpoints:
-            log.info("Web detect %s: %d endpoint(s) from %d candidate(s)", host.ip, len(endpoints), len(candidates))
+            log.info(
+                "Web detect %s: %d endpoint(s) from %d candidate(s)",
+                host.ip,
+                len(endpoints),
+                len(candidates),
+            )
 
             # Write per-host file
             web_file = tree.host_web_dir(host.ip) / "endpoints.txt"
-            web_file.write_text(
-                "\n".join(endpoints) + "\n", encoding="utf-8"
-            )
+            web_file.write_text("\n".join(endpoints) + "\n", encoding="utf-8")
 
             # Append to global web file
             global_file = tree.web_dir / "all_endpoints.txt"
@@ -227,7 +299,11 @@ async def probe_host(
                 for url in endpoints:
                     fh.write(url + "\n")
         else:
-            log.info("Web detect %s: no web endpoints responded among %d candidate(s)", host.ip, len(candidates))
+            log.info(
+                "Web detect %s: no web endpoints responded among %d candidate(s)",
+                host.ip,
+                len(candidates),
+            )
 
         # Run httpx tech detection on discovered endpoints
         await _detect_technologies(host, tree, config.tool_timeout)
