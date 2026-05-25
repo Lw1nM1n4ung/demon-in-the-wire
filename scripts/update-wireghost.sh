@@ -12,9 +12,10 @@
 #   sudo bash scripts/update-wireghost.sh --tools      # tools only (install + update)
 #   sudo bash scripts/update-wireghost.sh --feeds      # feeds only
 #   sudo bash scripts/update-wireghost.sh --all        # everything (host tools + feeds + Docker)
+#   sudo bash scripts/update-wireghost.sh --full       # full stack update WITH database backup + restore
 #
 #   # Pass flags via curl:
-#   curl -fsSL <url> | sudo bash -s -- --docker
+#   curl -fsSL <url> | sudo bash -s -- --full
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -548,12 +549,69 @@ docker_update() {
 }
 
 ###########################################################################
+# 5. Database backup & restore (--full flag)
+###########################################################################
+db_backup() {
+    step "Backing up database"
+
+    local backup_dir="${PROJECT_DIR}/backups"
+    mkdir -p "$backup_dir"
+
+    local timestamp; timestamp=$(date +%Y%m%d_%H%M%S)
+    BACKUP_FILE="${backup_dir}/wireghost_${timestamp}.sql.gz"
+
+    info "Dumping database to ${BACKUP_FILE}..."
+
+    if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db sh -c \
+        'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --events wireghost' \
+        2>/dev/null | gzip > "$BACKUP_FILE"; then
+        local size; size=$(du -h "$BACKUP_FILE" | cut -f1)
+        ok "Database backed up (${size}) → ${BACKUP_FILE}"
+    else
+        warn "Database backup FAILED — continuing without backup"
+        BACKUP_FILE=""
+    fi
+}
+
+db_restore() {
+    if [ -z "${BACKUP_FILE:-}" ] || [ ! -f "${BACKUP_FILE:-}" ]; then
+        warn "No backup file to restore — skipping"
+        return
+    fi
+
+    step "Restoring database"
+
+    info "Restoring from ${BACKUP_FILE}..."
+
+    # Wait for DB
+    for i in $(seq 1 30); do
+        if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db mysqladmin ping -h localhost --silent 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if gunzip < "$BACKUP_FILE" | docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db sh -c \
+        'mysql -u root -p"$MYSQL_ROOT_PASSWORD" wireghost' 2>/dev/null; then
+        ok "Database restored successfully"
+    else
+        warn "Database restore FAILED — backup kept at: ${BACKUP_FILE}"
+        return
+    fi
+
+    # Schema may be behind code after restore — catch up
+    info "Running migrations after restore..."
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -3 || \
+        warn "post-restore migrate failed — check: docker compose logs api"
+}
+
+###########################################################################
 # Main
 ###########################################################################
 RAW_BASE="https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2"
 
 # ── Parse flags ────────────────────────────────────────────────────────
-WITH_SELF=true; WITH_TOOLS=true; WITH_FEEDS=true; WITH_DOCKER=false; FORCE_HOST=false; WITH_HOST_PIP=false
+WITH_SELF=true; WITH_TOOLS=true; WITH_FEEDS=true; WITH_DOCKER=false; FORCE_HOST=false; WITH_HOST_PIP=false; WITH_BACKUP=false
 for arg in "$@"; do
     case "$arg" in
         --self)   WITH_TOOLS=false; WITH_FEEDS=false ;;
@@ -561,13 +619,15 @@ for arg in "$@"; do
         --feeds)  WITH_SELF=false; WITH_TOOLS=false ;;
         --docker) WITH_DOCKER=true ;;
         --host)   FORCE_HOST=true; WITH_HOST_PIP=true ;;
+        --full)   WITH_DOCKER=true; WITH_HOST_PIP=true; WITH_BACKUP=true ;;
         --all)    WITH_DOCKER=true; WITH_HOST_PIP=true ;;  # everything including host pip
         --help|-h)
             echo "Usage: sudo bash update-wireghost.sh [flags]"
             echo "  (no flags)  Auto-detect: self + tools + feeds + Docker (if running)"
+            echo "  --full      Full rebuild with DB backup + restore (safest)"
+            echo "  --all       Everything: host tools + pip + Docker rebuild"
             echo "  --docker    Force Docker stack rebuild"
             echo "  --host      Host-only mode (pip install locally, skip Docker)"
-            echo "  --all       Everything: host tools + pip + Docker rebuild"
             echo "  --self      Self-update only (git pull + pip install)"
             echo "  --tools     Tools only (install missing + update existing)"
             echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
@@ -630,7 +690,17 @@ if [ "$WITH_FEEDS" = true ]; then
 fi
 
 if [ "$WITH_DOCKER" = true ]; then
+    if [ "$WITH_BACKUP" = true ] && [ "$DOCKER_DEPLOY" = true ]; then
+        db_backup
+    elif [ "$WITH_BACKUP" = true ]; then
+        warn "Docker stack not running — skipping backup (nothing to back up)"
+    fi
+
     docker_update
+
+    if [ "$WITH_BACKUP" = true ] && [ -n "${BACKUP_FILE:-}" ] && [ -f "${BACKUP_FILE:-}" ]; then
+        db_restore
+    fi
 fi
 
 printf "\n${GREEN}${BOLD}══ Update complete ═══════════════════════════════════${NC}\n\n"
