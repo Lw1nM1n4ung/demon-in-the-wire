@@ -114,6 +114,36 @@ ok "Code up to date ($(git rev-parse --short HEAD))"
 # 3. Build images locally
 ###########################################################################
 info "Step 3: Building Docker images (cached)..."
+
+# Ensure .env exists with dummy values (compose needs them for interpolation
+# during build). Real values come from the VPS .env at deploy time.
+if [ ! -f "${PROJECT_DIR}/.env" ]; then
+    warn ".env missing (fresh clone?) — creating temporary one for build"
+    cat > "${PROJECT_DIR}/.env" <<'ENVEOF'
+MYSQL_ROOT_PASSWORD=build_placeholder
+MYSQL_PASSWORD=build_placeholder
+MYSQL_USER=wireghost
+MYSQL_DATABASE=wireghost
+REDIS_PASSWORD=build_placeholder
+DJANGO_SECRET_KEY=build_placeholder
+WIREGHOST_HOST=localhost
+WIREGHOST_PROTO=https
+WIREGHOST_PORT=443
+WIREGHOST_HTTP_BIND=127.0.0.1
+WIREGHOST_HTTP_PORT=80
+WIREGHOST_LOG_DIR=./logs
+EMAIL_HOST=localhost
+EMAIL_PORT=587
+EMAIL_USE_TLS=true
+EMAIL_HOST_USER=
+EMAIL_HOST_PASSWORD=
+DEFAULT_FROM_EMAIL=noreply@wireghost.local
+CSRF_COOKIE_SECURE=true
+SESSION_COOKIE_SECURE=true
+CSRF_TRUSTED_ORIGINS=https://localhost
+ENVEOF
+    ok "Temporary .env created (not used for deploy)"
+fi
 cd "$PROJECT_DIR"
 
 # Build all services — local machine has good Docker Hub / GitHub access
