@@ -82,6 +82,15 @@ info "VPS:     ${VPS}"
 info "Project: ${PROJECT_DIR}"
 echo ""
 
+# Extract host IP from VPS argument (e.g., "demon@10.10.9.240" → "10.10.9.240")
+REMOTE_HOST="${VPS##*@}"
+# If it looks like an IP, use it as default WIREGHOST_HOST for the build
+if echo "$REMOTE_HOST" | grep -qP '^\d+\.\d+\.\d+\.\d+$'; then
+    REMOTE_HOST_IP="$REMOTE_HOST"
+else
+    REMOTE_HOST_IP=""
+fi
+
 ###########################################################################
 # 1. DB backup (from VPS)
 ###########################################################################
@@ -157,19 +166,30 @@ docker compose -f docker-compose.yml build --pull portal 2>&1 || die "Portal ima
 ok "Portal image built"
 
 ###########################################################################
-# 4. Save images → tar
+# 4. Save images → individual tarballs
 ###########################################################################
 info "Step 4: Saving images to archive..."
-IMAGE_TAR="${TMPDIR}/wireghost-images.tar.gz"
 
-docker save \
-    callmedemon/wireghost:web \
-    callmedemon/wireghost:worker \
-    callmedemon/wireghost:portal \
-    | gzip > "$IMAGE_TAR"
+# Save each image individually — portal first (smallest, ~25MB), then worker (~2GB), then web (~500MB).
+# Individual files mean a partial transfer failure doesn't lose everything,
+# and portal can be deployed immediately without waiting for worker/web.
+_save_one() {
+    local tag="$1" file="$2"
+    docker save "$tag" | gzip > "$file"
+}
 
-tar_size=$(du -h "$IMAGE_TAR" | cut -f1)
-ok "Images saved (${tar_size})"
+IMAGE_DIR="${TMPDIR}/images"
+mkdir -p "$IMAGE_DIR"
+
+_save_one callmedemon/wireghost:portal  "${IMAGE_DIR}/portal.tar.gz"  &
+_save_one callmedemon/wireghost:web     "${IMAGE_DIR}/web.tar.gz"     &
+_save_one callmedemon/wireghost:worker  "${IMAGE_DIR}/worker.tar.gz"  &
+wait
+
+for f in portal web worker; do
+    [ -s "${IMAGE_DIR}/${f}.tar.gz" ] || die "Failed to save ${f} image"
+done
+ok "Images saved (portal: $(du -h "${IMAGE_DIR}/portal.tar.gz" | cut -f1), web: $(du -h "${IMAGE_DIR}/web.tar.gz" | cut -f1), worker: $(du -h "${IMAGE_DIR}/worker.tar.gz" | cut -f1))"
 
 ###########################################################################
 # 5. Transfer code + images to VPS
@@ -190,9 +210,20 @@ info "Transferring code ($(du -h "$code_tar" | cut -f1))..."
 scp "$code_tar" "${VPS}:${REMOTE_DIR}/.remote-code.tar.gz" 2>&1 || die "SCP code transfer failed"
 ok "Code transferred"
 
-info "Transferring images (this may take a while)..."
-scp "$IMAGE_TAR" "${VPS}:${REMOTE_DIR}/.remote-images.tar.gz" 2>&1 || die "SCP image transfer failed"
-ok "Images transferred"
+# Transfer images individually — portal first (fast, gets the critical fix deployed ASAP)
+_scp_img() {
+    local name="$1" file="$2" remote_file="$3"
+    info "Transferring ${name} ($(du -h "$file" | cut -f1))..."
+    scp "$file" "${VPS}:${remote_file}" 2>&1 || {
+        warn "${name} transfer failed — continuing"
+        return 1
+    }
+    ok "${name} transferred"
+}
+
+_scp_img "portal" "${IMAGE_DIR}/portal.tar.gz"  "${REMOTE_DIR}/.remote-portal.tar.gz"
+_scp_img "web"    "${IMAGE_DIR}/web.tar.gz"     "${REMOTE_DIR}/.remote-web.tar.gz"
+_scp_img "worker" "${IMAGE_DIR}/worker.tar.gz"  "${REMOTE_DIR}/.remote-worker.tar.gz"
 
 # Transfer backup file if present
 REMOTE_BACKUP=""
@@ -218,11 +249,19 @@ REMOTE_DIR="$1"; WITH_BACKUP="$2"; BACKUP_FILE="$3"
 
 echo "[VPS] Loading images..."
 cd "$REMOTE_DIR"
-gunzip -c .remote-images.tar.gz | docker load 2>&1 | head -5
+for f in .remote-portal .remote-web .remote-worker; do
+    if [ -f "${f}.tar.gz" ]; then
+        echo "[VPS]   Loading ${f#.remote-}..."
+        gunzip -c "${f}.tar.gz" | docker load 2>&1 | head -3
+        rm -f "${f}.tar.gz"
+    else
+        echo "[VPS]   ${f#.remote-} image not found — skipping"
+    fi
+done
 
 echo "[VPS] Extracting code..."
 tar xzf .remote-code.tar.gz 2>/dev/null
-rm -f .remote-code.tar.gz .remote-images.tar.gz
+rm -f .remote-code.tar.gz
 
 echo "[VPS] Stopping stack..."
 docker compose -f docker-compose.yml -f docker-compose.host.yml down --remove-orphans 2>&1 || true
@@ -275,4 +314,4 @@ ok "Temporary files removed"
 
 echo ""
 ok "Remote update finished successfully"
-echo "  Portal: https://${VPS##*@}:18443"
+echo "  Portal: https://${REMOTE_HOST}:18443"
