@@ -26,14 +26,22 @@ warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 die()   { printf "${RED}[FATAL]${NC} %s\n" "$*" >&2; exit 1; }
 
 # ── Parse args ──────────────────────────────────────────────────────────
-VPS=""; WITH_BACKUP=false
+VPS=""; WITH_BACKUP=false; PROJECT_DIR=""; _next_project_dir=false
 for arg in "$@"; do
+    if [ "$_next_project_dir" = true ]; then
+        PROJECT_DIR="$arg"
+        _next_project_dir=false
+        continue
+    fi
     case "$arg" in
         --full) WITH_BACKUP=true ;;
+        --project-dir) _next_project_dir=true ;;
+        --project-dir=*) PROJECT_DIR="${arg#*=}" ;;
         --help|-h)
-            echo "Usage: bash update-remote.sh <vps> [--full]"
-            echo "  vps     SSH destination (required)"
-            echo "  --full  DB backup + restore"
+            echo "Usage: bash update-remote.sh <vps> [--full] [--project-dir=<path>]"
+            echo "  vps          SSH destination (required)"
+            echo "  --full       DB backup + restore"
+            echo "  --project-dir Path to demon-in-the-wire project (auto-detected if omitted)"
             exit 0 ;;
         *) VPS="$arg" ;;
     esac
@@ -43,8 +51,26 @@ done
 
 # ── Find project root ───────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-[ -f "${PROJECT_DIR}/pyproject.toml" ] || die "Project root not found at ${PROJECT_DIR}"
+
+if [ -n "$PROJECT_DIR" ]; then
+    # Explicit path given
+    [ -f "${PROJECT_DIR}/pyproject.toml" ] || die "pyproject.toml not found at ${PROJECT_DIR} (--project-dir)"
+elif [ -f "$PWD/pyproject.toml" ]; then
+    PROJECT_DIR="$PWD"
+elif [ -f "${SCRIPT_DIR}/../pyproject.toml" ]; then
+    PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+    # Search upward from PWD
+    _search="$PWD"
+    while [ "$_search" != "/" ]; do
+        if [ -f "$_search/pyproject.toml" ]; then
+            PROJECT_DIR="$_search"
+            break
+        fi
+        _search="$(dirname "$_search")"
+    done
+    [ -n "$PROJECT_DIR" ] || die "Project root not found. cd to the project or use --project-dir=<path>"
+fi
 
 REMOTE_DIR="/opt/wireghost"
 TMPDIR="${PROJECT_DIR}/.remote-update"
