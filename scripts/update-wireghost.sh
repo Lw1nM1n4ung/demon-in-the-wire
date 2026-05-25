@@ -15,6 +15,7 @@
 #   sudo bash scripts/update-wireghost.sh --full       # full stack update WITH database backup + restore
 #   sudo bash scripts/update-wireghost.sh --verbose    # show full output (no suppression)
 #   sudo bash scripts/update-wireghost.sh --no-pull    # skip Docker Hub pulls (use cached images)
+#   sudo bash scripts/update-wireghost.sh --no-cache   # force full rebuild (no layer cache)
 #
 #   # Pass flags via curl:
 #   curl -fsSL <url> | sudo bash -s -- --full
@@ -506,17 +507,21 @@ docker_update() {
         info "Skipping Docker Hub pulls (--no-pull) — using cached base images"
     fi
 
-    # ── Build app images from scratch (no cache) with retry ──
-    info "Building app images (no cache)..."
+    # ── Build app images with retry ──
+    # Default: cached build (fast — layers are reused, only changed COPY steps rerun).
+    # --no-cache or --full: full rebuild from scratch (slow but thorough).
     local build_ok=false build_tmp; build_tmp=$(mktemp)
-    local build_pull_flag=""
-    [ "$WITH_PULL" = true ] && build_pull_flag="--pull"
+    local build_flags=""
+    [ "$WITH_PULL" = true ] && build_flags="--pull"
+    [ "$WITH_NO_CACHE" = true ] && build_flags="--no-cache ${build_flags}"
+    local build_label; build_label="Building app images"
+    [ "$WITH_NO_CACHE" = true ] && build_label="${build_label} (no cache)" || build_label="${build_label} (cached)"
+    info "$build_label"
     for attempt in 1 2 3; do
         if [ "$VERBOSE" = true ]; then
-            # Show live build output while capturing for error reporting
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache ${build_pull_flag} 2>&1 | tee "$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} 2>&1 | tee "$build_tmp" && build_ok=true && break
         else
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache ${build_pull_flag} 2>"$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} 2>"$build_tmp" && build_ok=true && break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
         sleep 5
@@ -664,7 +669,7 @@ db_restore() {
 RAW_BASE="https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2"
 
 # ── Parse flags ────────────────────────────────────────────────────────
-WITH_SELF=true; WITH_TOOLS=true; WITH_FEEDS=true; WITH_DOCKER=false; FORCE_HOST=false; WITH_HOST_PIP=false; WITH_BACKUP=false; WITH_PULL=true
+WITH_SELF=true; WITH_TOOLS=true; WITH_FEEDS=true; WITH_DOCKER=false; FORCE_HOST=false; WITH_HOST_PIP=false; WITH_BACKUP=false; WITH_PULL=true; WITH_NO_CACHE=false
 for arg in "$@"; do
     case "$arg" in
         --self)   WITH_TOOLS=false; WITH_FEEDS=false ;;
@@ -672,20 +677,22 @@ for arg in "$@"; do
         --feeds)  WITH_SELF=false; WITH_TOOLS=false ;;
         --docker) WITH_DOCKER=true ;;
         --host)   FORCE_HOST=true; WITH_HOST_PIP=true ;;
-        --full)   WITH_DOCKER=true; WITH_HOST_PIP=true; WITH_BACKUP=true ;;
-        --all)    WITH_DOCKER=true; WITH_HOST_PIP=true ;;  # everything including host pip
+        --full)   WITH_DOCKER=true; WITH_HOST_PIP=true; WITH_BACKUP=true; WITH_NO_CACHE=true ;;
+        --all)    WITH_DOCKER=true; WITH_HOST_PIP=true ;;
+        --no-cache) WITH_NO_CACHE=true ;;
         --no-pull) WITH_PULL=false ;;
         --verbose|-v) VERBOSE=true ;;
         --help|-h)
             echo "Usage: sudo bash update-wireghost.sh [flags]"
             echo "  (no flags)  Auto-detect: self + tools + feeds + Docker (if running)"
-            echo "  --full      Full rebuild with DB backup + restore (safest)"
-            echo "  --all       Everything: host tools + pip + Docker rebuild"
-            echo "  --docker    Force Docker stack rebuild"
+            echo "  --full      Full rebuild (no-cache) with DB backup + restore"
+            echo "  --all       Everything: host tools + pip + Docker (cached build)"
+            echo "  --docker    Docker stack rebuild (cached build — fast)"
+            echo "  --no-cache  Force full Docker rebuild — no layer cache (slow)"
+            echo "  --no-pull   Skip Docker Hub pulls (use cached base images)"
             echo "  --host      Host-only mode (pip install locally, skip Docker)"
             echo "  --self      Self-update only (git pull + pip install)"
             echo "  --tools     Tools only (install missing + update existing)"
-            echo "  --no-pull   Skip Docker Hub pulls (use locally cached base images)"
             echo "  --verbose   Show full output (no suppression)"
             echo "  -v          Same as --verbose"
             echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
