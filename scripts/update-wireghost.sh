@@ -13,6 +13,7 @@
 #   sudo bash scripts/update-wireghost.sh --feeds      # feeds only
 #   sudo bash scripts/update-wireghost.sh --all        # everything (host tools + feeds + Docker)
 #   sudo bash scripts/update-wireghost.sh --full       # full stack update WITH database backup + restore
+#   sudo bash scripts/update-wireghost.sh --verbose    # show full output (no suppression)
 #
 #   # Pass flags via curl:
 #   curl -fsSL <url> | sudo bash -s -- --full
@@ -25,6 +26,17 @@ info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
 ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*"; }
 warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 die()   { printf "${RED}[FATAL]${NC} %s\n" "$*" >&2; exit 1; }
+
+# ── Verbose mode helpers ─────────────────────────────────────────────────
+VERBOSE="${VERBOSE:-false}"
+_tee() {
+    # Pipe through: verbose → full output; quiet → last N lines (default 3)
+    if [ "$VERBOSE" = true ]; then cat; else tail -"${1:-3}"; fi
+}
+_pip_q() {
+    # pip quiet flag: verbose → no -q (show all); quiet → -q
+    if [ "$VERBOSE" = true ]; then echo ""; else echo "-q"; fi
+}
 
 # ── Find project root ──────────────────────────────────────────────────
 find_root() {
@@ -144,7 +156,7 @@ self_update() {
 
     info "Pulling ${branch}..."
     git fetch origin "$branch" || warn "git fetch failed — check network"
-    if ! git pull --ff-only origin "$branch" 2>&1 | tail -3; then
+    if ! git pull --ff-only origin "$branch" 2>&1 | _tee 3; then
         warn "git pull failed — repo may have local changes"
         return
     fi
@@ -200,9 +212,9 @@ self_update() {
 
     info "Installing packages... (Python ${py_ver})"
     set +e
-    "$pip" install --no-cache-dir -e "${PROJECT_DIR}" -q 2>&1 | tail -2
+    "$pip" install --no-cache-dir $(_pip_q) -e "${PROJECT_DIR}" 2>&1 | _tee 2
     if [ -f "${PROJECT_DIR}/web_portal/requirements.txt" ]; then
-        "$pip" install --no-cache-dir -r "${PROJECT_DIR}/web_portal/requirements.txt" -q 2>&1 | tail -2
+        "$pip" install --no-cache-dir $(_pip_q) -r "${PROJECT_DIR}/web_portal/requirements.txt" 2>&1 | _tee 2
     fi
     set -e
     ok "Python packages updated"
@@ -397,7 +409,7 @@ tools_update() {
         if git clone --depth 1 https://github.com/Pennyw0rth/NetExec.git "$ne_tmp" 2>/dev/null; then
             # Strip `@ git+https://...Certipy` so pip uses the PyPI certipy-ad
             sed -i 's/"certipy-ad @ git+https:\/\/github\.com\/Pennyw0rth\/Certipy[^"]*"/"certipy-ad"/' "$ne_tmp/pyproject.toml"
-            if pip3 install --upgrade "$ne_tmp" 2>&1 | tail -3; then
+            if pip3 install $(_pip_q) --upgrade "$ne_tmp" 2>&1 | _tee 3; then
                 ok "netexec installed"
             else
                 warn "netexec — install failed (optional)"
@@ -430,23 +442,23 @@ feeds_update() {
     # Prefer running inside worker container if Docker is up
     if [ "$DOCKER_DEPLOY" = true ] && docker compose "${DOCKER_COMPOSE_FILES[@]}" ps 2>/dev/null | grep -q "worker.*Up"; then
         info "Updating nuclei templates in worker container..."
-        docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T worker nuclei -update-templates 2>&1 | tail -2 && \
+        docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T worker nuclei -update-templates 2>&1 | _tee 2 && \
             ok "nuclei templates updated (worker)" || warn "worker nuclei template update failed"
 
         info "Updating searchsploit DB in worker container..."
-        docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T worker searchsploit -u 2>&1 | tail -2 && \
+        docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T worker searchsploit -u 2>&1 | _tee 2 && \
             ok "searchsploit DB updated (worker)" || warn "worker searchsploit update failed"
     fi
 
     # Also update on host if tools are installed
     if command -v nuclei >/dev/null 2>&1; then
         info "nuclei -update-templates (host)..."
-        nuclei -update-templates 2>&1 | tail -2 && ok "nuclei templates updated (host)" || true
+        nuclei -update-templates 2>&1 | _tee 2 && ok "nuclei templates updated (host)" || true
     fi
 
     if command -v searchsploit >/dev/null 2>&1; then
         info "searchsploit -u (host)..."
-        searchsploit -u 2>&1 | tail -2 && ok "searchsploit DB updated (host)" || true
+        searchsploit -u 2>&1 | _tee 2 && ok "searchsploit DB updated (host)" || true
     fi
 }
 
@@ -466,7 +478,7 @@ docker_update() {
     local config_tmp; config_tmp=$(mktemp)
     if ! docker compose "${DOCKER_COMPOSE_FILES[@]}" config >/dev/null 2>"$config_tmp"; then
         warn "Compose config validation FAILED — aborting to preserve running stack:"
-        tail -5 "$config_tmp" | while IFS= read -r line; do warn "  $line"; done
+        _tee 5 < "$config_tmp" | while IFS= read -r line; do warn "  $line"; done
         rm -f "$config_tmp"
         die "Fix docker-compose.yml syntax before retrying"
     fi
@@ -475,22 +487,25 @@ docker_update() {
 
     # ── Pull external base images (from registries, not built locally) ──
     info "Pulling external base images..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis docker-proxy 2>&1 | tail -5 || true
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis docker-proxy 2>&1 | _tee 5 || true
     ok "Base images pulled"
 
     # ── Build app images from scratch (no cache) with retry ──
     info "Building app images (no cache)..."
     local build_ok=false build_tmp; build_tmp=$(mktemp)
     for attempt in 1 2 3; do
-        if docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>"$build_tmp"; then
-            build_ok=true; break
+        if [ "$VERBOSE" = true ]; then
+            # Show live build output while capturing for error reporting
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>&1 | tee "$build_tmp" && build_ok=true && break
+        else
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>"$build_tmp" && build_ok=true && break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
         sleep 5
     done
     if [ "$build_ok" = false ]; then
         warn "Build failed after 3 attempts — last error:"
-        tail -30 "$build_tmp" | while IFS= read -r line; do warn "  $line"; done
+        _tee 30 < "$build_tmp" | while IFS= read -r line; do warn "  $line"; done
         rm -f "$build_tmp"
         die "Build failed — cannot continue"
     fi
@@ -499,13 +514,13 @@ docker_update() {
 
     # ── Full stop — tear down every container so we start completely fresh ──
     info "Stopping all containers..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" down --remove-orphans 2>&1 | tail -3 || true
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" down --remove-orphans 2>&1 | _tee 3 || true
     ok "All containers stopped"
 
     # ── Full recreate — force-recreate ensures every container is brand new,
     # even if Compose config hasn't changed. Eliminates stale layer bugs. ──
     info "Starting stack with force-recreate..."
-    if docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --force-recreate --remove-orphans 2>&1 | tail -5; then
+    if docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --force-recreate --remove-orphans 2>&1 | _tee 5; then
         ok "All containers recreated from fresh images"
     else
         die "docker compose up failed — check: cd ${PROJECT_DIR} && docker compose up -d"
@@ -524,12 +539,12 @@ docker_update() {
 
     # ── Run migrations ──
     info "Running Django migrations..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -5 || \
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | _tee 5 || \
         warn "migrations may have failed — check: docker compose logs api"
 
     # ── Collect static ──
     info "Collecting static files..."
-    if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | tail -3; then
+    if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | _tee 3; then
         ok "Static files collected"
     else
         warn "collectstatic failed — static files may be stale"
@@ -546,7 +561,7 @@ docker_update() {
 
     # ── Restart portal to flush Docker DNS cache (stale API container IP → 502) ──
     info "Restarting portal (DNS cache refresh)..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" restart portal 2>&1 | tail -2 || true
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" restart portal 2>&1 | _tee 2 || true
     ok "Portal restarted"
 
     # ── Prune dangling images and build cache (--no-cache leaves orphaned layers) ──
@@ -570,9 +585,13 @@ db_backup() {
 
     info "Dumping database to ${BACKUP_FILE}..."
 
-    if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db sh -c \
-        'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --events wireghost' \
-        2>/dev/null | gzip > "$BACKUP_FILE"; then
+    local dump_cmd; dump_cmd="docker compose ${DOCKER_COMPOSE_FILES[*]} exec -T db sh -c 'mysqldump -u root -p\"\$MYSQL_ROOT_PASSWORD\" --single-transaction --routines --triggers --events wireghost'"
+    if [ "$VERBOSE" = true ]; then
+        eval "$dump_cmd | gzip > \"$BACKUP_FILE\""
+    else
+        eval "$dump_cmd 2>/dev/null | gzip > \"$BACKUP_FILE\""
+    fi
+    if [ "${PIPESTATUS[0]:-0}" -eq 0 ] && [ -s "$BACKUP_FILE" ]; then
         local size; size=$(du -h "$BACKUP_FILE" | cut -f1)
         ok "Database backed up (${size}) → ${BACKUP_FILE}"
     else
@@ -599,8 +618,16 @@ db_restore() {
         sleep 1
     done
 
-    if gunzip < "$BACKUP_FILE" | docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db sh -c \
-        'mysql -u root -p"$MYSQL_ROOT_PASSWORD" wireghost' 2>/dev/null; then
+    local restore_ok=false
+    if [ "$VERBOSE" = true ]; then
+        gunzip < "$BACKUP_FILE" | docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db sh -c \
+            'mysql -u root -p"$MYSQL_ROOT_PASSWORD" wireghost' && restore_ok=true
+    else
+        gunzip < "$BACKUP_FILE" | docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db sh -c \
+            'mysql -u root -p"$MYSQL_ROOT_PASSWORD" wireghost' 2>/dev/null && restore_ok=true
+    fi
+
+    if [ "$restore_ok" = true ]; then
         ok "Database restored successfully"
     else
         warn "Database restore FAILED — backup kept at: ${BACKUP_FILE}"
@@ -609,7 +636,7 @@ db_restore() {
 
     # Schema may be behind code after restore — catch up
     info "Running migrations after restore..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -3 || \
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | _tee 3 || \
         warn "post-restore migrate failed — check: docker compose logs api"
 }
 
@@ -629,6 +656,7 @@ for arg in "$@"; do
         --host)   FORCE_HOST=true; WITH_HOST_PIP=true ;;
         --full)   WITH_DOCKER=true; WITH_HOST_PIP=true; WITH_BACKUP=true ;;
         --all)    WITH_DOCKER=true; WITH_HOST_PIP=true ;;  # everything including host pip
+        --verbose|-v) VERBOSE=true ;;
         --help|-h)
             echo "Usage: sudo bash update-wireghost.sh [flags]"
             echo "  (no flags)  Auto-detect: self + tools + feeds + Docker (if running)"
@@ -638,6 +666,8 @@ for arg in "$@"; do
             echo "  --host      Host-only mode (pip install locally, skip Docker)"
             echo "  --self      Self-update only (git pull + pip install)"
             echo "  --tools     Tools only (install missing + update existing)"
+            echo "  --verbose   Show full output (no suppression)"
+            echo "  -v          Same as --verbose"
             echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
             exit 0 ;;
     esac
