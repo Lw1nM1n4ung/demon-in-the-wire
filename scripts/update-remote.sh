@@ -204,7 +204,7 @@ tar czf "$code_tar" \
     --exclude='logs' --exclude='backups' --exclude='data' \
     -C "$PROJECT_DIR" \
     web_portal/ src/ config/ pyproject.toml docker-compose.yml docker-compose.host.yml \
-    Dockerfile templates/ scripts/docker-entrypoint.sh scripts/portal-entrypoint.sh 2>/dev/null
+    Dockerfile templates/ scripts/docker-entrypoint.sh 2>/dev/null
 
 info "Transferring code ($(du -h "$code_tar" | cut -f1))..."
 scp "$code_tar" "${VPS}:${REMOTE_DIR}/.remote-code.tar.gz" 2>&1 || die "SCP code transfer failed"

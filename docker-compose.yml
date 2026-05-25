@@ -269,11 +269,7 @@ services:
     restart: unless-stopped
     networks: [public]
     ports:
-      - "0.0.0.0:${WIREGHOST_PORT:-443}:443"
-      - "${WIREGHOST_HTTP_BIND:-127.0.0.1}:${WIREGHOST_HTTP_PORT:-80}:80"
-    environment:
-      - WIREGHOST_HOST=${WIREGHOST_HOST:-localhost}
-      - WIREGHOST_PORT=${WIREGHOST_PORT:-443}
+      - "127.0.0.1:2006:443"
     volumes:
       - ./certs:/etc/nginx/certs:ro
       - ${WIREGHOST_LOG_DIR:-./logs}/nginx:/var/log/nginx
