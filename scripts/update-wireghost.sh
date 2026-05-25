@@ -368,8 +368,13 @@ tools_update() {
 
         # certipy-ad (netexec dependency — on PyPI as certipy-ad; the GitHub repo
         # has broken pyproject.toml metadata so git+https installs fail).
-        # Install from PyPI first, then use a pip constraints file to prevent
-        # netexec from trying to pull it from the broken GitHub URL.
+        # Install from PyPI first. NetExec's pyproject.toml declares:
+        #   "certipy-ad @ git+https://github.com/Pennyw0rth/Certipy"
+        # which pip resolves as a direct URL requirement — it MUST fetch from
+        # that URL. Constraints files can't redirect URL requirements, so we
+        # shallow-clone netexec, sed the @ git+https suffix out, and install
+        # from the patched local clone. Pip then resolves certipy-ad normally
+        # from PyPI (already installed above).
         local ca_tmp; ca_tmp=$(mktemp)
         if ! pip3 show certipy-ad >/dev/null 2>&1; then
             info "pip install certipy-ad (netexec dependency)..."
@@ -382,37 +387,25 @@ tools_update() {
         fi
         rm -f "$ca_tmp"
 
-        # NetExec (install/upgrade from GitHub).
-        # certipy-ad is pre-installed from PyPI above. A constraints file
-        # overrides netexec's `certipy-ad @ git+https://...` dependency so
-        # pip keeps the PyPI install instead of trying the broken GitHub URL.
-        local certipy_ver ne_tmp
-        certipy_ver=$(pip3 show certipy-ad 2>/dev/null | awk '/^Version:/ {print $2}')
-        ne_tmp=$(mktemp)
+        # NetExec — clone, patch out the broken certipy-ad git URL, install locally
+        local ne_tmp; ne_tmp=$(mktemp -d)
         if pip3 show netexec >/dev/null 2>&1; then
-            info "pip upgrade netexec..."
-            if [ -n "${certipy_ver:-}" ]; then
-                echo "certipy-ad==${certipy_ver}" > /tmp/wg-constraints.txt
-                pip3 install --upgrade --constraint /tmp/wg-constraints.txt "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
-                    ok "netexec upgraded" || { warn "netexec — upgrade failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
-                rm -f /tmp/wg-constraints.txt
+            info "pip upgrade netexec (patched)..."
+        else
+            info "pip install netexec (patched)..."
+        fi
+        if git clone --depth 1 https://github.com/Pennyw0rth/NetExec.git "$ne_tmp" 2>/dev/null; then
+            # Strip `@ git+https://...Certipy` so pip uses the PyPI certipy-ad
+            sed -i 's/"certipy-ad @ git+https:\/\/github\.com\/Pennyw0rth\/Certipy[^"]*"/"certipy-ad"/' "$ne_tmp/pyproject.toml"
+            if pip3 install --upgrade "$ne_tmp" 2>&1 | tail -3; then
+                ok "netexec installed"
             else
-                pip3 install --upgrade "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
-                    ok "netexec upgraded" || { warn "netexec — upgrade failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
+                warn "netexec — install failed (optional)"
             fi
         else
-            info "pip install netexec..."
-            if [ -n "${certipy_ver:-}" ]; then
-                echo "certipy-ad==${certipy_ver}" > /tmp/wg-constraints.txt
-                pip3 install --constraint /tmp/wg-constraints.txt "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
-                    ok "netexec installed" || { warn "netexec — install failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
-                rm -f /tmp/wg-constraints.txt
-            else
-                pip3 install "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
-                    ok "netexec installed" || { warn "netexec — install failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
-            fi
+            warn "netexec — clone failed (optional)"
         fi
-        rm -f "$ne_tmp"
+        rm -rf "$ne_tmp"
     fi
 
     # ── Summary ──
