@@ -348,6 +348,6 @@ printf "  ${BOLD}To reinstall:${NC}\n"
 if [ -f "${PROJECT_DIR}/scripts/install.sh" ]; then
     printf "    cd ${PROJECT_DIR} && sudo bash scripts/install.sh\n"
 else
-    printf "    curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/install-wireghost.sh | sudo bash\n"
+    printf "    curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/stable/scripts/install-wireghost.sh | sudo bash\n"
 fi
 printf "\n"

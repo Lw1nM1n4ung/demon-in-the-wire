@@ -744,7 +744,7 @@ WG._settingsAbout = function() {
     '<div class="panel-body"><div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;"><div class="topbar-logo" style="width:48px;height:48px;font-size:18px;border-radius:12px;">WG</div><div><div style="font-weight:800;font-size:1.2rem;color:var(--text-bright);">Wire<span style="color:var(--accent);font-family:var(--font-mono);">_Ghost</span></div><div style="font-size:0.82rem;color:var(--text-dim);">Vulnerability Assessment Portal</div></div></div>' +
     '<div class="info-grid" style="grid-template-columns:1fr 1fr;">' +
       '<div class="info-item"><div class="info-label">Version</div><div class="info-value">' + esc(ud && ud.current ? ud.current : '2.0.0') + '</div></div>' +
-      '<div class="info-item"><div class="info-label">Branch</div><div class="info-value mono">rewrite-v2</div></div>' +
+      '<div class="info-item"><div class="info-label">Branch</div><div class="info-value mono">stable</div></div>' +
       '<div class="info-item"><div class="info-label">License</div><div class="info-value">MIT</div></div>' +
       '<div class="info-item"><div class="info-label">Author</div><div class="info-value">callmedemon</div></div>' +
     '</div>' +
