@@ -212,6 +212,7 @@ Pre-built images on Docker Hub:
 |-------|------|----------|
 | `callmedemon/wireghost:web` | ~180 MB | Django API, Celery beat, Telegram bot |
 | `callmedemon/wireghost:worker` | ~700 MB | Celery worker with all scan tools (nmap, nuclei, nikto, naabu, masscan, httpx, gowitness, searchsploit, fping) |
+| `callmedemon/wireghost:portal` | ~50 MB | nginx + static SPA assets (no bind-mount dependency) |
 | `callmedemon/wireghost:latest` | ~700 MB | Standalone CLI scanner |
 
 ---
@@ -873,6 +874,9 @@ curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewri
 This performs a full stack update: `git pull` → `pip install` → `docker compose down` → `docker compose build --no-cache --pull` → `docker compose up -d --force-recreate` → image cleanup. Pass flags via curl:
 
 ```bash
+# Full rebuild with DB backup, verbose output (show all build logs)
+curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/update-wireghost.sh | sudo bash -s -- --full --verbose
+
 # Tools + feeds only (no Docker rebuild)
 curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/update-wireghost.sh | sudo bash -s -- --tools --feeds
 

@@ -157,10 +157,11 @@ One-command tool to update the host IP across all config files: `sudo python3 ip
 
 ### Docker images
 
-Three Dockerfiles:
+Four Dockerfiles:
 - `Dockerfile` (root) — standalone CLI scanner image with all scan tools + Metasploit. Pre-built: `callmedemon/wireghost`.
 - `web_portal/Dockerfile` — worker image with all scan tools (nmap, nuclei, metasploit-framework, etc.). Pre-built: `callmedemon/wireghost:worker`.
 - `web_portal/Dockerfile.web` — slim API/portal image (no scan tools, tools health dispatched to worker via Celery). Pre-built: `callmedemon/wireghost:web`.
+- `web_portal/Dockerfile.portal` — nginx + static SPA assets baked into the image. Pre-built: `callmedemon/wireghost:portal`. Replaces the raw `nginx:alpine` in docker-compose for `--full` rebuilds — no bind-mount dependency for source files.
 
 ## Key Files
 
@@ -218,7 +219,7 @@ Three Dockerfiles:
 | `web_portal/scanner/tests/test_scan_artifact.py` | ScanArtifact test suite — 33 tests across 4 classes (model, serializer, viewset, queue handler) |
 | `web_portal/wireghost_web/urls.py` | REST routes + auth endpoints; AD recon routes at `/api/ad-recon/` |
 | `web/js/app/pages/ad-recon.js` | AD recon SPA frontend — three-panel cockpit, session polling, credential management |
-| `scripts/update-wireghost.sh` | Self-updating stack lifecycle script — `git pull`, `pip install -e .`, `docker compose down --remove-orphans`, `docker compose build --no-cache --pull`, `docker compose up -d --force-recreate`, then `docker image prune -af` + `docker builder prune -f`. Build failure is a hard `die()`. Waits 30s for DB before running `migrate`. Also updates worker container (same image rebuild) |
+| `scripts/update-wireghost.sh` | Self-updating stack lifecycle script — `git pull`, `pip install -e .`, `docker compose down --remove-orphans`, `docker compose build --no-cache --pull`, `docker compose up -d --force-recreate`, then `docker image prune -af` + `docker builder prune -f`. Build failure is a hard `die()`. Waits 30s for DB before running `migrate`. Flags: `--full` (DB backup + all 4 images rebuilt including portal), `--verbose`/`-v` (show full output instead of tail summaries), `--tools`, `--feeds`, `--self`. Also updates worker container (same image rebuild) |
 | `scripts/install.sh` | Interactive first-run installer — generates `.env` (secrets), self-signed TLS certs (`openssl req`), starts Docker stack. Must run as root (needs Docker access) |
 | `scripts/run_qa.sh` | Full QA gate — spawns disposable Docker stack, runs all test suites (JS unit, Django scanner, Playwright browser), tears down. Pass `--fresh-clone` to clone from GitHub first |
 | `docker-compose.yml` | 7 services: db, redis, api, worker, beat, bot, portal (+ wireghost tools profile) |
