@@ -314,4 +314,4 @@ ok "Temporary files removed"
 
 echo ""
 ok "Remote update finished successfully"
-echo "  Portal: https://${REMOTE_HOST}:18443"
+echo "  Portal: https://127.0.0.1:2006 (on VPS — access via SSH tunnel)"
