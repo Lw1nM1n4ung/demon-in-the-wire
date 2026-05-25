@@ -512,8 +512,11 @@ docker_update() {
     # ── Full recreate — force-recreate ensures every container is brand new,
     # even if Compose config hasn't changed. Eliminates stale layer bugs. ──
     info "Starting stack with force-recreate..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --force-recreate --remove-orphans 2>&1 | tail -5
-    ok "All containers recreated from fresh images"
+    if docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --force-recreate --remove-orphans 2>&1 | tail -5; then
+        ok "All containers recreated from fresh images"
+    else
+        die "docker compose up failed — check: cd ${PROJECT_DIR} && docker compose up -d"
+    fi
 
     # ── Wait for DB to accept connections ──
     info "Waiting for database..."
