@@ -12,6 +12,7 @@ from ..models import (
     Asset,
     Screenshot,
     ExploitMatch,
+    ScanArtifact,
 )
 from ..policy_tools import normalize_policy_tools
 
@@ -469,3 +470,33 @@ class ExploitMatchSerializer(serializers.ModelSerializer):
             "port_number",
             "created_at",
         ]
+
+
+class ScanArtifactListSerializer(serializers.ModelSerializer):
+    """Lean serializer — excludes content to keep list payloads small."""
+
+    host_ip = serializers.CharField(source="host.ip", read_only=True, default="")
+
+    class Meta:
+        model = ScanArtifact
+        fields = [
+            "id",
+            "scan",
+            "host",
+            "host_ip",
+            "tool",
+            "name",
+            "content_type",
+            "size",
+            "created_at",
+        ]
+
+
+class ScanArtifactSerializer(serializers.ModelSerializer):
+    """Full serializer — includes raw content for detail view."""
+
+    host_ip = serializers.CharField(source="host.ip", read_only=True, default="")
+
+    class Meta:
+        model = ScanArtifact
+        fields = "__all__"

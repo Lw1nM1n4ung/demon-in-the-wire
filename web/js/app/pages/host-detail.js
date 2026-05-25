@@ -27,6 +27,19 @@ WG.renderHostDetail = function(id) {
   var ports = host.ports || [];
   var techs = host.technologies || [];
   var hFindings = WG.getCached('host_findings_' + id, '/findings/?scan=' + (host.scan || ''), 'findings').filter(function(f) { return f.host === id || f.host_ip === host.ip; });
+  var hostArts = WG._cache['host_artifacts_' + id] || [];
+
+  // Fetch artifacts for this host (background — updates count badge and tab content on next render)
+  if (!WG._cache['host_artifacts_' + id]) {
+    WG.api('/artifacts/?host=' + id).then(function(arts) {
+      if (arts) {
+        WG._cache['host_artifacts_' + id] = arts;
+        WG._cacheTime['host_artifacts_' + id] = Date.now();
+        var badge = document.getElementById('hostArtifactCount');
+        if (badge) badge.textContent = arts.length;
+      }
+    });
+  }
 
   var sevCards = ['critical','high','medium','low','info'].map(function(sev) {
     var count = hFindings.filter(function(f) { return f.severity === sev; }).length;
@@ -52,6 +65,7 @@ WG.renderHostDetail = function(id) {
       '<div class="tab" data-tab="findings" onclick="WG.switchHostTab(\'findings\',\'' + id + '\')">Findings <span class="count">' + hFindings.length + '</span></div>' +
       '<div class="tab" data-tab="tech" onclick="WG.switchHostTab(\'tech\',\'' + id + '\')">Technologies <span class="count">' + techs.length + '</span></div>' +
       ((host.screenshots && host.screenshots.length) ? '<div class="tab" data-tab="screenshots" onclick="WG.switchHostTab(\'screenshots\',\'' + id + '\')">Screenshots <span class="count">' + host.screenshots.length + '</span></div>' : '') +
+      '<div class="tab" data-tab="artifacts" onclick="WG.switchHostTab(\'artifacts\',\'' + id + '\')">Artifacts <span class="count" id="hostArtifactCount">' + hostArts.length + '</span></div>' +
     '</div>' +
     '<div id="hostTabContent">' + WG._hostPortsTab(ports) + '</div>';
 };
@@ -104,6 +118,48 @@ WG._hostScreenshotsTab = function(screenshots) {
   return '<div class="screenshot-gallery">' + cards.join('') + '</div>';
 };
 
+WG._hostArtifactsTab = function(artifacts) {
+  if (!artifacts || !artifacts.length) return '<div class="panel-empty"><div class="icon">&#128196;</div>No raw tool output captured</div>';
+  var esc = WG.escHtml;
+  return '<div class="panel">' +
+    artifacts.map(function(a, i) {
+      return '<div class="accordion-item" style="border-bottom:1px solid var(--border-color);">' +
+        '<div class="accordion-header" onclick="WG._toggleArtifact(this,\'' + a.id + '\')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;transition:background var(--transition-fast);">' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<span class="tag" style="font-size:0.7rem;">' + esc(a.tool) + '</span>' +
+            '<span class="mono" style="font-size:0.8rem;color:var(--text-primary);">' + esc(a.name) + '</span>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:12px;">' +
+            '<span style="font-size:0.7rem;color:var(--text-dim);">' + esc(a.content_type) + '</span>' +
+            '<span style="font-size:0.7rem;color:var(--text-dim);">' + WG.fmtBytes(a.size) + '</span>' +
+            '<svg class="artifact-chevron" viewBox="0 0 24 24" style="width:14px;height:14px;opacity:0.4;transition:transform 0.2s;"><path d="M9 18l6-6-6-6"/></svg>' +
+          '</div>' +
+        '</div>' +
+        '<div class="artifact-content" style="display:none;"><div class="code-block" style="margin:0;border-radius:0;max-height:500px;overflow:auto;font-size:0.75rem;"><span style="color:var(--text-dim);">Loading...</span></div></div>' +
+      '</div>';
+    }).join('') +
+    '</div>';
+};
+
+WG._toggleArtifact = function(el, artifactId) {
+  var body = el.nextElementSibling;
+  var chevron = el.querySelector('.artifact-chevron');
+  if (!body) return;
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    if (chevron) chevron.style.transform = 'rotate(90deg)';
+    var codeBlock = body.querySelector('.code-block');
+    if (codeBlock && codeBlock.textContent.indexOf('Loading...') !== -1) {
+      WG.api('/artifacts/' + artifactId + '/').then(function(data) {
+        if (data && codeBlock) codeBlock.textContent = data.content || '(empty)';
+      });
+    }
+  } else {
+    body.style.display = 'none';
+    if (chevron) chevron.style.transform = '';
+  }
+};
+
 WG._bindScreenshotClicks = function(screenshots) {
   document.querySelectorAll('.screenshot-card[data-ss-idx]').forEach(function(card) {
     card.onclick = function() { WGLightbox.open(screenshots, parseInt(card.dataset.ssIdx)); };
@@ -120,5 +176,9 @@ WG.switchHostTab = function(tab, hostId) {
   else if (tab === 'screenshots' && host) {
     el.innerHTML = WG._hostScreenshotsTab(host.screenshots);
     WG._bindScreenshotClicks(host.screenshots);
+  }
+  else if (tab === 'artifacts') {
+    var arts = WG._cache['host_artifacts_' + hostId] || [];
+    el.innerHTML = WG._hostArtifactsTab(arts);
   }
 };

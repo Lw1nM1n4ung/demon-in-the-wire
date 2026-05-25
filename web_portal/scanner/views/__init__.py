@@ -16,6 +16,7 @@ from ..models import (
     Technology,
     Screenshot as DBScreenshot,
     ExploitMatch,
+    ScanArtifact,
 )
 from ..policy_tools import normalize_policy_tools
 
@@ -94,6 +95,8 @@ from ..serializers import (
     AssetListSerializer,
     ScreenshotSerializer,  # noqa: F401 — re-exported for API router
     ExploitMatchSerializer,
+    ScanArtifactSerializer,
+    ScanArtifactListSerializer,
 )
 
 
@@ -432,6 +435,26 @@ class ScanViewSet(viewsets.ModelViewSet):
             cache.set(cache_key, result, 300)
 
         return Response(result)
+
+    @action(detail=True, methods=["get"])
+    def discovery(self, request, pk=None):
+        """Live host discovery status — hosts found so far and subnet progress."""
+        scan = self.get_object()
+        hosts = scan.hosts.filter(status="up").values(
+            "ip", "hostname", "mac_address", "vendor", "current_phase"
+        ).order_by("ip")
+
+        return Response({
+            "scan_id": str(scan.id),
+            "scan_name": scan.name,
+            "status": scan.status,
+            "current_phase": scan.current_phase,
+            "target": scan.target,
+            "hosts_total": scan.hosts_total or 0,
+            "hosts_scanned": scan.hosts_scanned or 0,
+            "live_hosts": hosts.count(),
+            "hosts": list(hosts),
+        })
 
 
 class HostViewSet(viewsets.ReadOnlyModelViewSet):
@@ -998,4 +1021,34 @@ class ExploitMatchViewSet(viewsets.ReadOnlyModelViewSet):
         confidence = self.request.query_params.get("confidence")
         if confidence:
             qs = qs.filter(confidence=confidence)
+        return qs
+
+
+class ScanArtifactViewSet(viewsets.ReadOnlyModelViewSet):
+    """Raw tool output captured during scans (nmap XML, nuclei JSON, etc.).
+
+    Filter with ``?scan=<uuid>`` or ``?host=<uuid>``.  The list endpoint
+    excludes ``content`` to keep payloads small; use the detail endpoint
+    (``/<id>/``) to retrieve the full raw output.
+    """
+
+    queryset = ScanArtifact.objects.select_related("scan", "host")
+    permission_classes = [HasPerm("scan:read")]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return ScanArtifactListSerializer
+        return ScanArtifactSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        scan_id = self.request.query_params.get("scan")
+        if scan_id:
+            qs = qs.filter(scan_id=scan_id)
+        host_id = self.request.query_params.get("host")
+        if host_id:
+            qs = qs.filter(host_id=host_id)
+        tool = self.request.query_params.get("tool")
+        if tool:
+            qs = qs.filter(tool=tool)
         return qs

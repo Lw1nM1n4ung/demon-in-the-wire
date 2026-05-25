@@ -772,4 +772,39 @@ class Screenshot(models.Model):
         return f"{self.url} ({self.host.ip})"
 
 
+class ScanArtifact(models.Model):
+    """Raw tool output captured during a scan and stored in the database.
+
+    Mirrors what was previously only on the filesystem — nmap XML, nuclei JSON,
+    enum4linux TXT, etc.  ``content`` is a MySQL LONGTEXT (4 GiB ceiling) which
+    is more than sufficient for practical scan output sizes.
+
+    Host is nullable because some artifacts (e.g. scan-level reports) aren't
+    tied to a single host.
+    """
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    scan = models.ForeignKey(Scan, on_delete=models.CASCADE, related_name="artifacts")
+    host = models.ForeignKey(
+        Host, null=True, blank=True, on_delete=models.CASCADE, related_name="artifacts"
+    )
+    tool = models.CharField(max_length=64)
+    name = models.CharField(max_length=256)
+    content = models.TextField()
+    content_type = models.CharField(max_length=32, default="text/plain")
+    size = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["scan", "tool"]),
+            models.Index(fields=["host"]),
+        ]
+
+    def __str__(self):
+        host_part = f" @ {self.host.ip}" if self.host else ""
+        return f"{self.tool}/{self.name}{host_part}"
+
+
 from .ad_recon import *  # noqa: F403

@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from wireghost.config import ScanConfig
@@ -72,6 +73,7 @@ async def run_pipeline(
     on_host_complete: Callable[[Host, list[Finding]], None] | None = None,
     on_host_phase: Callable[[str, str], None] | None = None,
     on_subnet_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
+    on_artifact: Callable[[str, str, str, str, str], None] | None = None,
 ) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
 
@@ -93,6 +95,10 @@ async def run_pipeline(
     If *on_subnet_complete* is provided it is called after each subnet
     scan during discovery with the list of newly discovered IPs and
     MAC/vendor updates, enabling incremental host creation in the DB.
+
+    If *on_artifact* is provided it is called each time a tool writes
+    output that should be persisted: ``on_artifact(host_ip, tool, name,
+    content, content_type)``.
     """
     scan_start = datetime.now()
 
@@ -229,10 +235,30 @@ async def run_pipeline(
         on_progress(phase_label, pct, completed)
     sem = asyncio.Semaphore(config.parallelism)
 
+    _TEXT_EXT = {".xml", ".json", ".txt", ".html", ".csv", ".log", ".nmap", ".gnmap", ".yml", ".yaml"}
+
+    def _emit_dir_artifacts(ip: str, directory: Path, tool: str, *, recursive: bool = True) -> None:
+        """Read text files in *directory* and emit as artifacts."""
+        if on_artifact is None or not directory.exists():
+            return
+        iterator = directory.rglob("*") if recursive else directory.glob("*")
+        for fp in sorted(iterator):
+            if not fp.is_file() or fp.suffix.lower() not in _TEXT_EXT:
+                continue
+            try:
+                content = fp.read_text(errors="replace")
+                ct = {".xml": "text/xml", ".json": "application/json", ".html": "text/html"}.get(
+                    fp.suffix.lower(), "text/plain"
+                )
+                on_artifact(ip, tool, fp.name, content, ct)
+            except Exception:
+                pass
+
     async def _host_pipeline(ip: str) -> tuple[Host, list[Finding]]:
         """Run the full scan pipeline for a single host."""
         # Phase 3a: Port scan (with fallback chain) + service detection
         host = await scan_host(ip, config, tree, sem)
+        _emit_dir_artifacts(ip, tree.host_nmap_xml_dir(ip), "nmap")
         await _advance_host_phase(ip, "portscan")
 
         # Enrich with ARP data from discovery phase
@@ -281,6 +307,8 @@ async def run_pipeline(
         )
         await _advance_host_phase(ip, "vulnscan")
 
+        _emit_dir_artifacts(ip, tree.host_vuln_dir(ip), "vulnscan")
+
         vuln_findings = vuln_result if not isinstance(vuln_result, Exception) else []
         msf_findings = msf_result if not isinstance(msf_result, Exception) else []
         if isinstance(vuln_result, Exception):
@@ -306,6 +334,9 @@ async def run_pipeline(
             return_exceptions=True,
         )
         await _advance_host_phase(ip, "enumeration")
+
+        # Emit top-level host dir files (enum outputs: enum4linux txt, nxc logs, etc.)
+        _emit_dir_artifacts(ip, tree.host_dir(ip), "enumeration", recursive=False)
 
         enum_names = [
             "cms",

@@ -85,6 +85,7 @@ def run_scan(self, scan_id):
         #   ("subnet_hosts", new_ips, mac_updates)     — incremental Host creation per subnet
         #   ("host_result", host, findings)            — update Host, create Ports/Findings
         #   ("host_phase", ip, phase)                  — update Host.current_phase
+        #   ("artifact", host_ip, tool, name, content, content_type) — store raw tool output
         #
         # MySQL stores UUIDs without dashes (CHAR(32)), so we strip them
         # from the string form before passing to raw SQL.
@@ -105,6 +106,7 @@ def run_scan(self, scan_id):
                 Technology as _DBTech,
                 Screenshot as _DBScreenshot,
                 Scan as _Scan,
+                ScanArtifact,
             )
 
             while not _progress_stop.is_set():
@@ -195,6 +197,21 @@ def run_scan(self, scan_id):
                         _, ip, phase = item
                         _DBHost.objects.filter(scan_id=scan_id, ip=ip).update(
                             current_phase=phase,
+                        )
+                    elif action == "artifact":
+                        _, host_ip, tool, name, content, content_type = item
+                        # Resolve host FK if available — lookup by scan+ip
+                        db_host = _DBHost.objects.filter(
+                            scan_id=scan_id, ip=host_ip
+                        ).first()
+                        ScanArtifact.objects.create(
+                            scan_id=scan_id,
+                            host=db_host,
+                            tool=tool,
+                            name=name,
+                            content=content,
+                            content_type=content_type,
+                            size=len(content),
                         )
                     elif action == "host_result":
                         _, host, findings = item
@@ -349,6 +366,12 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
+        def _on_artifact(host_ip: str, tool: str, name: str, content: str, content_type: str) -> None:
+            try:
+                _progress_queue.put_nowait(("artifact", host_ip, tool, name, content, content_type))
+            except Exception:
+                pass
+
         try:
             report = asyncio.run(
                 run_pipeline(
@@ -358,6 +381,7 @@ def run_scan(self, scan_id):
                     on_host_complete=_on_host_complete,
                     on_host_phase=_on_host_phase,
                     on_subnet_complete=_on_subnet_complete,
+                    on_artifact=_on_artifact,
                 )
             )
         finally:

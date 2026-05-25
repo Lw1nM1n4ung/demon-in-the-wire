@@ -51,6 +51,46 @@ WG.phaseLabel = function(phase) {
   return WG.PHASE_LABELS[phase] || labels[phase] || phase || 'Pending';
 };
 
+/* ── Sidebar collapsible parent ── */
+WG._toggleSidebarParent = function(toggleEl) {
+  var parent = toggleEl.closest('.sidebar-parent');
+  var children = parent.querySelector('.sidebar-children');
+  if (!children) return;
+  if (parent.classList.contains('expanded')) {
+    children.style.maxHeight = '0px';
+    parent.classList.remove('expanded'); parent.classList.add('collapsed');
+  } else {
+    children.style.maxHeight = children.scrollHeight + 'px';
+    parent.classList.remove('collapsed'); parent.classList.add('expanded');
+  }
+  WG._saveSidebarState();
+};
+
+WG._saveSidebarState = function() {
+  var state = {};
+  document.querySelectorAll('.sidebar-parent[data-collapsible]').forEach(function(el) {
+    state[el.dataset.collapsible] = el.classList.contains('expanded') ? 'expanded' : 'collapsed';
+  });
+  try { localStorage.setItem('wg_sidebar_state', JSON.stringify(state)); } catch(e) {}
+};
+
+WG._loadSidebarState = function() {
+  try {
+    var saved = JSON.parse(localStorage.getItem('wg_sidebar_state'));
+    if (!saved) return;
+    document.querySelectorAll('.sidebar-parent[data-collapsible]').forEach(function(el) {
+      var key = el.dataset.collapsible;
+      if (!key || saved[key] !== 'expanded') return;
+      var children = el.querySelector('.sidebar-children');
+      if (!children) return;
+      children.style.maxHeight = 'none';
+      var h = children.scrollHeight;
+      children.style.maxHeight = h + 'px';
+      el.classList.remove('collapsed'); el.classList.add('expanded');
+    });
+  } catch(e) {}
+};
+
 WG.sevBarHtml = function(scan) {
   var total = (scan.critical_count || 0) + (scan.high_count || 0) + (scan.medium_count || 0) + (scan.low_count || 0) + (scan.info_count || 0);
   if (!total) return '<div class="sev-bar"><span class="i" style="width:100%"></span></div>';

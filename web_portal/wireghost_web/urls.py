@@ -9,6 +9,7 @@ from scanner.views import (
     ScanPolicyViewSet,
     ScheduledScanViewSet,
     ExploitMatchViewSet,
+    ScanArtifactViewSet,
     dashboard_stats,
     download_report,
     report_config,
@@ -73,6 +74,7 @@ router.register(r"schedules", ScheduledScanViewSet)
 router.register(r"exploits", ExploitMatchViewSet)
 router.register(r"ad-recon/profiles", CredentialProfileViewSet, basename="ad-recon-profile")
 router.register(r"ad-recon/sessions", ADReconSessionViewSet, basename="ad-recon-session")
+router.register(r"artifacts", ScanArtifactViewSet)
 
 urlpatterns = [
     path("admin/", admin.site.urls),

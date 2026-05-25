@@ -8,6 +8,19 @@ WG.renderFindingDetail = function(id) {
         WG._cacheTime['finding_' + id] = Date.now();
         var main = document.getElementById('mainContent');
         if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderFindingDetail(id);
+        // Fetch artifacts for this finding's host (background — re-render when they arrive)
+        if (data.host && !WG._cache['host_artifacts_' + data.host]) {
+          WG.api('/artifacts/?host=' + data.host).then(function(arts) {
+            if (arts && arts.length) {
+              WG._cache['host_artifacts_' + data.host] = arts;
+              WG._cacheTime['host_artifacts_' + data.host] = Date.now();
+              if (WG.state.currentPage === 'finding') {
+                var main2 = document.getElementById('mainContent');
+                if (main2 && !document.querySelector(".modal-overlay.active")) main2.innerHTML = WG.renderFindingDetail(id);
+              }
+            }
+          });
+        }
       }
     });
   }
@@ -72,5 +85,27 @@ WG.renderFindingDetail = function(id) {
     (f.tags ?
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">' +
       f.tags.split(',').map(function(t) { return '<span class="tag">' + esc(t.trim()) + '</span>'; }).join('') +
-      '</div>' : '');
+      '</div>' : '') +
+
+    (function() {
+      var hostArts = WG._cache['host_artifacts_' + f.host] || [];
+      if (!hostArts.length) return '';
+      return '<div class="panel" style="margin-top:20px;"><div class="panel-header"><div class="panel-title">Host Artifacts (' + hostArts.length + ')</div></div><div class="panel-body" style="padding:0;">' +
+        hostArts.map(function(a) {
+          return '<div class="accordion-item" style="border-bottom:1px solid var(--border-color);">' +
+            '<div class="accordion-header" onclick="WG._toggleArtifact(this,\'' + a.id + '\')" style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;cursor:pointer;">' +
+              '<div style="display:flex;align-items:center;gap:8px;">' +
+                '<span class="tag" style="font-size:0.65rem;">' + esc(a.tool) + '</span>' +
+                '<span class="mono" style="font-size:0.78rem;">' + esc(a.name) + '</span>' +
+              '</div>' +
+              '<div style="display:flex;align-items:center;gap:10px;">' +
+                '<span style="font-size:0.68rem;color:var(--text-dim);">' + WG.fmtBytes(a.size) + '</span>' +
+                '<svg class="artifact-chevron" viewBox="0 0 24 24" style="width:14px;height:14px;opacity:0.4;transition:transform 0.2s;"><path d="M9 18l6-6-6-6"/></svg>' +
+              '</div>' +
+            '</div>' +
+            '<div class="artifact-content" style="display:none;"><div class="code-block" style="margin:0;border-radius:0;max-height:400px;overflow:auto;font-size:0.72rem;"><span style="color:var(--text-dim);">Loading...</span></div></div>' +
+          '</div>';
+        }).join('') +
+        '</div></div>';
+    })();
 };

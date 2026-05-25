@@ -54,6 +54,11 @@ WG._ROUTES = [
   { page: 'users',          path: '/users' },
   { page: 'system',         path: '/system' },
   { page: 'ad-recon',       path: '/ad-recon' },
+  { page: 'live-discovery', path: '/live-discovery' },
+  { page: 'phase-portscan',   path: '/phase/portscan' },
+  { page: 'phase-webdetect',  path: '/phase/webdetect' },
+  { page: 'phase-webcrawl',   path: '/phase/webcrawl' },
+  { page: 'phase-enumeration', path: '/phase/enumeration' },
 ];
 
 WG._routeToPath = function(page, params) {
@@ -163,6 +168,14 @@ WG.render = function() {
     el.classList.toggle('active', el.dataset.page === route.page);
   });
 
+  /* Highlight parent toggle when any child is active. */
+  document.querySelectorAll('.sidebar-parent').forEach(function(parent) {
+    var toggle = parent.querySelector('.sidebar-parent-toggle');
+    if (!toggle) return;
+    var anyActive = parent.querySelector('.sidebar-children .sidebar-item.active');
+    toggle.classList.toggle('active', !!anyActive);
+  });
+
   var pages = {
     dashboard:        WG.renderDashboard,
     scans:            WG.renderScans,
@@ -183,6 +196,11 @@ WG.render = function() {
     users:            WG.renderUsers,
     system:           WG.renderSystem,
     'ad-recon':       WG.renderADRecon,
+    'live-discovery': WG.renderLiveDiscovery,
+    'phase-portscan':   function() { return WG.renderPhaseView('portscan'); },
+    'phase-webdetect':  function() { return WG.renderPhaseView('webdetect'); },
+    'phase-webcrawl':   function() { return WG.renderPhaseView('webcrawl'); },
+    'phase-enumeration': function() { return WG.renderPhaseView('enumeration'); },
   };
 
   var renderFn = pages[route.page] || WG.renderDashboard;
@@ -273,6 +291,7 @@ WG._dismissUpdateBanner = function() {
 /* ── Boot ── */
 (function() {
   _initEvents();
+  WG._loadSidebarState();
 
   /* Bounce back to the dashboard canonical URL if we landed on /app.html or
    * some empty path — avoids confusing users who see the internal filename. */
