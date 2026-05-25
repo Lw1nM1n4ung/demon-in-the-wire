@@ -519,23 +519,36 @@ docker_update() {
     [ "$WITH_NO_CACHE" = true ] && build_label="${build_label} (no cache)" || build_label="${build_label} (cached)"
     info "$build_label"
 
-    # Build Python services first (api, worker — beat and bot reuse api's image)
+    # Build api image first (beat, bot reuse this — pure Python, no GitHub deps)
     for attempt in 1 2 3; do
         if [ "$VERBOSE" = true ]; then
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} api worker 2>&1 | tee "$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} api 2>&1 | tee "$build_tmp" && build_ok=true && break
         else
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} api worker 2>"$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} api 2>"$build_tmp" && build_ok=true && break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
         sleep 5
     done
     if [ "$build_ok" = false ]; then
-        warn "Build failed after 3 attempts — last error:"
+        warn "api build failed after 3 attempts — last error:"
         _tee 30 < "$build_tmp" | while IFS= read -r line; do warn "  $line"; done
         rm -f "$build_tmp"
         die "Build failed — cannot continue"
     fi
-    ok "Python images built"
+    ok "API image built"
+
+    # Worker image (pulls tools from GitHub — may fail on restricted networks)
+    local worker_ok=false
+    info "Building worker image..."
+    if docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} worker 2>"$build_tmp"; then
+        worker_ok=true
+        ok "Worker image built"
+    else
+        warn "Worker build failed (network?) — reusing cached worker image"
+        _tee 5 < "$build_tmp" | while IFS= read -r line; do warn "  $line"; done
+        warn "Worker tools may be stale — rebuild when connectivity recovers"
+    fi
+    rm -f "$build_tmp"
 
     # Portal build (may hang on slow Docker Hub — timeout after 120s)
     local portal_ok=false
