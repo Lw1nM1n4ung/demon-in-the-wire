@@ -209,6 +209,7 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "web"]
+STATIC_ROOT = os.environ.get("STATIC_ROOT", "/tmp/staticfiles")
 SILENCED_SYSTEM_CHECKS = ["staticfiles.W004", "security.W008"]
 
 # Default primary key field type
