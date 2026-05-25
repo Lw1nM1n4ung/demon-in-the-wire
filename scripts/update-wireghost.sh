@@ -89,6 +89,18 @@ detect_docker() {
         DOCKER_MODE="docker"
     fi
 
+    # If stack is NOT running but override files exist on disk, still include them
+    # so docker_update() uses the right configuration on rebuild.
+    if [ "$DOCKER_DEPLOY" = false ]; then
+        if [ -f docker-compose.host.yml ]; then
+            DOCKER_COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.host.yml)
+            DOCKER_MODE="host"
+        elif [ -f docker-compose.dev.yml ]; then
+            DOCKER_COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.dev.yml)
+            DOCKER_MODE="dev"
+        fi
+    fi
+
     cd - >/dev/null
 }
 
@@ -445,37 +457,54 @@ docker_update() {
     info "Mode: ${DOCKER_MODE:-docker}"
     info "Compose files: ${DOCKER_COMPOSE_FILES[*]}"
 
-    # Pull external base images first (independent of build)
-    info "Pulling external base images..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis portal 2>&1 | tail -3 || true
+    # ── Validate compose config before touching anything ──
+    info "Validating compose configuration..."
+    local config_tmp; config_tmp=$(mktemp)
+    if ! docker compose "${DOCKER_COMPOSE_FILES[@]}" config >/dev/null 2>"$config_tmp"; then
+        warn "Compose config validation FAILED — aborting to preserve running stack:"
+        tail -5 "$config_tmp" | while IFS= read -r line; do warn "  $line"; done
+        rm -f "$config_tmp"
+        die "Fix docker-compose.yml syntax before retrying"
+    fi
+    rm -f "$config_tmp"
+    ok "Compose config valid"
 
-    # Build app images from scratch (no cache) with retry
+    # ── Pull external base images (from registries, not built locally) ──
+    info "Pulling external base images..."
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis portal docker-proxy 2>&1 | tail -5 || true
+    ok "Base images pulled"
+
+    # ── Build app images from scratch (no cache) with retry ──
     info "Building app images (no cache)..."
-    local build_ok=false
+    local build_ok=false build_tmp; build_tmp=$(mktemp)
     for attempt in 1 2 3; do
-        if docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>&1 | tail -12; then
+        if docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>"$build_tmp"; then
             build_ok=true; break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
         sleep 5
     done
     if [ "$build_ok" = false ]; then
-        die "Build failed after 3 attempts — cannot continue"
+        warn "Build failed after 3 attempts — last error:"
+        tail -30 "$build_tmp" | while IFS= read -r line; do warn "  $line"; done
+        rm -f "$build_tmp"
+        die "Build failed — cannot continue"
     fi
+    rm -f "$build_tmp"
     ok "Images built successfully"
 
-    # Full stop — tear down every container so we start completely fresh
+    # ── Full stop — tear down every container so we start completely fresh ──
     info "Stopping all containers..."
     docker compose "${DOCKER_COMPOSE_FILES[@]}" down --remove-orphans 2>&1 | tail -3 || true
     ok "All containers stopped"
 
-    # Full recreate — force-recreate ensures every container is brand new,
-    # even if Compose config hasn't changed. Eliminates stale layer bugs.
+    # ── Full recreate — force-recreate ensures every container is brand new,
+    # even if Compose config hasn't changed. Eliminates stale layer bugs. ──
     info "Starting stack with force-recreate..."
     docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --force-recreate --remove-orphans 2>&1 | tail -5
     ok "All containers recreated from fresh images"
 
-    # Wait for DB to accept connections
+    # ── Wait for DB to accept connections ──
     info "Waiting for database..."
     for i in $(seq 1 30); do
         if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db mysqladmin ping -h localhost --silent 2>/dev/null; then
@@ -486,18 +515,36 @@ docker_update() {
         sleep 1
     done
 
-    # Run migrations
+    # ── Run migrations ──
     info "Running Django migrations..."
     docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -5 || \
         warn "migrations may have failed — check: docker compose logs api"
 
-    # Collect static
+    # ── Collect static ──
     info "Collecting static files..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | tail -2 || true
+    if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | tail -3; then
+        ok "Static files collected"
+    else
+        warn "collectstatic failed — static files may be stale"
+    fi
 
-    # Prune dangling images and build cache (--no-cache leaves orphaned layers)
-    info "Pruning old images and build cache..."
-    docker image prune -af 2>/dev/null || true
+    # ── Verify API health before restarting portal ──
+    info "Verifying API health..."
+    sleep 2  # brief pause for gunicorn workers to initialize
+    if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/auth/csrf/')" 2>/dev/null; then
+        ok "API responding"
+    else
+        warn "API not responding — check: docker compose logs api"
+    fi
+
+    # ── Restart portal to flush Docker DNS cache (stale API container IP → 502) ──
+    info "Restarting portal (DNS cache refresh)..."
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" restart portal 2>&1 | tail -2 || true
+    ok "Portal restarted"
+
+    # ── Prune dangling images and build cache (--no-cache leaves orphaned layers) ──
+    info "Pruning dangling images and build cache..."
+    docker image prune -f 2>/dev/null || true
     docker builder prune -f 2>/dev/null || true
     ok "Docker stack fully recreated"
 }
