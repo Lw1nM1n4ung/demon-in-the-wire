@@ -154,8 +154,6 @@ docker compose -f docker-compose.yml build --pull worker 2>&1 || die "Worker ima
 ok "Worker image built"
 
 docker compose -f docker-compose.yml build --pull portal 2>&1 || die "Portal image build failed"
-# Portal has no image: field in compose — tag it so docker save finds it
-docker tag demon-in-the-wire-portal callmedemon/wireghost:portal 2>/dev/null || true
 ok "Portal image built"
 
 ###########################################################################
@@ -185,8 +183,8 @@ tar czf "$code_tar" \
     --exclude='node_modules' --exclude='.remote-update' \
     --exclude='logs' --exclude='backups' --exclude='data' \
     -C "$PROJECT_DIR" \
-    web_portal/ src/ pyproject.toml docker-compose.yml docker-compose.host.yml \
-    Dockerfile templates/ scripts/docker-entrypoint.sh 2>/dev/null
+    web_portal/ src/ config/ pyproject.toml docker-compose.yml docker-compose.host.yml \
+    Dockerfile templates/ scripts/docker-entrypoint.sh scripts/portal-entrypoint.sh 2>/dev/null
 
 info "Transferring code ($(du -h "$code_tar" | cut -f1))..."
 scp "$code_tar" "${VPS}:${REMOTE_DIR}/.remote-code.tar.gz" 2>&1 || die "SCP code transfer failed"

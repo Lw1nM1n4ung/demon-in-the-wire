@@ -6,7 +6,7 @@ server_tokens off;
 server {
     listen 80 default_server;
     server_name _;
-    return 301 https://{{WIREGHOST_HOST}}:{{WIREGHOST_PORT}}$request_uri;
+    return 301 https://{{WIREGHOST_HOST}}$request_uri;
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -31,8 +31,18 @@ server {
     ssl_session_timeout 1d;
     ssl_session_tickets off;
 
-    # Use Docker's embedded DNS — avoids stale resolution from host search domains
+    # Use Docker's embedded DNS — avoids stale resolution from host search domains.
+    # Variable-based proxy_pass is required for resolver to re-resolve on TTL
+    # expiry; static hostnames are only resolved once at startup.
     resolver 127.0.0.11 valid=10s ipv6=off;
+    set $api_upstream api:8000;
+
+    gzip on;
+    gzip_types application/json text/css application/javascript text/plain;
+    gzip_min_length 1000;
+    gzip_comp_level 6;
+    gzip_vary on;
+    gzip_proxied any;
 
     root /usr/share/nginx/html;
     absolute_redirect off;
@@ -89,10 +99,6 @@ server {
         try_files $uri =404;
     }
 
-    location /js/lib/ {
-        try_files $uri =404;
-    }
-
     location /css/ {
         try_files $uri =404;
     }
@@ -103,7 +109,7 @@ server {
 
     location = /_auth_check {
         internal;
-        proxy_pass              http://api:8000/api/auth/check/;
+        proxy_pass              http://$api_upstream/api/auth/check/;
         proxy_pass_request_body off;
         proxy_set_header        Content-Length "";
         proxy_set_header        Host $host;
@@ -115,7 +121,15 @@ server {
     # Tier 1 — AUTHENTICATED ONLY
     # ═══════════════════════════════════════════════════════════════════
 
+    location /js/lib/ {
+        sendfile off;
+        add_header Cache-Control "no-store" always;
+        try_files $uri =404;
+    }
+
     location /js/app/ {
+        sendfile off;
+        add_header Cache-Control "no-store" always;
         try_files $uri =404;
     }
 
@@ -138,7 +152,7 @@ server {
         try_files $uri /app.html;
     }
     location @gate_to_login {
-        return 302 https://{{WIREGHOST_HOST}}:{{WIREGHOST_PORT}}/login?next=$uri;
+        return 302 https://{{WIREGHOST_HOST}}/login?next=$uri;
     }
 
     # ═══════════════════════════════════════════════════════════════════
@@ -146,7 +160,7 @@ server {
     # ═══════════════════════════════════════════════════════════════════
 
     location /api/ {
-        proxy_pass http://api:8000;
+        proxy_pass http://$api_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -166,6 +180,6 @@ server {
     }
 
     location /static/ {
-        proxy_pass http://api:8000;
+        proxy_pass http://$api_upstream;
     }
 }

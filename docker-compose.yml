@@ -262,6 +262,7 @@ services:
           cpus: "0.5"
 
   portal:
+    image: callmedemon/wireghost:portal
     build:
       context: .
       dockerfile: web_portal/Dockerfile.portal

@@ -1,6 +1,11 @@
 # Wire_Ghost — Portal (nginx + static assets)
-# Bakes web/ and nginx.conf into the image so the portal is fully
-# rebuildable from source (no bind-mount dependency for source files).
+# Bakes web/ and the nginx config TEMPLATE into the image.
+# The entrypoint renders the template at container startup using
+# WIREGHOST_HOST / WIREGHOST_PORT env vars (set in .env via docker-compose).
+# This means the same image works for any host — no rebuild needed.
 FROM nginx:alpine
 COPY web/ /usr/share/nginx/html/
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY config/nginx.conf.tpl /etc/nginx/conf.d/default.conf.tpl
+COPY scripts/portal-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+ENTRYPOINT ["/docker-entrypoint.sh"]
