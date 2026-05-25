@@ -48,6 +48,9 @@ Automated vulnerability scanner and attack surface management platform. Chains *
 - **Web server scanning** — nikto detects misconfigurations, dangerous files, outdated software, and insecure headers on web endpoints
 - **Version-aware exploit detection** — searchsploit per detected software version, linked to Exploit-DB
 - **Cross-tool deduplication** — findings deduplicated by CVE or normalized title prefix on host:port:identity
+- **ScanArtifact persistence** — raw tool output (nmap XML, nuclei JSON, enum4linux txt, etc.) stored in DB via artifact queue; browsable accordion viewer on host detail (Artifacts tab) and finding detail (Host Artifacts section) with lazy content loading
+- **Two-pass NVD CVE search** — CPE 2.3 vendor/product matching (~200-entry map), version extraction from 11 banner sources, NVD API 2.0 rate-limited (5 req/30s without key, 50 with key), pass 2 deduplicates against existing CVEs
+- **AD recon engine** — 8-phase Active Directory enumeration (Phase 0 connectivity gate → LDAP → BloodHound → AS-REP roasting → Kerberoasting → RPC → ADCS → Responder); Fernet-encrypted credential storage with UUID FK isolation; Celery task with real-time session polling
 - **SSRF-safe target validation** — blocks loopback, link-local, multicast, reserved, cloud metadata IPs; detects hex/octal/short-form IP encoding; resolves hostnames via getaddrinfo (IPv4+IPv6) against full blocklist
 
 ### Web Portal
@@ -61,6 +64,10 @@ Automated vulnerability scanner and attack surface management platform. Chains *
 - **Scheduled scans** — daily / weekly / biweekly / monthly, with timezone-aware execution times
 - **Reports** — DOCX, XLSX, HTML, and interactive dashboard per scan
 - **Network topology** — D3 force-directed graph visualization per scan
+- **Live Host Discovery** — real-time host table with 2-second polling during active scan discovery phase
+- **Phase dashboard** — collapsible sidebar with 7 pipeline-phase sub-tabs, per-phase progress tracking
+- **AD Recon cockpit** — credential vault (Fernet AES-256-GCM encrypted), 8-phase task with real-time session polling, BloodHound/Impacket integration
+- **ScanArtifact viewer** — accordion-based raw tool output browser (nmap XML, nuclei JSON, enum4linux TXT) on host and finding detail pages, lazy content loading from detail endpoint
 
 ### Telegram Bot
 
@@ -431,7 +438,7 @@ When run from the portal, output lives under `/data/output/<target>/` inside the
 | **Findings** | All | Global vulnerability list with severity/source/search filters |
 | **Finding Detail** | All | Full evidence — HTTP request/response, curl command, CVE/CWE/CVSS, references |
 | **Hosts** | Viewer+ | Discovered hosts with port counts and technology fingerprints |
-| **Host Detail** | Viewer+ | Ports, services, technologies, associated findings |
+| **Host Detail** | Viewer+ | Ports, services, technologies, screenshots, raw tool artifacts |
 | **Assets** | Viewer+ | Deduplicated asset inventory with risk scores |
 | **Topology** | Viewer+ | D3 force-directed network graph per scan |
 | **New Scan** | Engineer+ | Launch a scan with target, type, parallelism, timeout, tool toggles |
@@ -440,6 +447,9 @@ When run from the portal, output lives under `/data/output/<target>/` inside the
 | **Scan Policies** | Engineer+ | Reusable scan configuration templates |
 | **Reports** | Viewer+ | Browse and download generated reports |
 | **Report Builder** | Engineer+ | Configure report branding (logo, title, company, color, sections) |
+| **Live Host Discovery** | Engineer+ | Real-time host discovery dashboard with 2-second polling during scan |
+| **Phase Dashboard** | Viewer+ | Per-pipeline-phase progress view (7 sub-tabs under Vuln Scanning) |
+| **AD Recon** | Engineer+ | Active Directory reconnaissance cockpit — credential management, 8-phase enumeration task |
 | **Settings** | All | User profile, API tokens, notification preferences, Telegram linking |
 | **Users** | Owner | Create/edit/delete users, assign roles |
 | **Audit Log** | Owner | Full activity trail with actor, action, IP, timestamp |
@@ -633,6 +643,13 @@ Authentication: Session cookie (browser) or `Authorization: Token wg_...` header
 | GET/PUT | `/api/notifications/config/` | authenticated | Notification preferences |
 | POST | `/api/notifications/test/` | authenticated | Send test notification |
 | POST | `/api/auth/telegram-link-code/` | authenticated | Generate Telegram link code |
+| GET | `/api/artifacts/` | `host:read` | ScanArtifact list (filterable: `?host=`, `?scan=`, `?tool=`) — excludes content |
+| GET | `/api/artifacts/<id>/` | `host:read` | ScanArtifact detail with full raw content |
+| GET/POST | `/api/ad-recon/credentials/` | `scan:read` / `scan:write` | AD credential vault (Fernet-encrypted) |
+| GET/POST | `/api/ad-recon/sessions/` | `scan:read` / `scan:write` | AD recon sessions |
+| GET | `/api/ad-recon/sessions/<id>/` | `scan:read` | AD recon session detail + results |
+| POST | `/api/ad-recon/sessions/<id>/start/` | `scan:write` | Launch AD recon task |
+| POST | `/api/ad-recon/sessions/<id>/cancel/` | `scan:write` | Cancel running AD recon |
 
 ### Creating a Scan (POST /api/scans/)
 
@@ -747,6 +764,7 @@ Config priority: **CLI flags > `WIREGHOST_*` env vars > `wireghost.yml` > defaul
 | **beat** | `callmedemon/wireghost:web` | Celery scheduler (60s tick) | 512 MB mem limit |
 | **bot** | `callmedemon/wireghost:web` | Telegram bot (long-polling) | 256 MB mem limit |
 | **portal** | `nginx:alpine` | Reverse proxy + SPA frontend | Serves static files, proxies `/api/` |
+| **docker-proxy** | `tecnativa/docker-socket-proxy` | Secure Docker API proxy | Read-only container stats for `/api/system-processes/` |
 
 ### Pipeline Phases
 
@@ -1024,17 +1042,17 @@ src/wireghost/                  # Python package (standalone pipeline)
 
 web_portal/                     # Django REST API
     scanner/
-        models.py               # User, Scan, Host, Port, Finding, Asset, Permission, ...
-        views.py                # ViewSets + function views with HasPerm gates
+        models/                 # Package: __init__ (User, Scan, Host, Port, Finding, Asset, Permission, ScanArtifact, ...) + ad_recon.py (11 Fernet-encrypted models)
+        views/                  # Package: __init__ (ScanViewSet, HostViewSet, FindingViewSet, ScanArtifactViewSet, ...) + ad_recon.py (credential/session ViewSets)
+        serializers/            # Package: __init__ (ScanArtifactListSerializer + ScanArtifactSerializer, SSRF validation, ...) + ad_recon.py
+        tasks/                  # Package: __init__ (Celery bridge: run_scan, artifact queue handler, daemon thread progress updater) + ad_recon.py (8-phase AD recon)
         auth_views.py           # Auth, user management, site-config, audit log
-        serializers.py          # DRF serializers with SSRF validation
-        tasks.py                # Celery: run_scan, check_scheduled_scans, generate_report
         notifications.py        # Telegram notification dispatch
         bot/                    # Telegram bot
             callbacks/          # Inline keyboard handlers (scans, findings, assets, ...)
             menus.py            # Menu keyboard builders
             screenshots.py      # Screenshot album delivery
-        migrations/             # 16 migrations (permissions, assets, viewer RBAC, ...)
+        migrations/             # 38 migrations (UUIDv7 PKs, permissions, assets, viewer RBAC, ScanArtifact, AD recon models, index name fix)
     wireghost_web/
         settings.py             # Django config
         celery.py               # Celery app + beat schedule
@@ -1049,10 +1067,17 @@ web/                            # Static SPA (vanilla JS + Chart.js + D3)
         public/                 # Tier 0 — served before auth (login, theme, API wrapper)
         app/                    # Tier 1 — behind auth_request
             router.js           # History API router + role gates
+            components.js       # Shared UI helpers — WG.PHASE_ORDER, WG.phaseProgress(), WG.phaseLabel()
             pages/              # One module per page
+                host-detail.js      # Ports, Findings, Technologies, Screenshots, Artifacts tabs
+                finding-detail.js   # CVSS, CVE/CWE, HTTP evidence, Host Artifacts section
+                live-discovery.js   # Real-time host discovery dashboard (2s polling)
+                phase-view.js       # Shared per-phase progress dashboard
+                ad-recon.js         # AD recon cockpit — credentials, sessions, results
+                scan-queue.js       # Live running/pending scan cards
         lib/                    # Vendored: Chart.js, D3.js
 
-docker-compose.yml              # 7 services: db, redis, api, worker, beat, bot, portal
+docker-compose.yml              # 8 services: db, redis, api, worker, beat, bot, portal, docker-proxy
 docker-compose.dev.yml          # Dev overlay (bind mounts, debug ports)
 Dockerfile                      # Standalone scanner image (all tools preinstalled)
 web_portal/Dockerfile           # Worker image (Django + scan tools)
