@@ -262,15 +262,15 @@ services:
           cpus: "0.5"
 
   portal:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: web_portal/Dockerfile.portal
     restart: unless-stopped
     networks: [public]
     ports:
       - "0.0.0.0:${WIREGHOST_PORT:-443}:443"
       - "${WIREGHOST_HTTP_BIND:-127.0.0.1}:${WIREGHOST_HTTP_PORT:-80}:80"
     volumes:
-      - ./web:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/nginx/certs:ro
       - ${WIREGHOST_LOG_DIR:-./logs}/nginx:/var/log/nginx
     depends_on:

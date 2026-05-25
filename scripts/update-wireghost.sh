@@ -482,7 +482,7 @@ docker_update() {
 
     # ── Pull external base images (from registries, not built locally) ──
     info "Pulling external base images..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis portal docker-proxy 2>&1 | tail -5 || true
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis docker-proxy 2>&1 | tail -5 || true
     ok "Base images pulled"
 
     # ── Build app images from scratch (no cache) with retry ──

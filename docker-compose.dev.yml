@@ -41,3 +41,6 @@ services:
   portal:
     ports:
       - "0.0.0.0:${WIREGHOST_PORT:-9995}:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
