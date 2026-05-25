@@ -418,59 +418,68 @@ feeds_update() {
 # 4. Docker stack
 ###########################################################################
 docker_update() {
-    step "Rebuilding Docker Compose stack"
+    step "Full Docker Compose stack recreate"
 
     cd "$PROJECT_DIR"
 
     info "Mode: ${DOCKER_MODE:-docker}"
     info "Compose files: ${DOCKER_COMPOSE_FILES[*]}"
 
-    # Pull external base images
-    info "Pulling external images..."
+    # Pull external base images first (independent of build)
+    info "Pulling external base images..."
     docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis portal 2>&1 | tail -3 || true
 
-    # Build app images with retry
-    info "Building app images..."
+    # Build app images from scratch (no cache) with retry
+    info "Building app images (no cache)..."
     local build_ok=false
     for attempt in 1 2 3; do
-        if docker compose "${DOCKER_COMPOSE_FILES[@]}" build --pull 2>&1 | tail -8; then
+        if docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>&1 | tail -12; then
             build_ok=true; break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
         sleep 5
     done
     if [ "$build_ok" = false ]; then
-        warn "Build failed after 3 attempts — images may be stale"
+        die "Build failed after 3 attempts — cannot continue"
     fi
+    ok "Images built successfully"
 
-    # Recreate containers
-    info "Recreating containers..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --remove-orphans 2>&1 | tail -5
-    ok "Containers recreated"
+    # Full stop — tear down every container so we start completely fresh
+    info "Stopping all containers..."
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" down --remove-orphans 2>&1 | tail -3 || true
+    ok "All containers stopped"
 
-    # Wait for DB
+    # Full recreate — force-recreate ensures every container is brand new,
+    # even if Compose config hasn't changed. Eliminates stale layer bugs.
+    info "Starting stack with force-recreate..."
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" up -d --force-recreate --remove-orphans 2>&1 | tail -5
+    ok "All containers recreated from fresh images"
+
+    # Wait for DB to accept connections
     info "Waiting for database..."
-    for i in $(seq 1 20); do
+    for i in $(seq 1 30); do
         if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db mysqladmin ping -h localhost --silent 2>/dev/null; then
             ok "Database ready"
             break
         fi
-        [ "$i" -eq 20 ] && warn "Database not ready after 20s"
+        [ "$i" -eq 30 ] && warn "Database not ready after 30s — migrations may fail"
         sleep 1
     done
 
-    # Migrations
+    # Run migrations
     info "Running Django migrations..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -3 || \
+    docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py migrate --noinput 2>&1 | tail -5 || \
         warn "migrations may have failed — check: docker compose logs api"
 
     # Collect static
     info "Collecting static files..."
     docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T api python manage.py collectstatic --noinput 2>&1 | tail -2 || true
 
-    # Prune old images
-    docker image prune -f 2>/dev/null || true
-    ok "Docker stack updated"
+    # Prune dangling images and build cache (--no-cache leaves orphaned layers)
+    info "Pruning old images and build cache..."
+    docker image prune -af 2>/dev/null || true
+    docker builder prune -f 2>/dev/null || true
+    ok "Docker stack fully recreated"
 }
 
 ###########################################################################
