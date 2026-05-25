@@ -14,6 +14,7 @@
 #   sudo bash scripts/update-wireghost.sh --all        # everything (host tools + feeds + Docker)
 #   sudo bash scripts/update-wireghost.sh --full       # full stack update WITH database backup + restore
 #   sudo bash scripts/update-wireghost.sh --verbose    # show full output (no suppression)
+#   sudo bash scripts/update-wireghost.sh --no-pull    # skip Docker Hub pulls (use cached images)
 #
 #   # Pass flags via curl:
 #   curl -fsSL <url> | sudo bash -s -- --full
@@ -497,19 +498,25 @@ docker_update() {
     ok "Compose config valid"
 
     # ── Pull external base images (from registries, not built locally) ──
-    info "Pulling external base images..."
-    docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis docker-proxy 2>&1 | _tee 5 || true
-    ok "Base images pulled"
+    if [ "$WITH_PULL" = true ]; then
+        info "Pulling external base images..."
+        docker compose "${DOCKER_COMPOSE_FILES[@]}" pull db redis docker-proxy 2>&1 | _tee 5 || true
+        ok "Base images pulled"
+    else
+        info "Skipping Docker Hub pulls (--no-pull) — using cached base images"
+    fi
 
     # ── Build app images from scratch (no cache) with retry ──
     info "Building app images (no cache)..."
     local build_ok=false build_tmp; build_tmp=$(mktemp)
+    local build_pull_flag=""
+    [ "$WITH_PULL" = true ] && build_pull_flag="--pull"
     for attempt in 1 2 3; do
         if [ "$VERBOSE" = true ]; then
             # Show live build output while capturing for error reporting
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>&1 | tee "$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache ${build_pull_flag} 2>&1 | tee "$build_tmp" && build_ok=true && break
         else
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache --pull 2>"$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build --no-cache ${build_pull_flag} 2>"$build_tmp" && build_ok=true && break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
         sleep 5
@@ -657,7 +664,7 @@ db_restore() {
 RAW_BASE="https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2"
 
 # ── Parse flags ────────────────────────────────────────────────────────
-WITH_SELF=true; WITH_TOOLS=true; WITH_FEEDS=true; WITH_DOCKER=false; FORCE_HOST=false; WITH_HOST_PIP=false; WITH_BACKUP=false
+WITH_SELF=true; WITH_TOOLS=true; WITH_FEEDS=true; WITH_DOCKER=false; FORCE_HOST=false; WITH_HOST_PIP=false; WITH_BACKUP=false; WITH_PULL=true
 for arg in "$@"; do
     case "$arg" in
         --self)   WITH_TOOLS=false; WITH_FEEDS=false ;;
@@ -667,6 +674,7 @@ for arg in "$@"; do
         --host)   FORCE_HOST=true; WITH_HOST_PIP=true ;;
         --full)   WITH_DOCKER=true; WITH_HOST_PIP=true; WITH_BACKUP=true ;;
         --all)    WITH_DOCKER=true; WITH_HOST_PIP=true ;;  # everything including host pip
+        --no-pull) WITH_PULL=false ;;
         --verbose|-v) VERBOSE=true ;;
         --help|-h)
             echo "Usage: sudo bash update-wireghost.sh [flags]"
@@ -677,6 +685,7 @@ for arg in "$@"; do
             echo "  --host      Host-only mode (pip install locally, skip Docker)"
             echo "  --self      Self-update only (git pull + pip install)"
             echo "  --tools     Tools only (install missing + update existing)"
+            echo "  --no-pull   Skip Docker Hub pulls (use locally cached base images)"
             echo "  --verbose   Show full output (no suppression)"
             echo "  -v          Same as --verbose"
             echo "  --feeds     Feeds only (nuclei templates, searchsploit DB)"
@@ -701,6 +710,9 @@ detect_docker
 info "Project: ${PROJECT_DIR}"
 if [ "$DOCKER_DEPLOY" = true ]; then
     ok "Detected Docker deployment (${DOCKER_MODE})"
+fi
+if [ "$WITH_DOCKER" = true ] && [ "$WITH_PULL" = false ]; then
+    info "Docker Hub pulls DISABLED — using cached base images only"
 fi
 
 # Auto-enable Docker rebuild when deployment is detected and no explicit flags override
