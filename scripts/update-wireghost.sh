@@ -510,6 +510,7 @@ docker_update() {
     # ── Build app images with retry ──
     # Default: cached build (fast — layers are reused, only changed COPY steps rerun).
     # --no-cache or --full: full rebuild from scratch (slow but thorough).
+    # Portal is built separately — nginx:alpine pull can hang on poor connections.
     local build_ok=false build_tmp; build_tmp=$(mktemp)
     local build_flags=""
     [ "$WITH_PULL" = true ] && build_flags="--pull"
@@ -517,11 +518,13 @@ docker_update() {
     local build_label; build_label="Building app images"
     [ "$WITH_NO_CACHE" = true ] && build_label="${build_label} (no cache)" || build_label="${build_label} (cached)"
     info "$build_label"
+
+    # Build Python services first (api, worker — beat and bot reuse api's image)
     for attempt in 1 2 3; do
         if [ "$VERBOSE" = true ]; then
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} 2>&1 | tee "$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} api worker 2>&1 | tee "$build_tmp" && build_ok=true && break
         else
-            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} 2>"$build_tmp" && build_ok=true && break
+            docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} api worker 2>"$build_tmp" && build_ok=true && break
         fi
         warn "Build attempt ${attempt}/3 failed — retrying in 5s..."
         sleep 5
@@ -532,7 +535,25 @@ docker_update() {
         rm -f "$build_tmp"
         die "Build failed — cannot continue"
     fi
+    ok "Python images built"
+
+    # Portal build (may hang on slow Docker Hub — timeout after 120s)
+    local portal_ok=false
+    info "Building portal image (timeout: 120s)..."
+    if timeout 120 docker compose "${DOCKER_COMPOSE_FILES[@]}" build ${build_flags} portal 2>"$build_tmp"; then
+        portal_ok=true
+        ok "Portal image built"
+    else
+        local rc=$?
+        if [ "$rc" -eq 124 ]; then
+            warn "Portal build timed out (Docker Hub unreachable?) — using old portal image"
+        else
+            warn "Portal build failed — using old portal image"
+            _tee 5 < "$build_tmp" | while IFS= read -r line; do warn "  $line"; done
+        fi
+    fi
     rm -f "$build_tmp"
+
     ok "Images built successfully"
 
     # ── Full stop — tear down every container so we start completely fresh ──
