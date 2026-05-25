@@ -365,18 +365,16 @@ tools_update() {
             fi
         done
 
-        # certipy-ad (netexec dependency — not always on PyPI; install from GitHub first)
-        # Must have git for pip git+https:// installs — pip falls back to PyPI when git is missing
-        if ! command -v git >/dev/null 2>&1; then
-            warn "git not found — certipy-ad/netexec install via git+https will fail; install git first"
-        fi
+        # certipy-ad (netexec dependency — on PyPI as certipy-ad; the GitHub repo
+        # has broken pyproject.toml metadata so git+https installs fail)
         if ! pip3 show certipy-ad >/dev/null 2>&1; then
             info "pip install certipy-ad (netexec dependency)..."
             local ca_tmp; ca_tmp=$(mktemp)
-            if pip3 install "certipy-ad @ git+https://github.com/Pennyw0rth/Certipy.git" 2>"$ca_tmp"; then
+            # Try PyPI first; if that fails, netexec will pull it as a dependency anyway
+            if pip3 install certipy-ad 2>"$ca_tmp"; then
                 ok "certipy-ad installed"
             else
-                warn "certipy-ad — install failed:"
+                warn "certipy-ad — install failed (netexec will install it as a dependency):"
                 tail -3 "$ca_tmp" | while IFS= read -r line; do warn "  $line"; done
             fi
             rm -f "$ca_tmp"
