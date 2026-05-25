@@ -798,8 +798,8 @@ class ScanArtifact(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["scan", "tool"]),
-            models.Index(fields=["host"]),
+            models.Index(fields=["scan", "tool"], name="scan_artifact_scan_tool_idx"),
+            models.Index(fields=["host"], name="scan_artifact_host_idx"),
         ]
 
     def __str__(self):
