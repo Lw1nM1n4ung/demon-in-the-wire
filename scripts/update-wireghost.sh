@@ -473,6 +473,17 @@ docker_update() {
     info "Mode: ${DOCKER_MODE:-docker}"
     info "Compose files: ${DOCKER_COMPOSE_FILES[*]}"
 
+    # ── Auto-fix missing env vars that host/dev installs need ──
+    if [[ " ${DOCKER_COMPOSE_FILES[*]} " =~ "host.yml" ]]; then
+        if ! grep -q '^WIREGHOST_DATA_DIR=' .env 2>/dev/null; then
+            local data_dir="${PROJECT_DIR}/data"
+            info "Auto-creating WIREGHOST_DATA_DIR=${data_dir}"
+            mkdir -p "${data_dir}/output" "${data_dir}/assets"
+            echo "WIREGHOST_DATA_DIR=${data_dir}" >> .env
+            ok "Added WIREGHOST_DATA_DIR to .env"
+        fi
+    fi
+
     # ── Validate compose config before touching anything ──
     info "Validating compose configuration..."
     local config_tmp; config_tmp=$(mktemp)
