@@ -862,6 +862,26 @@ docker compose build --no-cache worker
 
 The worker image downloads nuclei templates and tool binaries at build time. External template `.tar.gz` archives in `templates/` are extracted at container startup.
 
+### One-Line Update (curl)
+
+Update Wire\_Ghost and its Docker stack directly from GitHub:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/update-wireghost.sh | sudo bash
+```
+
+This performs a full stack update: `git pull` → `pip install` → `docker compose down` → `docker compose build --no-cache --pull` → `docker compose up -d --force-recreate` → image cleanup. Pass flags via curl:
+
+```bash
+# Tools + feeds only (no Docker rebuild)
+curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/update-wireghost.sh | sudo bash -s -- --tools --feeds
+
+# Self-update only (git pull + pip install)
+curl -fsSL https://raw.githubusercontent.com/Lw1nM1n4ung/demon-in-the-wire/rewrite-v2/scripts/update-wireghost.sh | sudo bash -s -- --self
+```
+
+**Warning:** The Docker rebuild destroys all running containers (scans, Celery tasks, in-memory state). Wait for active scans to finish before updating. DB data survives (volume). Build takes 5-10 minutes on first run.
+
 ---
 
 ## Backup & Restore
