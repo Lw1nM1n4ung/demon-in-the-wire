@@ -154,6 +154,8 @@ docker compose -f docker-compose.yml build --pull worker 2>&1 || die "Worker ima
 ok "Worker image built"
 
 docker compose -f docker-compose.yml build --pull portal 2>&1 || die "Portal image build failed"
+# Portal has no image: field in compose — tag it so docker save finds it
+docker tag demon-in-the-wire-portal callmedemon/wireghost:portal 2>/dev/null || true
 ok "Portal image built"
 
 ###########################################################################
