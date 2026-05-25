@@ -367,37 +367,49 @@ tools_update() {
         done
 
         # certipy-ad (netexec dependency — on PyPI as certipy-ad; the GitHub repo
-        # has broken pyproject.toml metadata so git+https installs fail)
+        # has broken pyproject.toml metadata so git+https installs fail).
+        # Install from PyPI first, then use a pip constraints file to prevent
+        # netexec from trying to pull it from the broken GitHub URL.
+        local ca_tmp; ca_tmp=$(mktemp)
         if ! pip3 show certipy-ad >/dev/null 2>&1; then
             info "pip install certipy-ad (netexec dependency)..."
-            local ca_tmp; ca_tmp=$(mktemp)
-            # Try PyPI first; if that fails, netexec will pull it as a dependency anyway
             if pip3 install certipy-ad 2>"$ca_tmp"; then
                 ok "certipy-ad installed"
             else
-                warn "certipy-ad — install failed (netexec will install it as a dependency):"
+                warn "certipy-ad — install failed:"
                 tail -3 "$ca_tmp" | while IFS= read -r line; do warn "  $line"; done
             fi
-            rm -f "$ca_tmp"
         fi
+        rm -f "$ca_tmp"
 
-        # NetExec (install/upgrade from GitHub — PyPI may miss certipy-ad dependency)
-        local ne_tmp; ne_tmp=$(mktemp)
+        # NetExec (install/upgrade from GitHub).
+        # certipy-ad is pre-installed from PyPI above. A constraints file
+        # overrides netexec's `certipy-ad @ git+https://...` dependency so
+        # pip keeps the PyPI install instead of trying the broken GitHub URL.
+        local certipy_ver ne_tmp
+        certipy_ver=$(pip3 show certipy-ad 2>/dev/null | awk '/^Version:/ {print $2}')
+        ne_tmp=$(mktemp)
         if pip3 show netexec >/dev/null 2>&1; then
             info "pip upgrade netexec..."
-            if pip3 install --upgrade "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp"; then
-                ok "netexec upgraded"
+            if [ -n "${certipy_ver:-}" ]; then
+                echo "certipy-ad==${certipy_ver}" > /tmp/wg-constraints.txt
+                pip3 install --upgrade --constraint /tmp/wg-constraints.txt "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
+                    ok "netexec upgraded" || { warn "netexec — upgrade failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
+                rm -f /tmp/wg-constraints.txt
             else
-                warn "netexec — upgrade failed (optional):"
-                tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done
+                pip3 install --upgrade "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
+                    ok "netexec upgraded" || { warn "netexec — upgrade failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
             fi
         else
             info "pip install netexec..."
-            if pip3 install "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp"; then
-                ok "netexec installed"
+            if [ -n "${certipy_ver:-}" ]; then
+                echo "certipy-ad==${certipy_ver}" > /tmp/wg-constraints.txt
+                pip3 install --constraint /tmp/wg-constraints.txt "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
+                    ok "netexec installed" || { warn "netexec — install failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
+                rm -f /tmp/wg-constraints.txt
             else
-                warn "netexec — install failed (optional):"
-                tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done
+                pip3 install "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp" && \
+                    ok "netexec installed" || { warn "netexec — install failed (optional):"; tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done; }
             fi
         fi
         rm -f "$ne_tmp"
