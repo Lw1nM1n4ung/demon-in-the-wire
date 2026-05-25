@@ -354,22 +354,42 @@ tools_update() {
         done
 
         # certipy-ad (netexec dependency — not always on PyPI; install from GitHub first)
+        # Must have git for pip git+https:// installs — pip falls back to PyPI when git is missing
+        if ! command -v git >/dev/null 2>&1; then
+            warn "git not found — certipy-ad/netexec install via git+https will fail; install git first"
+        fi
         if ! pip3 show certipy-ad >/dev/null 2>&1; then
             info "pip install certipy-ad (netexec dependency)..."
-            pip3 install "certipy-ad @ git+https://github.com/Pennyw0rth/Certipy.git" -q 2>&1 | tail -1 && \
-                ok "certipy-ad installed" || warn "certipy-ad — install failed"
+            local ca_tmp; ca_tmp=$(mktemp)
+            if pip3 install "certipy-ad @ git+https://github.com/Pennyw0rth/Certipy.git" 2>"$ca_tmp"; then
+                ok "certipy-ad installed"
+            else
+                warn "certipy-ad — install failed:"
+                tail -3 "$ca_tmp" | while IFS= read -r line; do warn "  $line"; done
+            fi
+            rm -f "$ca_tmp"
         fi
 
         # NetExec (install/upgrade from GitHub — PyPI may miss certipy-ad dependency)
+        local ne_tmp; ne_tmp=$(mktemp)
         if pip3 show netexec >/dev/null 2>&1; then
             info "pip upgrade netexec..."
-            pip3 install --upgrade "git+https://github.com/Pennyw0rth/NetExec.git" -q 2>&1 | tail -1 && \
-                ok "netexec upgraded" || warn "netexec — upgrade failed (optional)"
+            if pip3 install --upgrade "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp"; then
+                ok "netexec upgraded"
+            else
+                warn "netexec — upgrade failed (optional):"
+                tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done
+            fi
         else
             info "pip install netexec..."
-            pip3 install "git+https://github.com/Pennyw0rth/NetExec.git" -q 2>&1 | tail -1 && \
-                ok "netexec installed" || warn "netexec — install failed (optional)"
+            if pip3 install "git+https://github.com/Pennyw0rth/NetExec.git" 2>"$ne_tmp"; then
+                ok "netexec installed"
+            else
+                warn "netexec — install failed (optional):"
+                tail -3 "$ne_tmp" | while IFS= read -r line; do warn "  $line"; done
+            fi
         fi
+        rm -f "$ne_tmp"
     fi
 
     # ── Summary ──
