@@ -357,6 +357,7 @@ set -euo pipefail
 REMOTE_DIR="$1"; WITH_BACKUP="$2"; BACKUP_FILE="${3:-}"; REMOTE_IMAGES="${4:-}"
 
 echo "[VPS] Loading images..."
+echo "[VPS]   REMOTE_IMAGES='${REMOTE_IMAGES}'"
 cd "$REMOTE_DIR"
 for img in $REMOTE_IMAGES; do
     f=".remote-${img}.tar.gz"
@@ -389,10 +390,12 @@ docker compose $COMPOSE_FILES down --remove-orphans 2>&1 || true
 echo "[VPS] Starting stack..."
 
 # Build the list of services to force-recreate (only those whose images were transferred)
-FORCE_SVCS=""
+# Portal is always force-recreated — it's tiny (25MB) and the cost of serving
+# a stale nginx config (wrong redirect IP) is worse than 2s of portal downtime.
+FORCE_SVCS="portal"
 for img in $REMOTE_IMAGES; do
     case "$img" in
-        portal) FORCE_SVCS="$FORCE_SVCS portal" ;;
+        portal) ;;  # already in FORCE_SVCS
         web)    FORCE_SVCS="$FORCE_SVCS api beat bot" ;;
         worker) FORCE_SVCS="$FORCE_SVCS worker" ;;
     esac
@@ -433,11 +436,25 @@ if [ "$WITH_BACKUP" = true ] && [ -n "${BACKUP_FILE:-}" ] && [ -s "$BACKUP_FILE"
     docker compose $COMPOSE_FILES exec -T api python manage.py migrate --noinput 2>&1
 fi
 
-# Restart portal to flush DNS
-echo "[VPS] Restarting portal..."
-docker compose $COMPOSE_FILES restart portal 2>&1 || true
-
 echo "[VPS] Done — stack is running"
+
+# ── Quick health check ────────────────────────────────────────────────
+echo "[VPS] Health check..."
+sleep 2
+_portal_code=$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:2006/login 2>/dev/null || echo "000")
+_redirect_url=$(curl -sk -o /dev/null -w '%{redirect_url}' https://127.0.0.1:2006/ 2>/dev/null || echo "")
+echo "[VPS]   /login → HTTP ${_portal_code}"
+echo "[VPS]   / → ${_redirect_url}"
+if [ "$_portal_code" = "200" ]; then
+    echo "[VPS]   Health: PASS"
+else
+    echo "[VPS]   Health: FAIL (login returned ${_portal_code})"
+fi
+if echo "$_redirect_url" | grep -q '127.0.0.1'; then
+    echo "[VPS]   Redirect: PASS (using 127.0.0.1)"
+else
+    echo "[VPS]   Redirect: WARN (expected 127.0.0.1, got ${_redirect_url})"
+fi
 DEPLOY
 
 ok "Deployment complete"
