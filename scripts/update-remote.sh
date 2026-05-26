@@ -360,9 +360,12 @@ fi
 ###########################################################################
 info "Step 6: Deploying on VPS..."
 
-ssh "$VPS" bash -s <<'DEPLOY' -- "$REMOTE_DIR" "$WITH_BACKUP" "$REMOTE_BACKUP" "$REMOTE_IMAGES"
+# Use _none_ sentinel for empty args — SSH collapses empty quoted args ("") into
+# nothing, which shifts all subsequent positional parameters left by one.
+ssh "$VPS" bash -s <<'DEPLOY' -- "$REMOTE_DIR" "$WITH_BACKUP" "${REMOTE_BACKUP:-_none_}" "$REMOTE_IMAGES"
 set -euo pipefail
-REMOTE_DIR="$1"; WITH_BACKUP="$2"; BACKUP_FILE="${3:-}"; REMOTE_IMAGES="${4:-}"
+REMOTE_DIR="$1"; WITH_BACKUP="$2"; BACKUP_FILE="$3"; REMOTE_IMAGES="$4"
+[ "$BACKUP_FILE" = "_none_" ] && BACKUP_FILE=""
 
 echo "[VPS] Loading images..."
 echo "[VPS]   REMOTE_IMAGES='${REMOTE_IMAGES}'"
