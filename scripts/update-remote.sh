@@ -45,21 +45,25 @@ for arg in "$@"; do
     fi
     case "$arg" in
         --full) WITH_BACKUP=true ;;
-        --debug) DEBUG=true ;;
+        --debug|--verbose) DEBUG=true ;;
         --project-dir) _next_project_dir=true ;;
         --remote-dir) _next_remote_dir=true ;;
         --remote-dir=*) REMOTE_DIR="${arg#*=}" ;;
         --project-dir=*) PROJECT_DIR="${arg#*=}" ;;
         --help|-h)
-            echo "Usage: bash update-remote.sh <vps> [--full] [--debug] [--project-dir=<path>] [--remote-dir=<path>]"
+            echo "Usage: bash update-remote.sh <vps> [--full] [--debug|--verbose] [--project-dir=<path>] [--remote-dir=<path>]"
             echo "  vps          SSH destination (required)"
             echo "  --full       DB backup + restore"
-            echo "  --debug      Show every command + full output (troubleshooting)"
+            echo "  --debug, --verbose  Show every command + full output (troubleshooting)"
             echo "  --project-dir Path to demon-in-the-wire project (auto-detected if omitted)"
             echo "  --remote-dir  Path to project on VPS (auto-detected via SSH if omitted)"
             echo ""
             echo "  Env vars: TRANSFER_TIMEOUT=N (default 600), TRANSFER_RETRIES=N (default 3)"
             exit 0 ;;
+        --*)
+	            echo "ERROR: Unknown flag: $arg" >&2
+	            echo "Run with --help for usage." >&2
+	            exit 1 ;;
         *) VPS="$arg" ;;
     esac
 done
