@@ -3,10 +3,12 @@
 # Wire_Ghost — One-Command On-Premises Installer
 #
 # Usage:
-#   sudo bash scripts/install.sh                     # Interactive
+#   sudo bash scripts/install.sh                     # Interactive install
 #   sudo bash scripts/install.sh --host              # Host mode
 #   sudo bash scripts/install.sh --host --with-msf   # Host mode + Metasploit
 #   sudo bash scripts/install.sh --docker            # Docker-only mode
+#   sudo bash scripts/install.sh --remove            # Uninstall (interactive)
+#   sudo bash scripts/install.sh --remove --force    # Uninstall (no prompts)
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -17,21 +19,31 @@ cd "$PROJECT_DIR"
 # ── Flags ────────────────────────────────────────────────────────────
 INSTALL_MODE=""
 WITH_MSF=false
+REMOVE_MODE=false; REMOVE_FORCE=false; REMOVE_KEEP_DATA=false
 for arg in "$@"; do
     case "$arg" in
-        --host)     INSTALL_MODE="host" ;;
-        --docker)   INSTALL_MODE="docker" ;;
-        --with-msf) WITH_MSF=true ;;
+        --host)      INSTALL_MODE="host" ;;
+        --docker)    INSTALL_MODE="docker" ;;
+        --with-msf)  WITH_MSF=true ;;
+        --remove)    REMOVE_MODE=true ;;
+        --force)     REMOVE_FORCE=true ;;
+        --keep-data) REMOVE_KEEP_DATA=true ;;
         --help|-h)
             cat <<'USAGE'
 Wire_Ghost Installer
 
 Usage: sudo bash scripts/install.sh [OPTIONS]
 
-Options:
+Install options:
   --host       Host mode: scan tools on host, only web/DB in Docker
   --docker     Docker mode: everything in Docker containers (default)
   --with-msf   Install Metasploit Framework (host mode, adds ~1.5GB)
+
+Remove options:
+  --remove             Uninstall Wire_Ghost (interactive)
+  --remove --force     Uninstall without prompts
+  --remove --keep-data Uninstall but keep database and scan volumes
+
   --help       Show this help
 USAGE
             exit 0
@@ -994,6 +1006,16 @@ print_summary() {
 # Main
 # ══════════════════════════════════════════════════════════════════════
 banner
+
+# ── Remove mode — delegate to remove-wireghost.sh ────────────────────
+if [ "$REMOVE_MODE" = true ]; then
+    REMOVER="${SCRIPT_DIR}/remove-wireghost.sh"
+    [ -f "$REMOVER" ] || die "Remove script not found: ${REMOVER}"
+    _remove_args=""
+    $REMOVE_FORCE && _remove_args="--force"
+    $REMOVE_KEEP_DATA && _remove_args="--keep-data"
+    exec bash "$REMOVER" $_remove_args
+fi
 
 detect_wsl
 select_install_mode
