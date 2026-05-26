@@ -362,7 +362,7 @@ for img in $REMOTE_IMAGES; do
     f=".remote-${img}.tar.gz"
     if [ -f "$f" ]; then
         echo "[VPS]   Loading ${img}..."
-        gunzip -c "$f" | docker load 2>&1 | head -3
+        gunzip -c "$f" | docker load 2>&1 || { echo "[VPS]   WARNING: ${img} load failed"; continue; }
         rm -f "$f"
         echo "[VPS]   ${img} loaded"
     else
