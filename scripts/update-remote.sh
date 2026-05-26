@@ -30,7 +30,8 @@ TRANSFER_TIMEOUT="${TRANSFER_TIMEOUT:-600}"   # seconds per file (0 = none)
 TRANSFER_RETRIES="${TRANSFER_RETRIES:-3}"      # attempts per file
 
 # ── Parse args ──────────────────────────────────────────────────────────
-VPS=""; WITH_BACKUP=false; PROJECT_DIR=""; REMOTE_DIR=""; _next_project_dir=false; _next_remote_dir=false
+VPS=""; WITH_BACKUP=false; PROJECT_DIR=""; REMOTE_DIR=""; DEBUG=false
+_next_project_dir=false; _next_remote_dir=false
 for arg in "$@"; do
     if [ "$_next_project_dir" = true ]; then
         PROJECT_DIR="$arg"
@@ -44,20 +45,31 @@ for arg in "$@"; do
     fi
     case "$arg" in
         --full) WITH_BACKUP=true ;;
+        --debug) DEBUG=true ;;
         --project-dir) _next_project_dir=true ;;
         --remote-dir) _next_remote_dir=true ;;
         --remote-dir=*) REMOTE_DIR="${arg#*=}" ;;
         --project-dir=*) PROJECT_DIR="${arg#*=}" ;;
         --help|-h)
-            echo "Usage: bash update-remote.sh <vps> [--full] [--project-dir=<path>] [--remote-dir=<path>]"
+            echo "Usage: bash update-remote.sh <vps> [--full] [--debug] [--project-dir=<path>] [--remote-dir=<path>]"
             echo "  vps          SSH destination (required)"
             echo "  --full       DB backup + restore"
+            echo "  --debug      Show every command + full output (troubleshooting)"
             echo "  --project-dir Path to demon-in-the-wire project (auto-detected if omitted)"
             echo "  --remote-dir  Path to project on VPS (auto-detected via SSH if omitted)"
+            echo ""
+            echo "  Env vars: TRANSFER_TIMEOUT=N (default 600), TRANSFER_RETRIES=N (default 3)"
             exit 0 ;;
         *) VPS="$arg" ;;
     esac
 done
+
+# ── Debug mode ───────────────────────────────────────────────────────────
+if [ "$DEBUG" = true ]; then
+    set -x
+    info "DEBUG mode enabled — full command trace + output"
+    echo ""
+fi
 
 [ -z "$VPS" ] && die "VPS hostname required. Usage: bash update-remote.sh <vps> [--full]"
 

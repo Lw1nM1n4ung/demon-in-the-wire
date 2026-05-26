@@ -25,8 +25,22 @@ check() {
     fi
 }
 
-REMOTE_DIR="${WIREGHOST_DIR:-/opt/wireghost}"
-cd "$REMOTE_DIR" 2>/dev/null || { echo "Cannot cd to $REMOTE_DIR"; exit 1; }
+# Auto-detect project directory — check CWD first, then known paths
+_find_project() {
+    if [ -f "$PWD/docker-compose.yml" ]; then echo "$PWD"
+    elif [ -f "/home/demon/Tools/demon-in-the-wire/docker-compose.yml" ]; then echo "/home/demon/Tools/demon-in-the-wire"
+    elif [ -f "/opt/wireghost/docker-compose.yml" ]; then echo "/opt/wireghost"
+    else echo ""; fi
+}
+REMOTE_DIR="${WIREGHOST_DIR:-$(_find_project)}"
+cd "$REMOTE_DIR" 2>/dev/null || { echo "Cannot find project directory with docker-compose.yml"; exit 1; }
+
+# Auto-detect install mode — host mode uses docker-compose.host.yml
+if grep -q '^INSTALL_MODE=host' .env 2>/dev/null; then
+    COMPOSE_FILES="-f docker-compose.yml -f docker-compose.host.yml"
+else
+    COMPOSE_FILES=""
+fi
 
 echo ""
 echo "  Wire_Ghost Deploy Verification"
@@ -35,12 +49,12 @@ echo ""
 
 # ── 1. Stack status ──────────────────────────────────────────────────
 echo "── Stack ──"
-total=$(docker compose -f docker-compose.yml -f docker-compose.host.yml ps -q 2>/dev/null | wc -l)
+total=$(docker compose $COMPOSE_FILES ps -q 2>/dev/null | wc -l)
 check "8 containers running" "$([ "$total" -ge 8 ] && echo true || echo false)" "found $total"
 
 # Check each critical service
 for svc in db redis docker-proxy api worker beat bot portal; do
-    cid=$(docker compose -f docker-compose.yml -f docker-compose.host.yml ps -q "$svc" 2>/dev/null || true)
+    cid=$(docker compose $COMPOSE_FILES ps -q "$svc" 2>/dev/null || true)
     if [ -n "$cid" ]; then
         state=$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo "gone")
         check "  $svc ($state)" "$([ "$state" = running ] && echo true || echo false)" "$state"
@@ -52,19 +66,19 @@ done
 # ── 2. Portal image ──────────────────────────────────────────────────
 echo ""
 echo "── Portal ──"
-portal_img=$(docker inspect -f '{{.Config.Image}}' "$(docker compose -f docker-compose.yml -f docker-compose.host.yml ps -q portal 2>/dev/null)" 2>/dev/null || echo "")
+portal_img=$(docker inspect -f '{{.Config.Image}}' "$(docker compose $COMPOSE_FILES ps -q portal 2>/dev/null)" 2>/dev/null || echo "")
 check "Portal image is callmedemon/wireghost:portal" \
     "$(echo "$portal_img" | grep -q 'callmedemon/wireghost:portal' && echo true || echo false)" \
     "$portal_img"
 
 # Portal port binding should be 127.0.0.1:2006→443, NOT 0.0.0.0:443
-portal_ports=$(docker port "$(docker compose -f docker-compose.yml -f docker-compose.host.yml ps -q portal 2>/dev/null)" 2>/dev/null || echo "")
+portal_ports=$(docker port "$(docker compose $COMPOSE_FILES ps -q portal 2>/dev/null)" 2>/dev/null || echo "")
 check "Portal binds 127.0.0.1:2006 (not 0.0.0.0)" \
     "$(echo "$portal_ports" | grep -q '127.0.0.1:2006' && echo true || echo false)" \
     "$portal_ports"
 
 # Nginx config inside portal — must NOT contain old IP
-nginx_conf=$(docker compose -f docker-compose.yml -f docker-compose.host.yml exec -T portal cat /etc/nginx/conf.d/default.conf 2>/dev/null || echo "")
+nginx_conf=$(docker compose $COMPOSE_FILES exec -T portal cat /etc/nginx/conf.d/default.conf 2>/dev/null || echo "")
 check "nginx.conf has no old IP (152.42.160.210)" \
     "$(echo "$nginx_conf" | grep -qv '152.42.160.210' && echo true || echo false)"
 
@@ -105,7 +119,7 @@ check "/api/auth/csrf/ returns 200" "$([ "$csrf_code" = 200 ] && echo true || ec
 # ── 5. DB connectivity ───────────────────────────────────────────────
 echo ""
 echo "── DB ──"
-db_ping=$(docker compose -f docker-compose.yml -f docker-compose.host.yml exec -T db mysqladmin ping -h localhost --silent 2>/dev/null && echo "alive" || echo "dead")
+db_ping=$(docker compose $COMPOSE_FILES exec -T db mysqladmin ping -h localhost --silent 2>/dev/null && echo "alive" || echo "dead")
 check "MySQL ping" "$([ "$db_ping" = alive ] && echo true || echo false)" "$db_ping"
 
 # ── 6. Summary ───────────────────────────────────────────────────────

@@ -131,7 +131,11 @@ check_host_os() {
 check_prereqs() {
     info "Checking prerequisites..."
 
-    [ "$(id -u)" -eq 0 ] || die "This installer must be run as root (sudo bash install.sh)"
+    if [ "$INSTALL_MODE" = "host" ]; then
+        [ "$(id -u)" -eq 0 ] || die "Host mode requires root (sudo bash install.sh --host)"
+    elif [ "$(id -u)" -ne 0 ] && ! groups "$(id -un)" 2>/dev/null | grep -q '\bdocker\b'; then
+        die "Docker mode requires root or docker group membership.\n  Run as root:  sudo bash install.sh --docker\n  Or add user:  sudo usermod -aG docker \$USER && newgrp docker"
+    fi
 
     if ! command -v docker >/dev/null 2>&1; then
         if [ "$_IS_WSL" = true ]; then
@@ -675,18 +679,6 @@ generate_certs() {
     info "  SHA-256: ${FINGERPRINT}"
 }
 
-# ── Render nginx config ──────────────────────────────────────────────
-render_nginx() {
-    if [ ! -f config/nginx.conf.tpl ]; then
-        die "config/nginx.conf.tpl not found — is this the Wire_Ghost project directory?"
-    fi
-
-    sed -e "s/{{WIREGHOST_HOST}}/${WIREGHOST_HOST}/g" \
-        -e "s/{{WIREGHOST_PORT}}/${WIREGHOST_PORT}/g" \
-        config/nginx.conf.tpl > nginx.conf
-    ok "nginx.conf rendered for ${WIREGHOST_HOST}:${WIREGHOST_PORT}"
-}
-
 # ── Write .env ───────────────────────────────────────────────────────
 write_env() {
     if [ "$UPGRADE_MODE" = true ]; then
@@ -799,6 +791,10 @@ create_dirs() {
 
 # ── Docker daemon hardening ──────────────────────────────────────────
 harden_docker_daemon() {
+    if [ "$(id -u)" -ne 0 ]; then
+        info "Skipping Docker daemon hardening (not root — run as root to apply)"
+        return
+    fi
     local DAEMON_JSON="/etc/docker/daemon.json"
     if [ ! -f "$DAEMON_JSON" ]; then
         cat > "$DAEMON_JSON" <<'DAEMONJSON'
@@ -1018,7 +1014,6 @@ step "Generating TLS certificates"
 generate_certs
 
 step "Writing configuration"
-render_nginx
 write_env
 create_dirs
 harden_docker_daemon

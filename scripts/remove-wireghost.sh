@@ -11,8 +11,8 @@
 #   • All Wire_Ghost containers (api, worker, beat, portal, db, redis)
 #   • Docker volumes (mysql_data, scan_output, report_assets)
 #   • Built Docker images (wireghost api/worker/beat)
-#   • Docker network (wireghost_net)
-#   • Local files (certs/, logs/, backups/, .env, nginx.conf)
+#   • Docker network (demon-in-the-wire_*)
+#   • Local files (certs/, logs/, backups/, .env)
 #   • Host mode: systemd units, Python venv, scan data directory
 #   • Optionally: the entire project directory
 # ══════════════════════════════════════════════════════════════════════
@@ -53,8 +53,8 @@ show_help() {
     printf "  • Docker containers   (api, worker, beat, portal, db, redis)\n"
     printf "  • Docker volumes      (mysql_data, scan_output, report_assets)\n"
     printf "  • Docker images       (wireghost, nmap, nuclei, httpx)\n"
-    printf "  • Docker network      (wireghost_net)\n"
-    printf "  • Local files         (certs/, logs/, backups/, .env, nginx.conf)\n"
+    printf "  • Docker network      (demon-in-the-wire_*)\n"
+    printf "  • Local files         (certs/, logs/, backups/, .env)\n"
     printf "  • Project directory   (optional, interactive only)\n\n"
 }
 
@@ -272,12 +272,10 @@ step "Removing local files"
 
 removed_files=()
 
-for item in .env nginx.conf; do
-    if [ -f "$item" ]; then
-        rm -f "$item"
-        removed_files+=("$item")
-    fi
-done
+if [ -f .env ]; then
+    rm -f .env
+    removed_files+=(".env")
+fi
 
 for dir in certs logs backups; do
     if [ -d "$dir" ]; then
@@ -337,7 +335,7 @@ printf "${GREEN}═════════════════════�
 printf "  ${BOLD}What was removed:${NC}\n"
 printf "    • Docker containers, networks\n"
 $KEEP_DATA && printf "    • Docker images (volumes preserved)\n" || printf "    • Docker volumes and images\n"
-printf "    • Local config (.env, nginx.conf, certs/, logs/)\n"
+printf "    • Local config (.env, certs/, logs/)\n"
 if [ "$INSTALL_MODE" = "host" ]; then
     printf "    • systemd units (wireghost-worker, wireghost-beat)\n"
     printf "    • Python virtual environment (.venv/)\n"
