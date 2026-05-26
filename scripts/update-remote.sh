@@ -325,6 +325,10 @@ if ! _transfer_file "code" "$code_tar" "${REMOTE_DIR}/.remote-code.tar.gz"; then
 fi
 
 # ── Transfer images (best-effort, track what succeeded) ───────────────────
+# Always force-transfer portal (25MB) — size-based dedup is unreliable for
+# small images where a config change may produce the same compressed byte count.
+ssh -o ConnectTimeout=5 "$VPS" "rm -f '${REMOTE_DIR}/.remote-portal.tar.gz'" 2>/dev/null || true
+
 REMOTE_IMAGES=""
 for img in portal web worker; do
     if _transfer_file "$img" "${IMAGE_DIR}/${img}.tar.gz" "${REMOTE_DIR}/.remote-${img}.tar.gz"; then
