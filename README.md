@@ -754,6 +754,8 @@ Config priority: **CLI flags > `WIREGHOST_*` env vars > `wireghost.yml` > defaul
 └─────────────────────────────────────────────────────┘
 ```
 
+Data flows through three paths: **inbound** — browser → nginx (TLS termination, session auth) → gunicorn (4 workers) → MySQL; **async work** — Django enqueues tasks to Redis, Celery worker picks them up, daemon thread writes progress back to MySQL; **real-time** — Telegram bot long-polls Redis for notifications, sends messages and receives commands via the same Django API.
+
 ### Docker Compose Services
 
 | Service | Image | Role | Resources |
@@ -766,6 +768,64 @@ Config priority: **CLI flags > `WIREGHOST_*` env vars > `wireghost.yml` > defaul
 | **bot** | `callmedemon/wireghost:web` | Telegram bot (long-polling) | 256 MB mem limit |
 | **portal** | `nginx:alpine` | Reverse proxy + SPA frontend | Serves static files, proxies `/api/` |
 | **docker-proxy** | `tecnativa/docker-socket-proxy` | Secure Docker API proxy | Read-only container stats for `/api/system-processes/` |
+
+### Request Flow — Scan Lifecycle
+
+```
+Browser                    nginx                    Django API              Redis            Celery Worker
+  │                          │                          │                    │                    │
+  │  POST /api/scans/        │                          │                    │                    │
+  │─────────────────────────►│  proxy /api/             │                    │                    │
+  │                          │─────────────────────────►│                    │                    │
+  │                          │                          │  enqueue task      │                    │
+  │                          │                          │───────────────────►│                    │
+  │  201 { id, status }      │                          │                    │                    │
+  │◄─────────────────────────│◄─────────────────────────│                    │                    │
+  │                          │                          │                    │  dequeue           │
+  │                          │                          │                    │───────────────────►│
+  │                          │                          │                    │                    │
+  │                          │                          │                    │  run_pipeline()    │
+  │                          │                          │                    │  ┌─ discovery      │
+  │                          │                          │                    │  ├─ portscan       │
+  │                          │                          │                    │  ├─ webdetect      │
+  │                          │                          │  on_progress()     │  ├─ webcrawl       │
+  │                          │                          │◄───────────────────┤  ├─ vulnscan       │
+  │                          │                          │  (Queue.put)       │  ├─ enumeration    │
+  │                          │                          │                    │  └─ reports        │
+  │                          │                          │                    │                    │
+  │                          │                          │  daemon thread     │                    │
+  │                          │                          │  UPDATE scan SET   │                    │
+  │                          │                          │  current_phase=X   │                    │
+  │                          │                          │──────────────────►│                    │
+  │                          │                          │       mysql        │                    │
+  │                          │                          │                    │                    │
+  │  GET /api/scans/<id>/    │                          │                    │                    │
+  │  (every 3s while running)│                          │                    │                    │
+  │─────────────────────────►│─────────────────────────►│                    │                    │
+  │  { current_phase,        │                          │  SELECT from mysql  │                    │
+  │    hosts_scanned, ... }  │                          │                    │                    │
+  │◄─────────────────────────│◄─────────────────────────│                    │                    │
+```
+
+1. **Browser** POSTs to `/api/scans/` — Django validates, creates a `Scan` row, enqueues a Celery task to Redis, returns 201.
+2. **Celery worker** dequeues the task, calls `run_pipeline()` with six callback closures. The callbacks push `(action, ...)` tuples onto a thread-safe `queue.Queue`.
+3. **Daemon thread** drains the queue in a 0.5s-poll loop, writing progress updates (`current_phase`, `hosts_scanned`) directly to MySQL via raw SQL, and creating `Host`, `Port`, `Finding`, and `ScanArtifact` rows via Django ORM.
+4. **Browser** polls `GET /api/scans/<id>/` every 3 seconds, reading progress from the DB. No WebSockets, no Redis pub/sub — progress is DB-driven so it survives worker restarts.
+
+### Shared Pipeline — CLI and Celery
+
+Both entry paths call the same `run_pipeline()` async function in `src/wireghost/pipeline/orchestrator.py`. The function takes a `ScanConfig` and six optional callback closures:
+
+| Callback | Fires when | CLI path | Celery path |
+|----------|-----------|----------|-------------|
+| `on_progress` | Phase advances or host completes | unused | pushes `("progress", phase, pct, done)` to Queue |
+| `on_discovery_complete` | Host discovery finishes | unused | creates DB hosts from live IPs + MAC/vendor map |
+| `on_host_complete` | A host finishes all phases | unused | persists Host + Findings + Ports to DB |
+| `on_host_phase` | A host enters a new phase | unused | updates `Host.current_phase` in DB |
+| `on_subnet_complete` | Each /24 subnet scan finishes | unused | incremental host creation during discovery |
+| `on_artifact` | Tool writes output file | unused | pushes `("artifact", ...)` to Queue → `ScanArtifact` rows |
+
+The CLI path passes no callbacks — it runs the same pipeline but produces only filesystem output and console logs. The Celery path uses callbacks to persist everything to MySQL via a daemon thread that owns its own DB connection (so the async pipeline never touches the ORM directly, avoiding `SynchronousOnlyOperation` errors).
 
 ### Pipeline Phases
 
@@ -789,7 +849,87 @@ Phase 6  Service Enumeration   CMS (WPScan) ∥ SMB (enum4linux) ∥ NetExec ∥
 Phase 7  Report Generation     DOCX, XLSX, HTML, Interactive Dashboard
 ```
 
-`pipeline.orchestrator.run_pipeline()` is the single async entry point for both CLI and the Celery `run_scan` task. Per-host parallelism is controlled via `asyncio.Semaphore(config.parallelism)`. Each host independently advances through phases; overall progress is a weighted average across all hosts. Cross-tool finding deduplication runs after all phases per host.
+**Per-host parallelism:** Each host is an independent `asyncio.Task` gated by `asyncio.Semaphore(config.parallelism)`. Hosts advance through phases at their own pace — a fast host on portscan doesn't wait for a slow host still in discovery. Overall progress is a **weighted average** across all hosts using phase midpoints (discovery=9, portscan=27, webdetect=46, webcrawl=58, vulnscan=67, enumeration=77, reports=94). The dominant phase label (the phase containing the most hosts) is what the UI displays.
+
+**Scanner fallback chain:** Port discovery uses a symmetric fallback: nmap SYN scan first, then naabu SYN, then masscan. If any scanner in the chain succeeds, the pipeline moves on — only complete failure across all three aborts the host. After ports are discovered, `nmap -sV -sC [-O]` runs targeted service detection on the discovered set, augmented by `fingerprintx` as a second source of truth for service identification.
+
+**Cross-tool deduplication:** After enumeration, findings are deduplicated by CVE (if present) or by normalized `host:port:title[:60]` key. Title normalization strips tool-specific prefixes (`nmap: `, `msf `, `nxc: `) so that the same vulnerability reported by multiple tools is counted once.
+
+**Two-pass NVD CVE search:** After the first pass during vuln scanning, a second pass runs after enumeration — now with version strings extracted from enum4linux, NetExec, SNMP, TLS, LDAP, CMS, and service banners. New CVEs not already covered by other findings are appended. The NVD API 2.0 is rate-limited (5 req/30s without an API key, 50 req/30s with one).
+
+### Data Architecture
+
+**Core entities:**
+
+```
+Scan ────► Host ────► Port
+  │           │
+  │           ├──► Finding (host-level or scan-level, nullable host FK)
+  │           ├──► Technology
+  │           ├──► Screenshot
+  │           └──► ScanArtifact (raw tool output)
+  │
+  ├──► Finding (scan-level: scan-wide issues, no host FK)
+  ├──► Report
+  └──► ExploitMatch (MSF module → finding mapping)
+
+Asset (cross-scan, unique on ip+port+protocol) ─── first_seen / last_seen / risk_score
+```
+
+**UUIDv7 primary keys:** Every model uses UUIDv7 (`uuid_utils.uuid7()`) — time-ordered 128-bit identifiers. The first 48 bits encode a Unix millisecond timestamp, giving B-tree index locality comparable to auto-increment while retaining global uniqueness. Singleton models (`ReportConfig`, `SiteConfig`) use well-known UUIDs (`00000000-0000-7000-8000-000000000001` / `...002`) so there is exactly one row.
+
+**Asset deduplication:** The `Asset` table is a cross-scan inventory keyed on `(ip, port, protocol)`. After each scan completes, `_sync_assets()` upserts rows — updating `last_seen` for existing assets and creating new ones for newly discovered ports. This gives the ASM dashboard trend tracking across scans rather than point-in-time snapshots.
+
+**Permission model:** Wire_Ghost uses its own RBAC system, not Django's built-in `Group`/`Permission`:
+
+- 3 roles: Owner, Engineer, Viewer — stored as a string on `User.role`.
+- 17 named permission codes (`scan:write`, `user:manage`, etc.) in a `Permission` table.
+- `RolePermission` join table maps roles to permission codes — seeded via migration, mutated only by new migrations.
+- `User.has_permission(code)` checks a Redis set keyed `perms:{role}` with a 1-hour TTL. On cache miss it queries `RolePermission` and materialises.
+- DRF views use `HasPerm(code)` and `HasMethodPerm(read_code, write_code)` factory classes — method-level read/write splitting on the same viewset.
+- `User.save()` enforces at-most-one Owner via `ValidationError`.
+
+**ScanArtifact model:** Raw tool output (nmap XML, nuclei JSON, enum4linux TXT, etc.) is stored as MySQL `LONGTEXT` in `ScanArtifact` rows — linked to scan and optionally host, keyed by tool name. The list endpoint (`/api/artifacts/?host=<uuid>`) excludes the `content` field for lightweight responses; the detail endpoint (`/api/artifacts/<id>/`) includes it. The frontend loads content lazily on accordion expand.
+
+### Frontend Architecture
+
+**Two-tier JS serving:** The SPA is split across an nginx-enforced security boundary:
+
+| Tier | Path | Access | Contents |
+|------|------|--------|----------|
+| Tier 0 | `/js/public/`, `/css/` | No auth | Theme, API wrapper, login/setup boot scripts |
+| Tier 1 | `/js/app/`, `/js/lib/` | Behind `auth_request` | Router, page modules, Chart.js, D3 |
+
+The nginx `location /` block gates the SPA shell (`app.html`) with `auth_request /_auth_check` — an internal subrequest to `GET /api/auth/check/` that returns 204 (valid session) or 401. On login, the Tier-0 `login-boot.js` hard-redirects to `/` so nginx re-evaluates the session gate and ships the full SPA. Tier-1 scripts are only reachable through the gated shell; direct requests for `/js/app/` files lack the `auth_request` gate but are impractical to enumerate.
+
+**SPA router:** A History API router (`web/js/app/router.js`) maps paths to page modules via a flat route table. `WG.render()` matches the current path, enforces role-based access via `WG._canVisit()` (viewers see 4 pages, engineers see all but Users, owners see everything), populates the sidebar and topbar, clears `#mainContent`, and injects the page module's HTML. Navigation uses `history.pushState` + `popstate` — every page change is a full DOM replacement (no virtual DOM).
+
+**API wrapper and cache:** A single `WG.api(path, opts)` function wraps `fetch` with automatic CSRF token injection, 401→login redirect, and 403/404 null returns. An in-memory cache (`WG._cache`, 30s TTL) avoids redundant API calls. `WG.refreshAndRerender()` compares new API responses against the cache via `JSON.stringify` before touching the DOM — skipping re-renders on unchanged data to prevent UI flicker. The global search filters the in-memory cache client-side without an API call.
+
+**Boot sequence:** `theme.js` → `state.js` → `api.js` → `auth.js` → `utils.js` → `components.js` → 22 page modules → `router.js`. The router IIFE binds sidebar clicks, keyboard shortcuts (Escape, `/`), and `popstate`, then calls `WG.render()` for the current URL.
+
+### AD Recon Architecture
+
+The AD recon engine is a separate system from the main scan pipeline — it runs sequential `subprocess.run()` calls rather than the async per-host pipeline.
+
+**Credential storage:** AD passwords and NT hashes are encrypted at rest using `cryptography.fernet.Fernet` (AES-256-GCM). The encryption key is derived from Django's `SECRET_KEY` via SHA-256. The model's `save()` method checks for the Fernet token prefix (`gAAAAA`) to avoid double-encryption on re-save. Credentials are decrypted in-memory at task start and `del`'d in a `finally` block.
+
+**Task flow (8 phases):**
+
+| Phase | Name | Tools | Hard gate? |
+|-------|------|-------|:----------:|
+| 0 | Connectivity | `nxc smb --timeout 15` | yes — aborts session |
+| 1 | LDAP | `ldapdomaindump`, `nxc smb --shares`, `nxc ldap` | no |
+| 2 | BloodHound | `bloodhound-python -c All` | no |
+| 3 | AS-REP Roasting | `impacket-GetNPUsers` (or `kerbrute` for unauth) | no |
+| 4 | Kerberoasting | `impacket-GetUserSPNs`, `impacket-secretsdump`, `impacket-samrdump` | no |
+| 5 | RPC | `rpcclient`, password policy, `nxc wmi` | no |
+| 6 | ADCS | `nxc ldap -M adcs` | no |
+| 7 | Responder | Passive SMB/LLMNR/mDNS capture (60s) | no |
+
+Phase 0 is the only hard gate — if the domain controller is unreachable, the entire session aborts. Phases 1-7 degrade gracefully: failed tools are recorded in `tool_status` JSON but the session continues.
+
+**Data model:** 11 models (`CredentialProfile`, `ADReconSession`, `ADDomain`, `ADUser`, `ADGroup`, `ADComputer`, `ADTrust`, `ADSPN`, `ADACL`, `ADShare`, `ADCertService`) mirror BloodHound/LDAP output, stored relationally rather than as JSON blobs. `ADACL.interesting_rights` captures pre-identified dangerous ACEs (GenericAll, WriteDacl, etc.). The frontend cockpit at `/ad-recon` provides a credential vault, session launcher, and per-phase results browser with real-time polling during active sessions.
 
 ---
 
