@@ -130,11 +130,26 @@ fi
 # 1. DB backup (from VPS)
 ###########################################################################
 if [ "$WITH_BACKUP" = true ]; then
-    info "Step 1: Backing up database from VPS..."
+    info "Step 1: Detecting VPS install mode + backing up database..."
+
+    # Auto-detect compose files from .env on the VPS — same logic as Step 6.
+    # Must run BEFORE the backup so we use the same compose files the stack
+    # was started with.  Without this, a Docker-mode VPS (no host.yml) would
+    # fail silently because the hardcoded host.yml path doesn't exist.
+    REMOTE_COMPOSE_FILES=""
+    if ssh "$VPS" "cd ${REMOTE_DIR} && grep -q '^INSTALL_MODE=host' .env 2>/dev/null" 2>/dev/null; then
+        REMOTE_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.host.yml"
+        info "  VPS mode: host"
+    else
+        info "  VPS mode: docker"
+    fi
+
     BACKUP_FILE="${TMPDIR}/wireghost_backup_$(date +%Y%m%d_%H%M%S).sql.gz"
 
-    ssh "$VPS" "cd ${REMOTE_DIR} && docker compose -f docker-compose.yml -f docker-compose.host.yml exec -T db sh -c 'mysqldump -u root -p\"\$MYSQL_ROOT_PASSWORD\" --single-transaction --routines --triggers --events wireghost' | gzip" > "$BACKUP_FILE" 2>/dev/null || {
+    ssh "$VPS" "cd ${REMOTE_DIR} && docker compose ${REMOTE_COMPOSE_FILES} exec -T db sh -c 'mysqldump -u root -p\"\$MYSQL_ROOT_PASSWORD\" --single-transaction --routines --triggers --events wireghost' | gzip" > "$BACKUP_FILE" 2>/dev/null || {
         warn "DB backup failed — continuing without backup"
+        warn "  Check: docker compose ps   (is the stack running?)"
+        warn "  Check: grep INSTALL_MODE .env   (host or docker?)"
         WITH_BACKUP=false
     }
 
@@ -246,7 +261,7 @@ tar czf "$code_tar" \
     --exclude='node_modules' --exclude='.remote-update' \
     --exclude='logs' --exclude='backups' --exclude='data' \
     -C "$PROJECT_DIR" \
-    web_portal/ src/ config/ pyproject.toml docker-compose.yml docker-compose.host.yml \
+    web_portal/ src/ config/ scripts/ pyproject.toml docker-compose.yml docker-compose.host.yml \
     Dockerfile templates/ 2>/dev/null
 
 # ── Transfer helper ───────────────────────────────────────────────────────
@@ -385,6 +400,26 @@ done
 echo "[VPS] Extracting code..."
 tar xzf .remote-code.tar.gz 2>/dev/null
 rm -f .remote-code.tar.gz
+
+# If .env is missing entirely, this is a first deploy — run the installer.
+# install.sh auto-detects non-interactive mode (no TTY over SSH heredoc)
+# and generates secrets + starts the stack in one shot.
+if [ ! -f .env ]; then
+    echo "[VPS] .env missing — running first-time installer..."
+    bash scripts/install.sh --docker --prebuilt
+    echo "[VPS] First-time install complete."
+    exit 0
+fi
+
+# Validate compose config separately from the .env existence check.
+# If this fails, .env may be corrupt OR Docker may be temporarily
+# unavailable. Don't reinstall (which would nuke existing config) —
+# warn and let the deploy fail visibly if the config is truly broken.
+if ! docker compose config --quiet 2>/dev/null; then
+    echo "[VPS] WARNING: docker compose config validation failed"
+    echo "[VPS]   Check: docker compose config (on VPS)"
+    echo "[VPS]   .env exists — continuing deploy attempt anyway"
+fi
 
 # Detect install mode to select the right compose files
 if grep -q '^INSTALL_MODE=host' .env 2>/dev/null; then

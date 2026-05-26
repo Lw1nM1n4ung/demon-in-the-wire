@@ -113,6 +113,14 @@ detect_docker() {
         elif [ -f docker-compose.dev.yml ]; then
             DOCKER_COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.dev.yml)
             DOCKER_MODE="dev"
+        # Fallback: read INSTALL_MODE from .env (matches remove-wireghost.sh logic)
+        elif [ -f "${PROJECT_DIR}/.env" ]; then
+            local _env_mode
+            _env_mode=$(grep '^INSTALL_MODE=' "${PROJECT_DIR}/.env" 2>/dev/null | cut -d= -f2)
+            if [ "$_env_mode" = "host" ] && [ -f docker-compose.host.yml ]; then
+                DOCKER_COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.host.yml)
+                DOCKER_MODE="host"
+            fi
         fi
     fi
 
@@ -642,17 +650,30 @@ db_backup() {
 
     info "Dumping database to ${BACKUP_FILE}..."
 
-    local dump_cmd; dump_cmd="docker compose ${DOCKER_COMPOSE_FILES[*]} exec -T db sh -c 'mysqldump -u root -p\"\$MYSQL_ROOT_PASSWORD\" --single-transaction --routines --triggers --events wireghost'"
+    # Pipe mysqldump through gzip. The pipeline runs inside an if-block so
+    # set -e + pipefail don't kill the script on failure — the -s check on
+    # the output file is the authoritative success indicator.
+    local backup_ok=false
     if [ "$VERBOSE" = true ]; then
-        eval "$dump_cmd | gzip > \"$BACKUP_FILE\""
+        if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db \
+            sh -c 'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --events wireghost' \
+            | gzip > "$BACKUP_FILE" && [ -s "$BACKUP_FILE" ]; then
+            backup_ok=true
+        fi
     else
-        eval "$dump_cmd 2>/dev/null | gzip > \"$BACKUP_FILE\""
+        if docker compose "${DOCKER_COMPOSE_FILES[@]}" exec -T db \
+            sh -c 'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --events wireghost' \
+            2>/dev/null | gzip > "$BACKUP_FILE" && [ -s "$BACKUP_FILE" ]; then
+            backup_ok=true
+        fi
     fi
-    if [ "${PIPESTATUS[0]:-0}" -eq 0 ] && [ -s "$BACKUP_FILE" ]; then
+
+    if [ "$backup_ok" = true ]; then
         local size; size=$(du -h "$BACKUP_FILE" | cut -f1)
         ok "Database backed up (${size}) → ${BACKUP_FILE}"
     else
         warn "Database backup FAILED — continuing without backup"
+        rm -f "$BACKUP_FILE"
         BACKUP_FILE=""
     fi
 }
@@ -794,6 +815,9 @@ fi
 if [ "$WITH_DOCKER" = true ]; then
     if [ "$WITH_BACKUP" = true ] && [ "$DOCKER_DEPLOY" = true ]; then
         db_backup
+        if [ -z "${BACKUP_FILE:-}" ]; then
+            die "Database backup failed — refusing to rebuild without a safety net.\n  Check: docker compose logs db\n  Run without --full to skip backup/restore and update in-place."
+        fi
     elif [ "$WITH_BACKUP" = true ]; then
         warn "Docker stack not running — skipping backup (nothing to back up)"
     fi

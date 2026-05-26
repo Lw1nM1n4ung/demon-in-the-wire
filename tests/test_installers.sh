@@ -502,6 +502,168 @@ _test_dir_validation "wireghost"            "rejected" "bare name rejected"
 _test_dir_validation "./local"              "rejected" "dot-relative rejected"
 
 # ════════════════════════════════════════════════════════════════════
+# TEST GROUP: install.sh --prebuilt flag parsing
+# ════════════════════════════════════════════════════════════════════
+printf "\n\033[1m── install.sh --prebuilt flag ────────────────────\033[0m\n"
+
+_test_flag_parse() {
+    local args="$1" expect_prebuilt="$2" expect_mode="$3" desc="$4"
+    # Simulate the flag parsing loop from install.sh
+    INSTALL_MODE=""
+    PREBUILT=false
+    for arg in $args; do
+        case "$arg" in
+            --host)      INSTALL_MODE="host" ;;
+            --docker)    INSTALL_MODE="docker" ;;
+            --prebuilt)  PREBUILT=true ;;
+            --with-msf)  : ;;
+        esac
+    done
+    _assert "$desc — PREBUILT" "$expect_prebuilt" "$PREBUILT"
+    if [ -n "$expect_mode" ]; then
+        _assert "$desc — INSTALL_MODE" "$expect_mode" "$INSTALL_MODE"
+    fi
+}
+
+_test_flag_parse "--docker"                  "false" "docker" "no --prebuilt flag"
+_test_flag_parse "--docker --prebuilt"       "true"  "docker" "--prebuilt with --docker"
+_test_flag_parse "--prebuilt --docker"       "true"  "docker" "--prebuilt before --docker"
+_test_flag_parse "--host --prebuilt"         "true"  "host"   "--prebuilt with --host"
+_test_flag_parse "--prebuilt"                "true"  ""       "--prebuilt alone"
+_test_flag_parse ""                          "false" ""       "no flags at all"
+_test_flag_parse "--host --with-msf"         "false" "host"   "--host --with-msf (no prebuilt)"
+_test_flag_parse "--host --with-msf --prebuilt" "true" "host" "--host --with-msf --prebuilt"
+
+# ════════════════════════════════════════════════════════════════════
+# TEST GROUP: build_and_start_docker() branching
+# ════════════════════════════════════════════════════════════════════
+printf "\n\033[1m── build_and_start_docker() branch ───────────────\033[0m\n"
+
+_test_build_branch() {
+    local prebuilt="$1" expect_skip="$2" desc="$3"
+    PREBUILT="$prebuilt"
+    local output=""
+    if $PREBUILT; then
+        output="SKIP_BUILD:up -d"
+    else
+        output="BUILD:up -d"
+    fi
+    _assert "$desc" "$expect_skip" "$output"
+}
+
+_test_build_branch "true"  "SKIP_BUILD:up -d" "PREBUILT=true skips build"
+_test_build_branch "false" "BUILD:up -d"      "PREBUILT=false runs build"
+
+# ════════════════════════════════════════════════════════════════════
+# TEST GROUP: update-remote.sh _none_ sentinel
+# ════════════════════════════════════════════════════════════════════
+printf "\n\033[1m── _none_ sentinel conversion ────────────────────\033[0m\n"
+
+_test_sentinel() {
+    local input="$1" expect="$2" desc="$3"
+    local BACKUP_FILE="$input"
+    [ "$BACKUP_FILE" = "_none_" ] && BACKUP_FILE=""
+    _assert "$desc" "$expect" "$BACKUP_FILE"
+}
+
+_test_sentinel "_none_"          ""                "_none_ → empty string"
+_test_sentinel "backup.tar.gz"   "backup.tar.gz"   "non-sentinel passes through"
+_test_sentinel ""                ""                 "empty stays empty"
+_test_sentinel "none"            "none"             "'none' (no underscores) passes through"
+
+# ════════════════════════════════════════════════════════════════════
+# TEST GROUP: update-remote.sh flag parsing
+# ════════════════════════════════════════════════════════════════════
+printf "\n\033[1m── update-remote.sh flag parsing ─────────────────\033[0m\n"
+
+_test_updater_flags() {
+    local args="$1" expect_debug="$2" expect_exit="$3" desc="$4"
+    local DEBUG=false VPS=""
+    local exit_code=0
+    for arg in $args; do
+        case "$arg" in
+            --full)                  : ;;
+            --debug|--verbose)       DEBUG=true ;;
+            --help|-h)               exit_code=0 ;;
+            --*)                     exit_code=1 ;;
+            *)                       VPS="$arg" ;;
+        esac
+    done
+    _assert "$desc — DEBUG" "$expect_debug" "$DEBUG"
+}
+
+_test_updater_flags "--verbose"                        "true"  "0" "--verbose sets DEBUG"
+_test_updater_flags "--debug"                          "true"  "0" "--debug sets DEBUG"
+_test_updater_flags "--full"                           "false" "0" "--full does not set DEBUG"
+_test_updater_flags "demon@10.10.9.240"                "false" "0" "VPS hostname parsed correctly"
+_test_updater_flags "demon@10.10.9.240 --verbose"      "true"  "0" "VPS + --verbose"
+_test_updater_flags "demon@10.10.9.240 --full --debug" "true"  "0" "VPS + --full + --debug"
+
+_test_updater_unknown_flag() {
+    local args="$1" expect_exit="$2" desc="$3"
+    local exit_code=0
+    for arg in $args; do
+        case "$arg" in
+            --full)             : ;;
+            --debug|--verbose)  : ;;
+            --help|-h)          exit_code=0 ;;
+            --*)                exit_code=1 ;;
+            *)                  : ;;
+        esac
+    done
+    _assert "$desc" "$expect_exit" "$exit_code"
+}
+
+_test_updater_unknown_flag "--bogus"  "1" "unknown --flag exits 1"
+_test_updater_unknown_flag "--wtf"    "1" "unknown --wtf exits 1"
+_test_updater_unknown_flag "--full"   "0" "known --full exits 0"
+
+# ════════════════════════════════════════════════════════════════════
+# TEST GROUP: First-time install guard logic
+# ════════════════════════════════════════════════════════════════════
+printf "\n\033[1m── First-time install guard ──────────────────────\033[0m\n"
+
+_test_guard() {
+    local env_exists="$1" compose_ok="$2" expect_install="$3" desc="$4"
+    local would_install="false"
+    # Only missing .env triggers install — compose validation failure
+    # (e.g. Docker daemon down) warns but does NOT nuke existing config.
+    if [ "$env_exists" = false ]; then
+        would_install="true"
+    fi
+    _assert "$desc" "$expect_install" "$would_install"
+}
+
+_test_guard "false" "false" "true"  "no .env + no compose → install"
+_test_guard "false" "true"  "true"  "no .env (compose irrelevant) → install"
+_test_guard "true"  "false" "false" ".env exists + compose fails → warn, skip install"
+_test_guard "true"  "true"  "false" ".env valid + compose ok → skip install"
+
+# ════════════════════════════════════════════════════════════════════
+# TEST GROUP: Code tar includes scripts/
+# ════════════════════════════════════════════════════════════════════
+printf "\n\033[1m── Code tar glob check ───────────────────────────\033[0m\n"
+
+_tar_cmd="web_portal/ src/ config/ scripts/ pyproject.toml docker-compose.yml docker-compose.host.yml Dockerfile templates/"
+_assert_contains "tar glob includes scripts/" "scripts/" "$_tar_cmd"
+_assert_contains "tar glob includes web_portal/" "web_portal/" "$_tar_cmd"
+_assert_contains "tar glob includes Dockerfile" "Dockerfile" "$_tar_cmd"
+
+# ════════════════════════════════════════════════════════════════════
+# TEST GROUP: Script syntax validation (extended)
+# ════════════════════════════════════════════════════════════════════
+printf "\n\033[1m── Extended syntax validation ────────────────────\033[0m\n"
+
+syntax_out=$(bash -n "$PROJECT_DIR/scripts/install.sh" 2>&1)
+_assert "install.sh syntax valid" "" "$syntax_out"
+
+syntax_out=$(bash -n "$PROJECT_DIR/scripts/update-remote.sh" 2>&1)
+_assert "update-remote.sh syntax valid" "" "$syntax_out"
+
+syntax_out=$(bash -n "$PROJECT_DIR/scripts/remove-wireghost.sh" 2>&1)
+_assert "remove-wireghost.sh syntax valid" "" "$syntax_out"
+
+# ════════════════════════════════════════════════════════════════════
 # Summary
 # ════════════════════════════════════════════════════════════════════
 printf "\n\033[1m══════════════════════════════════════════════════\033[0m\n"

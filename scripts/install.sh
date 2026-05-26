@@ -6,7 +6,7 @@
 #   sudo bash scripts/install.sh                     # Interactive install
 #   sudo bash scripts/install.sh --host              # Host mode
 #   sudo bash scripts/install.sh --host --with-msf   # Host mode + Metasploit
-#   sudo bash scripts/install.sh --docker            # Docker-only mode
+#   sudo bash scripts/install.sh --docker --prebuilt # Docker mode, skip build (air-gapped)
 #   sudo bash scripts/install.sh --remove            # Uninstall (interactive)
 #   sudo bash scripts/install.sh --remove --force    # Uninstall (no prompts)
 # ══════════════════════════════════════════════════════════════════════
@@ -20,11 +20,13 @@ cd "$PROJECT_DIR"
 INSTALL_MODE=""
 WITH_MSF=false
 REMOVE_MODE=false; REMOVE_FORCE=false; REMOVE_KEEP_DATA=false
+PREBUILT=false
 for arg in "$@"; do
     case "$arg" in
         --host)      INSTALL_MODE="host" ;;
         --docker)    INSTALL_MODE="docker" ;;
         --with-msf)  WITH_MSF=true ;;
+        --prebuilt)  PREBUILT=true ;;
         --remove)    REMOVE_MODE=true ;;
         --force)     REMOVE_FORCE=true ;;
         --keep-data) REMOVE_KEEP_DATA=true ;;
@@ -38,6 +40,7 @@ Install options:
   --host       Host mode: scan tools on host, only web/DB in Docker
   --docker     Docker mode: everything in Docker containers (default)
   --with-msf   Install Metasploit Framework (host mode, adds ~1.5GB)
+  --prebuilt   Skip docker compose build (use pre-loaded images — for air-gapped VPS)
 
 Remove options:
   --remove             Uninstall Wire_Ghost (interactive)
@@ -832,10 +835,13 @@ DAEMONJSON
 # ══════════════════════════════════════════════════════════════════════
 
 build_and_start_docker() {
-    step "Building containers"
-    info "This may take several minutes on first run..."
-    export DOCKER_CONTENT_TRUST=1
-    docker compose build --pull 2>&1 | tail -5
+    if [ "$PREBUILT" = true ]; then
+        info "Skipping build (--prebuilt) — using pre-loaded images"
+    else
+        step "Building containers"
+        info "This may take several minutes on first run..."
+        docker compose build --pull 2>&1 | tail -5
+    fi
 
     step "Starting services"
     info "Starting Wire_Ghost stack..."
@@ -849,8 +855,6 @@ build_and_start_docker() {
 # ══════════════════════════════════════════════════════════════════════
 
 build_and_start_host() {
-    step "Building web containers (slim image)"
-
     # Remove Docker-managed named volumes that conflict with host-mode bind mounts
     for vol in demon-in-the-wire_scan_output demon-in-the-wire_report_assets; do
         if docker volume inspect "$vol" >/dev/null 2>&1; then
@@ -862,9 +866,13 @@ build_and_start_host() {
         fi
     done
 
-    info "Building API/portal containers only..."
-    export DOCKER_CONTENT_TRUST=1
-    docker compose -f docker-compose.yml -f docker-compose.host.yml build --pull api portal 2>&1 | tail -5
+    if [ "$PREBUILT" = true ]; then
+        info "Skipping build (--prebuilt) — using pre-loaded images"
+    else
+        step "Building web containers (slim image)"
+        info "Building API/portal containers only..."
+        docker compose -f docker-compose.yml -f docker-compose.host.yml build --pull api portal 2>&1 | tail -5
+    fi
 
     step "Starting Docker services"
     info "Starting DB, Redis, API, portal..."
@@ -1011,10 +1019,10 @@ banner
 if [ "$REMOVE_MODE" = true ]; then
     REMOVER="${SCRIPT_DIR}/remove-wireghost.sh"
     [ -f "$REMOVER" ] || die "Remove script not found: ${REMOVER}"
-    _remove_args=""
-    $REMOVE_FORCE && _remove_args="--force"
-    $REMOVE_KEEP_DATA && _remove_args="--keep-data"
-    exec bash "$REMOVER" $_remove_args
+    _remove_args=()
+    [ "$REMOVE_FORCE" = true ] && _remove_args+=("--force")
+    [ "$REMOVE_KEEP_DATA" = true ] && _remove_args+=("--keep-data")
+    exec bash "$REMOVER" "${_remove_args[@]}"
 fi
 
 detect_wsl

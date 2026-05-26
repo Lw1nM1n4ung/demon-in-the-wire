@@ -60,7 +60,7 @@ show_help() {
 
 confirm() {
     local msg="$1"
-    if $FORCE; then return 0; fi
+    if [ "$FORCE" = true ]; then return 0; fi
     printf "  ${YELLOW}▸${NC} %s ${DIM}[y/N]${NC} " "$msg"
     read -r ans
     [[ "$ans" =~ ^[Yy] ]]
@@ -91,7 +91,7 @@ if [ "$INSTALL_MODE" = "host" ]; then
 fi
 
 # ── Safety confirmation ──────────────────────────────────────────────
-if ! $FORCE; then
+if [ "$FORCE" != true ]; then
     printf "${RED}${BOLD}  ⚠  WARNING: This will permanently destroy Wire_Ghost data.${NC}\n\n"
     printf "  Type ${BOLD}REMOVE${NC} to continue: "
     read -r ANSWER
@@ -131,11 +131,11 @@ if [ "$INSTALL_MODE" = "host" ]; then
     fi
 
     if [ -n "$WIREGHOST_DATA_DIR" ] && [ -d "$WIREGHOST_DATA_DIR" ]; then
-        if $KEEP_DATA; then
+        if [ "$KEEP_DATA" = true ]; then
             warn "Keeping scan data at ${WIREGHOST_DATA_DIR} (--keep-data)"
         else
             DATA_SIZE=$(du -sh "$WIREGHOST_DATA_DIR" 2>/dev/null | cut -f1 || echo "?")
-            if $FORCE || confirm "Remove scan data directory (${WIREGHOST_DATA_DIR}, ${DATA_SIZE})?"; then
+            if [ "$FORCE" = true ] || confirm "Remove scan data directory (${WIREGHOST_DATA_DIR}, ${DATA_SIZE})?"; then
                 rm -rf "$WIREGHOST_DATA_DIR"
                 ok "Removed scan data (${DATA_SIZE})"
             fi
@@ -177,7 +177,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 step "Removing Docker volumes"
 
-if $KEEP_DATA; then
+if [ "$KEEP_DATA" = true ]; then
     warn "Skipping volume removal (--keep-data)"
 else
     VOLUME_PREFIX="demon-in-the-wire"
@@ -222,7 +222,7 @@ for pattern in "${IMAGE_PATTERNS[@]}"; do
     fi
 done
 
-if ! $KEEP_DATA; then
+if [ "$KEEP_DATA" != true ]; then
     for img in "${TOOL_IMAGES[@]}"; do
         if docker images "$img" -q 2>/dev/null | grep -q .; then
             if confirm "Remove scan tool image: ${img}?"; then
@@ -238,7 +238,7 @@ fi
 BASE_IMAGES=("mysql:8.0" "redis:7-alpine" "nginx:alpine")
 for img in "${BASE_IMAGES[@]}"; do
     if docker images "$img" -q 2>/dev/null | grep -q .; then
-        if $FORCE || confirm "Remove base image: ${img}? (shared with other projects)"; then
+        if [ "$FORCE" = true ] || confirm "Remove base image: ${img}? (shared with other projects)"; then
             docker rmi "$img" 2>/dev/null || true
             ok "Removed: ${img}"
             removed_count=$((removed_count + 1))
@@ -298,7 +298,7 @@ step "Cleaning up dangling Docker resources"
 
 DANGLING=$(docker images -f "dangling=true" -q 2>/dev/null | wc -l || echo 0)
 if [ "$DANGLING" -gt 0 ]; then
-    if $FORCE || confirm "Prune ${DANGLING} dangling image(s)?"; then
+    if [ "$FORCE" = true ] || confirm "Prune ${DANGLING} dangling image(s)?"; then
         docker image prune -f >/dev/null 2>&1
         ok "Pruned dangling images"
     fi
@@ -311,7 +311,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 step "Project directory"
 
-if ! $FORCE; then
+if [ "$FORCE" != true ]; then
     if confirm "Remove the entire project directory (${PROJECT_DIR})?"; then
         cd /
         rm -rf "$SCRIPT_DIR"
@@ -334,7 +334,7 @@ printf "${GREEN}═════════════════════�
 
 printf "  ${BOLD}What was removed:${NC}\n"
 printf "    • Docker containers, networks\n"
-$KEEP_DATA && printf "    • Docker images (volumes preserved)\n" || printf "    • Docker volumes and images\n"
+[ "$KEEP_DATA" = true ] && printf "    • Docker images (volumes preserved)\n" || printf "    • Docker volumes and images\n"
 printf "    • Local config (.env, certs/, logs/)\n"
 if [ "$INSTALL_MODE" = "host" ]; then
     printf "    • systemd units (wireghost-worker, wireghost-beat)\n"
