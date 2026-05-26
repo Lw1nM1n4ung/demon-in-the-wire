@@ -204,6 +204,9 @@ sandbox.WG.renderSettings = function() { return ''; };
 sandbox.WG.renderUsers = function() { return ''; };
 sandbox.WG.renderSystem = function() { return ''; };
 
+/* components.js — defines WG._loadSidebarState called by router.js IIFE */
+loadFile(ctx, path.join(JS_DIR, 'app', 'components.js'), 'components.js');
+
 /* Seed a valid session so router IIFE's render() doesn't redirect to /login */
 sandbox.localStorage.setItem('wg_user_info', JSON.stringify({
   id: 1, username: 'admin', name: 'Admin', email: 'admin@test.com', role: 'owner', avatar: 'A'

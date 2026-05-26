@@ -292,11 +292,17 @@ async def run_pipeline(
         )
         await _advance_host_phase(ip, "webcrawl")
 
-        crawl_findings = crawl_result if not isinstance(crawl_result, Exception) else []
-        if isinstance(crawl_result, Exception):
+        if isinstance(crawl_result, BaseException):
             log.error("[%s] web crawl failed", ip, exc_info=crawl_result)
-        if isinstance(screenshot_findings, Exception):
+            crawl_findings = []
+        elif isinstance(crawl_result, list):
+            crawl_findings = crawl_result
+        else:
+            crawl_findings = []
+        if isinstance(screenshot_findings, BaseException):
             log.error("[%s] screenshot failed", ip, exc_info=screenshot_findings)
+            screenshot_findings = []
+        elif not isinstance(screenshot_findings, list):
             screenshot_findings = []
 
         # Phase 3d: Vulnerability scanning (nuclei + nmap NSE vuln + searchsploit + getsploit + nikto + MSF)
@@ -309,12 +315,20 @@ async def run_pipeline(
 
         _emit_dir_artifacts(ip, tree.host_vuln_dir(ip), "vulnscan")
 
-        vuln_findings = vuln_result if not isinstance(vuln_result, Exception) else []
-        msf_findings = msf_result if not isinstance(msf_result, Exception) else []
-        if isinstance(vuln_result, Exception):
+        if isinstance(vuln_result, BaseException):
             log.error("[%s] vuln scan failed", ip, exc_info=vuln_result)
-        if isinstance(msf_result, Exception):
+            vuln_findings = []
+        elif isinstance(vuln_result, list):
+            vuln_findings = vuln_result
+        else:
+            vuln_findings = []
+        if isinstance(msf_result, BaseException):
             log.error("[%s] msf scan failed", ip, exc_info=msf_result)
+            msf_findings = []
+        elif isinstance(msf_result, list):
+            msf_findings = msf_result
+        else:
+            msf_findings = []
 
         # Phase 3e: Service enumeration (SMB, NetExec, SNMP, NFS, LDAP, TLS, CMS, services)
         svc_task = (
@@ -355,7 +369,7 @@ async def run_pipeline(
             + list(msf_findings)
         )
         for name, result in zip(enum_names, enum_results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 log.error("[%s] %s scanner failed", ip, name, exc_info=result)
                 continue
             if isinstance(result, list):
@@ -398,7 +412,7 @@ async def run_pipeline(
     hosts: list[Host] = []
     all_findings: list[Finding] = []
     for i, r in enumerate(results):
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             log.error("Host pipeline failed for %s", live_ips[i], exc_info=r)
             continue
         host, findings = r

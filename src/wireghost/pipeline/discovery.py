@@ -318,7 +318,7 @@ async def discover_hosts(
     tree: OutputTree,
     on_progress: "Callable[[str, int, int], None] | None" = None,
     on_subnet_complete: "Callable[[list[str], dict[str, tuple[str, str]]], None] | None" = None,
-) -> tuple[list[str], dict[str, tuple[str, str]]]:
+) -> tuple[list[str], dict[str, tuple[str, str]], dict[str, str]]:
     """Run nmap -sn, fping, ARP tools, and passive DNS against *config.target*.
 
     Large CIDRs (>/24) are automatically partitioned into /24 subnets
@@ -540,4 +540,4 @@ async def discover_hosts(
     )
 
     log.info("Discovery found %d live host(s) across %d subnet(s)", len(sorted_ips), total)
-    return sorted_ips, mac_vendor
+    return sorted_ips, mac_vendor, dns_hostnames

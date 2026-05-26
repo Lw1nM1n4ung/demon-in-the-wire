@@ -14,6 +14,8 @@ from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.shared import Emu, Inches, Pt, RGBColor
 from lxml import etree
 
+from wireghost.models.severity import SEVERITY_COLORS, Severity
+
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
     from wireghost.models.finding import Finding
@@ -21,6 +23,10 @@ if TYPE_CHECKING:
     from wireghost.models.scan import Host
 
 log = logging.getLogger("wireghost")
+
+_SEVERITY_RGB: dict[Severity, RGBColor] = {
+    sev: RGBColor(*rgb) for sev, rgb in SEVERITY_COLORS.items()
+}
 
 
 def _make_anchor_image(
@@ -131,11 +137,16 @@ _DISCLAIMER = (
     "copyright, patent or trademark of the authors or any third party. "
     "The document is provided on an 'AS IS' basis.\n\n"
     "The findings in this report reflect the conditions found during the "
-    "assessment period (vulnerability / exploit reported to the date of "
+    "assessment period (vulnerability / exploit reported as of the date of "
     "the report and cannot guarantee any future compliance). Security is "
     "a continuous process and new vulnerabilities may be discovered after "
     "this assessment."
 )
+
+
+def _ip_key(ip: str) -> tuple[int, ...]:
+    """Sort key that orders IP addresses numerically (10.0.0.5 before 10.0.0.50)."""
+    return tuple(int(octet) for octet in ip.split("."))
 
 
 def _group_hosts_by_subnet(hosts: list[Host]) -> dict[str, list[Host]]:
@@ -145,15 +156,19 @@ def _group_hosts_by_subnet(hosts: list[Host]) -> dict[str, list[Host]]:
         parts = h.ip.rsplit(".", 1)
         subnet = f"{parts[0]}.0/24" if len(parts) == 2 else h.ip
         subnets[subnet].append(h)
-    return dict(sorted(subnets.items()))
+    return dict(sorted(subnets.items(), key=lambda kv: _ip_key(kv[0].split("/")[0])))
 
 
 def _group_findings_by_host(findings: list[Finding]) -> dict[str, list[Finding]]:
-    """Group findings by host IP."""
+    """Group findings by host IP, sorted by severity within each host."""
+    from wireghost.models.severity import SEVERITY_ORDER
+
     grouped: dict[str, list[Finding]] = defaultdict(list)
     for f in findings:
         grouped[f.host].append(f)
-    return dict(sorted(grouped.items()))
+    for host_findings in grouped.values():
+        host_findings.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
+    return dict(sorted(grouped.items(), key=lambda kv: _ip_key(kv[0])))
 
 
 class DocxRenderer:
@@ -170,19 +185,35 @@ class DocxRenderer:
 
         logo, header_logo = self._resolve_logos(config)
 
+        # Dynamic section numbering — counter shared across all section methods.
+        # Sections 1 (Exec Summary) and 2 (Target Subnets) are unnumbered;
+        # numbering becomes visible starting at section 3 (Live Hosts).
+        self._section = 0
+
         self._cover_page(doc, config, report, logo)
         self._executive_summary(doc, config, report)
+        doc.add_page_break()
         self._target_subnets(doc, report)
+        doc.add_page_break()
         self._live_hosts(doc, report)
+        doc.add_page_break()
         self._open_ports(doc, report)
+        doc.add_page_break()
         self._web_screenshots(doc, report, reports_dir)
-        self._identified_issues(doc, report)
+        self._identified_issues(doc, report, reports_dir)
+
+        end_para = doc.add_paragraph("END OF DOCUMENT")
+        end_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         self._add_header_logos(doc, logo, header_logo)
 
         out = reports_dir / "security_report.docx"
         doc.save(str(out))
         return out
+
+    def _next_section(self) -> int:
+        self._section += 1
+        return self._section
 
     @staticmethod
     def _resolve_logos(config: ScanConfig) -> tuple[Path | None, Path | None]:
@@ -191,10 +222,11 @@ class DocxRenderer:
         default_logo = assets / "logo.png"
         default_header = assets / "logo_header.png"
 
-        # Custom logo overrides both
+        # Custom logo: use as cover logo; keep built-in header logo if available
         custom = getattr(config, "logo_path", None)
         if custom and Path(custom).is_file():
-            return Path(custom), Path(custom)
+            header = default_header if default_header.is_file() else None
+            return Path(custom), header
 
         # Use built-in defaults
         logo = default_logo if default_logo.is_file() else None
@@ -268,8 +300,6 @@ class DocxRenderer:
         run.bold = True
         run.font.size = Pt(22)
 
-        doc.add_paragraph()
-
         # Disclaimer
         doc.add_paragraph()
         disc_title = doc.add_paragraph()
@@ -301,6 +331,7 @@ class DocxRenderer:
     def _executive_summary(
         self, doc: Document, config: ScanConfig, report: ScanReport
     ) -> None:
+        self._next_section()  # section 1 (unnumbered)
         doc.add_heading("Executive Summary", level=1)
         doc.add_paragraph(
             f"A comprehensive Vulnerability Assessment was conducted on "
@@ -309,20 +340,44 @@ class DocxRenderer:
         )
 
         stats = report.severity_stats()
-        from wireghost.models.severity import Severity
 
+        # Severity-distribution table
+        sev_table = doc.add_table(rows=1, cols=3)
+        sev_table.style = "Light Grid Accent 1"
+        hdr = sev_table.rows[0].cells
+        hdr[0].text = "Severity"
+        hdr[1].text = "Count"
+        hdr[2].text = "Description"
+
+        severity_rows = [
+            (Severity.CRITICAL, "Critical", "Immediate threat; requires urgent remediation"),
+            (Severity.HIGH, "High", "Significant risk; prioritize for resolution"),
+            (Severity.MEDIUM, "Medium", "Moderate risk; address in regular patch cycle"),
+            (Severity.LOW, "Low", "Minor risk; address as resources permit"),
+            (Severity.INFO, "Info", "Informational; no action required"),
+        ]
+        for sev, label, desc in severity_rows:
+            count = stats.get(sev, 0)
+            if count > 0:
+                row = sev_table.add_row().cells
+                # Colored severity label
+                sev_para = row[0].paragraphs[0]
+                sev_para.clear()
+                sev_run = sev_para.add_run(label)
+                sev_run.font.color.rgb = _SEVERITY_RGB.get(sev, _BLACK)
+                sev_run.bold = True
+                row[1].text = str(count)
+                row[2].text = desc
+
+        doc.add_paragraph()
         summary = doc.add_paragraph()
         summary.add_run("Assessment Results:\n").bold = True
         summary.add_run(f"  Hosts Scanned: {len(report.hosts)}\n")
         summary.add_run(f"  Open Ports: {report.total_open_ports}\n")
         summary.add_run(f"  Total Findings: {len(report.findings)}\n")
-        summary.add_run(f"  Critical: {stats.get(Severity.CRITICAL, 0)}\n")
-        summary.add_run(f"  High: {stats.get(Severity.HIGH, 0)}\n")
-        summary.add_run(f"  Medium: {stats.get(Severity.MEDIUM, 0)}\n")
-        summary.add_run(f"  Low: {stats.get(Severity.LOW, 0)}\n")
-        summary.add_run(f"  Info: {stats.get(Severity.INFO, 0)}\n")
 
     def _target_subnets(self, doc: Document, report: ScanReport) -> None:
+        self._next_section()  # section 2 (unnumbered)
         doc.add_heading("Target Subnets", level=1)
         doc.add_paragraph(
             "Vulnerability Assessment was conducted on the following targets."
@@ -345,7 +400,8 @@ class DocxRenderer:
             row[1].text = "0"
 
     def _live_hosts(self, doc: Document, report: ScanReport) -> None:
-        doc.add_heading("3. Identified Live Hosts", level=1)
+        sec = self._next_section()
+        doc.add_heading(f"{sec}. Identified Live Hosts", level=1)
         doc.add_paragraph("The following IPs are alive in the subnets.")
 
         subnets = _group_hosts_by_subnet(report.hosts)
@@ -357,7 +413,7 @@ class DocxRenderer:
 
         for subnet, hosts in subnets.items():
             first = True
-            for h in sorted(hosts, key=lambda x: tuple(int(p) for p in x.ip.split("."))):
+            for h in sorted(hosts, key=lambda x: _ip_key(x.ip)):
                 row = table.add_row().cells
                 row[0].text = subnet if first else ""
                 row[1].text = h.ip
@@ -369,15 +425,15 @@ class DocxRenderer:
             row[1].text = "No Live Host"
 
     def _open_ports(self, doc: Document, report: ScanReport) -> None:
-        doc.add_heading("4. Open Ports", level=1)
+        sec = self._next_section()
+        doc.add_heading(f"{sec}. Open Ports", level=1)
 
         subnets = _group_hosts_by_subnet(report.hosts)
-        section_num = 4
         sub_num = 1
 
         for subnet, hosts in subnets.items():
             doc.add_heading(
-                f"{section_num}.{sub_num}. Summarized open ports on {subnet} subnet.",
+                f"{sec}.{sub_num}. Summarized open ports on {subnet} subnet.",
                 level=2,
             )
 
@@ -386,7 +442,7 @@ class DocxRenderer:
             table.rows[0].cells[0].text = "Hosts"
             table.rows[0].cells[1].text = "Ports"
 
-            for h in sorted(hosts, key=lambda x: tuple(int(p) for p in x.ip.split("."))):
+            for h in sorted(hosts, key=lambda x: _ip_key(x.ip)):
                 ports_str = ",".join(
                     f"{p.number}/{p.protocol}" for p in h.open_ports
                 )
@@ -399,13 +455,18 @@ class DocxRenderer:
     def _web_screenshots(
         self, doc: Document, report: ScanReport, reports_dir: Path,
     ) -> None:
+        # Only show screenshots for hosts that have NO findings — hosts with both
+        # get screenshots embedded inline within _identified_issues instead.
+        hosts_with_findings = {f.host for f in report.findings}
         hosts_with_ss = [
-            h for h in report.hosts if getattr(h, "screenshots", None)
+            h for h in report.hosts
+            if getattr(h, "screenshots", None) and h.ip not in hosts_with_findings
         ]
         if not hosts_with_ss:
             return
 
-        doc.add_heading("5. Web Screenshots", level=1)
+        sec = self._next_section()
+        doc.add_heading(f"{sec}. Web Screenshots", level=1)
         doc.add_paragraph(
             "Screenshots of discovered web services captured during the assessment."
         )
@@ -432,38 +493,49 @@ class DocxRenderer:
                 except Exception:
                     log.debug("Could not embed screenshot %s", png)
 
-    def _identified_issues(self, doc: Document, report: ScanReport) -> None:
+    def _identified_issues(
+        self, doc: Document, report: ScanReport, reports_dir: Path,
+    ) -> None:
         if not report.findings:
             return
 
         findings_by_host = _group_findings_by_host(report.findings)
+        host_map: dict[str, Host] = {h.ip: h for h in report.hosts}
 
-        # Group hosts into subnets for section numbering
         host_to_subnet: dict[str, str] = {}
         for h in report.hosts:
             parts = h.ip.rsplit(".", 1)
             host_to_subnet[h.ip] = f"{parts[0]}.0/24" if len(parts) == 2 else h.ip
 
-        # Group findings by subnet
         findings_by_subnet: dict[str, list[Finding]] = defaultdict(list)
         for host_ip, host_findings in findings_by_host.items():
             subnet = host_to_subnet.get(host_ip, host_ip)
             findings_by_subnet[subnet].extend(host_findings)
 
-        section_num = 6
-        for subnet in sorted(findings_by_subnet.keys()):
+        shown_ss: set[str] = set()
+
+        for subnet in sorted(findings_by_subnet.keys(), key=lambda s: _ip_key(s.split("/")[0])):
+            sec = self._next_section()
             subnet_findings = findings_by_subnet[subnet]
             doc.add_heading(
-                f"{section_num}. Identified issues on {subnet} subnet.",
+                f"{sec}. Identified issues on {subnet} subnet.",
                 level=1,
             )
 
             for idx, finding in enumerate(subnet_findings, 1):
-                # Heading: section.idx. Title
-                doc.add_heading(
-                    f"{section_num}.{idx}. {finding.title}",
-                    level=2,
-                )
+                sev_label = finding.severity.name.upper() if hasattr(finding.severity, 'name') else str(finding.severity)
+                sev_color = _SEVERITY_RGB.get(finding.severity, _BLACK)
+
+                # Multi-run heading with colored severity label
+                h = doc.add_heading("", level=2)
+                h.clear()
+                run_num = h.add_run(f"{sec}.{idx}. [")
+                run_num.font.color.rgb = _GREEN
+                run_sev = h.add_run(sev_label)
+                run_sev.font.color.rgb = sev_color
+                run_sev.bold = True
+                run_tail = h.add_run(f"] {finding.title}")
+                run_tail.font.color.rgb = _GREEN
 
                 # IP (bold)
                 ip_para = doc.add_paragraph()
@@ -481,12 +553,37 @@ class DocxRenderer:
                 elif finding.matched_at:
                     url_text = finding.matched_at
                 elif finding.endpoint and finding.endpoint != "/":
-                    protocol = finding.protocol or "http"
-                    port = finding.port or "80"
-                    url_text = f"{protocol}://{finding.host}:{port}{finding.endpoint}"
+                    scheme = finding.protocol if finding.protocol in ("http", "https") else ""
+                    if not scheme:
+                        scheme = "https" if str(finding.port) == "443" else "http"
+                    port = finding.port or ""
+                    if port:
+                        url_text = f"{scheme}://{finding.host}:{port}{finding.endpoint}"
+                    else:
+                        url_text = f"{scheme}://{finding.host}{finding.endpoint}"
                 if url_text:
                     url_para = doc.add_paragraph()
                     url_para.add_run(f"URL: {url_text}").bold = True
+
+                # Embed web screenshots inline with first finding for this host
+                if finding.host not in shown_ss:
+                    shown_ss.add(finding.host)
+                    host = host_map.get(finding.host)
+                    if host and getattr(host, "screenshots", None):
+                        ss_dir = reports_dir.parent / "ips" / finding.host / "web" / "screenshots"
+                        for sc in host.screenshots:
+                            png = ss_dir / sc.filename
+                            if not png.is_file():
+                                continue
+                            caption = sc.url
+                            if sc.title:
+                                caption += f" — {sc.title}"
+                            ss_para = doc.add_paragraph()
+                            ss_para.add_run(f"Web Screenshot: {caption}").bold = True
+                            try:
+                                doc.add_picture(str(png), width=Inches(5.5))
+                            except Exception:
+                                log.debug("Could not embed screenshot %s", png)
 
                 # Vulnerability Summary
                 doc.add_heading("Vulnerability Summary", level=3)
@@ -523,7 +620,7 @@ class DocxRenderer:
                     curl_run = curl_para.add_run(finding.curl_command[:500])
                     curl_run.font.size = Pt(9)
 
-                # Evidence (request/response) - truncated
+                # Evidence (request/response) — truncated, small font
                 if finding.request:
                     doc.add_heading("Evidence", level=3)
                     req_text = finding.request[:500]
@@ -532,9 +629,3 @@ class DocxRenderer:
                     req_para = doc.add_paragraph()
                     req_run = req_para.add_run(req_text)
                     req_run.font.size = Pt(8)
-
-            section_num += 1
-
-        doc.add_paragraph()
-        end_para = doc.add_paragraph("END OF DOCUMENT")
-        end_para.alignment = WD_ALIGN_PARAGRAPH.CENTER

@@ -15,8 +15,6 @@ WG._getLoginCSRF = function() {
 };
 
 WG._ensureLoginCSRF = async function() {
-  var existing = WG._getLoginCSRF();
-  if (existing) return existing;
   var res = await fetch(WG.API_BASE + '/auth/csrf/', { credentials: 'include' });
   var data = await res.json().catch(function() { return {}; });
   return data.csrf || data.csrfToken || WG._getLoginCSRF() || '';

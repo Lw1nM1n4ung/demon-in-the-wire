@@ -6,7 +6,7 @@ security, and input validation against the live Docker stack.
 
 Expects Phase 3 to have already created the owner/engineer/viewer accounts.
 
-Usage: python3 qa_security.py --base https://localhost:18443 --results qa-results/phase-5.json
+Usage: python3 qa_security.py --base https://localhost:2006 --results qa-results/phase-5.json
 """
 import argparse, json, subprocess, sys, urllib3
 from pathlib import Path
