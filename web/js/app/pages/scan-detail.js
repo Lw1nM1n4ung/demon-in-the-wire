@@ -109,6 +109,7 @@ WG.renderScanDetail = function(id) {
     '<div class="page-header">' +
       '<div class="page-header-left"><h1>' + esc(scan.name) + '</h1><p>' + esc(scan.target) + ' &mdash; ' + esc(scan.scan_type) + ' scan</p></div>' +
       '<div class="page-header-actions">' +
+        (scan.scan_type === 'phase_based' ? '<button class="btn btn-primary btn-sm" onclick="WG.navigate(\'phase-workflow\',{id:\'' + id + '\'})">Phase Workflow</button>' : '') +
         (scan.status === 'running' ? '<button class="btn btn-danger btn-sm" onclick="WG.cancelScan(\'' + id + '\')">Cancel Scan</button>' : '') +
         (scan.status === 'completed' ? '<button class="btn btn-secondary btn-sm" onclick="WG.toast(\'Rescan queued\',\'info\')">Rescan</button>' : '') +
       '</div>' +

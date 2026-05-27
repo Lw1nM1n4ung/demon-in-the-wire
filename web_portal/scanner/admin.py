@@ -11,6 +11,7 @@ from .models import (
     ReportConfig,
     ScanPolicy,
     ScheduledScan,
+    PhaseRun,
 )
 
 admin.site.register(User, UserAdmin)
@@ -60,6 +61,13 @@ class ScanPolicyAdmin(admin.ModelAdmin):
 class ScheduledScanAdmin(admin.ModelAdmin):
     list_display = ["name", "target", "frequency", "enabled", "next_run"]
     list_filter = ["frequency", "enabled"]
+
+
+@admin.register(PhaseRun)
+class PhaseRunAdmin(admin.ModelAdmin):
+    list_display = ["scan", "phase", "sequence", "status", "started_at", "duration_seconds"]
+    list_filter = ["phase", "status"]
+    search_fields = ["scan__name"]
 
 
 # ── AD Recon ──

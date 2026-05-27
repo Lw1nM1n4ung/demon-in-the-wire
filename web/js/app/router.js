@@ -59,6 +59,7 @@ WG._ROUTES = [
   { page: 'phase-webdetect',  path: '/phase/webdetect' },
   { page: 'phase-webcrawl',   path: '/phase/webcrawl' },
   { page: 'phase-enumeration', path: '/phase/enumeration' },
+  { page: 'phase-workflow',  path: '/phase-workflow/:id' },
 ];
 
 WG._routeToPath = function(page, params) {
@@ -201,6 +202,7 @@ WG.render = function() {
     'phase-webdetect':  function() { return WG.renderPhaseView('webdetect'); },
     'phase-webcrawl':   function() { return WG.renderPhaseView('webcrawl'); },
     'phase-enumeration': function() { return WG.renderPhaseView('enumeration'); },
+    'phase-workflow':  function() { return WG.renderPhaseWorkflow(route.id); },
   };
 
   var renderFn = pages[route.page] || WG.renderDashboard;

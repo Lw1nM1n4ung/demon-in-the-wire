@@ -13,6 +13,7 @@ from ..models import (
     Screenshot,
     ExploitMatch,
     ScanArtifact,
+    PhaseRun,
 )
 from ..policy_tools import normalize_policy_tools
 
@@ -47,6 +48,21 @@ class AssetSerializer(AssetListSerializer):
 
     class Meta(AssetListSerializer.Meta):
         pass
+
+
+class PhaseRunSerializer(serializers.ModelSerializer):
+    phase_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PhaseRun
+        fields = [
+            "id", "scan", "phase", "phase_label", "sequence", "status",
+            "started_at", "completed_at", "duration_seconds", "error_message",
+            "retry_count", "tool_config", "output_summary",
+        ]
+
+    def get_phase_label(self, obj):
+        return dict(PhaseRun.PHASE_CHOICES).get(obj.phase, obj.phase)
 
 
 class PortSerializer(serializers.ModelSerializer):
@@ -220,6 +236,7 @@ class ScanSerializer(serializers.ModelSerializer):
     current_phase = serializers.CharField(read_only=True)
     hosts_scanned = serializers.IntegerField(read_only=True)
     hosts_total = serializers.IntegerField(read_only=True)
+    phase_runs = PhaseRunSerializer(many=True, read_only=True)
 
     class Meta:
         model = Scan
@@ -262,8 +279,10 @@ class ScanCreateSerializer(serializers.Serializer):
     target = serializers.CharField(max_length=2000)
     name = serializers.CharField(max_length=255, required=False, default="")
     scan_type = serializers.ChoiceField(
-        choices=["full", "quick", "port", "web", "service"], default="full"
+        choices=["full", "quick", "port", "web", "service", "discovery", "phase_based"],
+        default="full",
     )
+    phases = serializers.JSONField(required=False, default=list)
     parallelism = serializers.IntegerField(default=10, min_value=1, max_value=100)
     timeout = serializers.IntegerField(default=3600, min_value=60, max_value=86400)
     report_formats = serializers.CharField(default="dashboard,html,docx,xlsx")

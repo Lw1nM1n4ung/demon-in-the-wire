@@ -1,5 +1,6 @@
 from django.db.models import Count
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
@@ -17,6 +18,7 @@ from ..models import (
     Screenshot as DBScreenshot,
     ExploitMatch,
     ScanArtifact,
+    PhaseRun,
 )
 from ..policy_tools import normalize_policy_tools
 
@@ -97,6 +99,7 @@ from ..serializers import (
     ExploitMatchSerializer,
     ScanArtifactSerializer,
     ScanArtifactListSerializer,
+    PhaseRunSerializer,
 )
 
 
@@ -116,6 +119,7 @@ class ScanViewSet(viewsets.ModelViewSet):
         return ScanSerializer
 
     MAX_CONCURRENT_SCANS = 5
+    MAX_CONCURRENT_DISCOVERY = 3
 
     def create(self, request):
         serializer = ScanCreateSerializer(data=request.data)
@@ -131,6 +135,20 @@ class ScanViewSet(viewsets.ModelViewSet):
                 {"error": f"Maximum {self.MAX_CONCURRENT_SCANS} concurrent scans allowed."},
                 status=429,
             )
+
+        # Discovery scans have a tighter concurrency limit — they fan out to
+        # hundreds of parallel probes and can saturate the worker's network I/O.
+        if data["scan_type"] == "discovery":
+            disco_running = Scan.objects.filter(
+                created_by=request.user,
+                scan_type="discovery",
+                status__in=("pending", "running"),
+            ).count()
+            if disco_running >= self.MAX_CONCURRENT_DISCOVERY:
+                return Response(
+                    {"error": f"Maximum {self.MAX_CONCURRENT_DISCOVERY} concurrent discovery scans allowed."},
+                    status=429,
+                )
 
         import re
 
@@ -178,13 +196,24 @@ class ScanViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
 
-        # Launch Celery task
-        from scanner.tasks import run_scan
+        # Launch Celery task — discovery scans use a lightweight task
+        # that only calls discover_hosts(), skipping port/vuln/enum phases.
+        # Phase-based scans don't auto-dispatch — the frontend calls
+        # init_phases + run_phase after creation.
+        if data["scan_type"] == "phase_based":
+            pass  # scan stays pending; frontend drives the workflow
+        elif data["scan_type"] == "discovery":
+            from scanner.tasks.discovery import run_discovery_scan
 
-        task = run_scan.delay(str(scan.id))
-        scan.celery_task_id = task.id
-        scan.status = "running"
-        scan.save(update_fields=["celery_task_id", "status"])
+            task = run_discovery_scan.delay(str(scan.id))
+        else:
+            from scanner.tasks import run_scan
+
+            task = run_scan.delay(str(scan.id))
+        if data["scan_type"] != "phase_based":
+            scan.celery_task_id = task.id
+            scan.status = "running"
+            scan.save(update_fields=["celery_task_id", "status"])
 
         return Response(ScanSerializer(scan).data, status=status.HTTP_201_CREATED)
 
@@ -216,6 +245,70 @@ class ScanViewSet(viewsets.ModelViewSet):
 
         task = generate_report.delay(str(scan.id), formats=formats)
         return Response({"task_id": task.id, "status": "queued"})
+
+    @action(detail=True, methods=["post"])
+    def retry(self, request, pk=None):
+        """Retry a failed or cancelled discovery scan."""
+        scan = self.get_object()
+        if scan.status not in ("failed", "cancelled"):
+            return Response(
+                {"error": "Only failed or cancelled scans can be retried"},
+                status=400,
+            )
+        scan.status = "pending"
+        scan.error_message = ""
+        scan.save()
+        if scan.scan_type == "discovery":
+            from scanner.tasks.discovery import run_discovery_scan
+
+            task = run_discovery_scan.delay(str(scan.id))
+        else:
+            from scanner.tasks import run_scan
+
+            task = run_scan.delay(str(scan.id))
+        scan.celery_task_id = task.id
+        scan.status = "running"
+        scan.save(update_fields=["celery_task_id", "status"])
+        return Response(ScanSerializer(scan).data)
+
+    @action(detail=True, methods=["get"])
+    def discovery_export(self, request, pk=None):
+        """Export discovery results as CSV or JSON."""
+        scan = self.get_object()
+        fmt = request.query_params.get("export", "json").lower()
+        if fmt not in ("json", "csv"):
+            return Response({"error": "Export format must be 'json' or 'csv'"}, status=400)
+
+        hosts = scan.hosts.filter(status="up").values(
+            "ip", "hostname", "mac_address", "vendor", "current_phase"
+        ).order_by("ip")
+
+        if fmt == "csv":
+            import csv
+            import io
+
+            buf = io.StringIO()
+            writer = csv.DictWriter(
+                buf,
+                fieldnames=["ip", "hostname", "mac_address", "vendor", "current_phase"],
+            )
+            writer.writeheader()
+            for h in hosts:
+                writer.writerow(h)
+            return Response(
+                {"csv": buf.getvalue()},
+                headers={
+                    "Content-Disposition": f'attachment; filename="discovery_{scan.id}.csv"'
+                },
+            )
+
+        return Response({
+            "scan_id": str(scan.id),
+            "scan_name": scan.name,
+            "target": scan.target,
+            "hosts_found": scan.hosts_count,
+            "hosts": list(hosts),
+        })
 
     @action(detail=True, methods=["get"])
     def findings(self, request, pk=None):
@@ -454,6 +547,154 @@ class ScanViewSet(viewsets.ModelViewSet):
             "hosts_scanned": scan.hosts_scanned or 0,
             "live_hosts": hosts.count(),
             "hosts": list(hosts),
+        })
+
+    # ── Phase-Based Scan endpoints ──────────────────────────────────────
+
+    @action(detail=True, methods=["post"])
+    def init_phases(self, request, pk=None):
+        """Create PhaseRun rows for each enabled phase. Called after scan
+        creation for phase_based scans. Sets scan status to 'paused' so the
+        user can manually step through each phase."""
+        scan = self.get_object()
+        if scan.scan_type != "phase_based":
+            return Response({"error": "Not a phase-based scan"}, status=400)
+        if PhaseRun.objects.filter(scan=scan).exists():
+            return Response({"error": "Phases already initialized"}, status=400)
+
+        enabled = request.data.get("phases", [p[0] for p in PhaseRun.PHASE_CHOICES])
+        enabled_tools = request.data.get("enabled_tools", {})
+
+        runs = []
+        for idx, phase in enumerate(enabled):
+            if phase not in dict(PhaseRun.PHASE_CHOICES):
+                continue
+            runs.append(PhaseRun(
+                scan=scan, phase=phase, sequence=idx,
+                status="pending", tool_config=enabled_tools.get(phase, {}),
+            ))
+        if not runs:
+            return Response({"error": "No valid phases"}, status=400)
+
+        PhaseRun.objects.bulk_create(runs)
+        scan.phases = enabled
+        scan.current_phase_index = -1
+        scan.status = "paused"
+        scan.save(update_fields=["phases", "current_phase_index", "status"])
+        serializer = PhaseRunSerializer(PhaseRun.objects.filter(scan=scan), many=True)
+        return Response(serializer.data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def run_phase(self, request, pk=None):
+        """Dispatch a Celery task for a specific phase, or the next pending
+        phase if no phase name is provided."""
+        scan = self.get_object()
+        phase_name = request.data.get("phase")
+        if phase_name:
+            phase_run = get_object_or_404(PhaseRun, scan=scan, phase=phase_name)
+        else:
+            phase_run = PhaseRun.objects.filter(
+                scan=scan, status="pending").order_by("sequence").first()
+            if not phase_run:
+                return Response({"error": "No pending phases"}, status=400)
+            phase_name = phase_run.phase
+
+        if phase_run.status == "running":
+            return Response({"error": "Phase already running"}, status=400)
+
+        from scanner.tasks.phase_scan import run_phase as _task
+
+        t = _task.delay(str(scan.id), phase_name)
+        phase_run.celery_task_id = t.id
+        phase_run.save(update_fields=["celery_task_id"])
+        return Response({"phase": phase_name, "task_id": t.id, "status": "started"})
+
+    @action(detail=True, methods=["post"])
+    def retry_phase(self, request, pk=None):
+        """Reset a failed or cancelled phase to pending for re-execution."""
+        scan = self.get_object()
+        phase_name = request.data.get("phase")
+        if not phase_name:
+            return Response({"error": "phase is required"}, status=400)
+        phase_run = get_object_or_404(PhaseRun, scan=scan, phase=phase_name)
+        if phase_run.status not in ("failed", "cancelled"):
+            return Response(
+                {"error": f"Cannot retry phase with status '{phase_run.status}'"},
+                status=400,
+            )
+        phase_run.status = "pending"
+        phase_run.retry_count += 1
+        phase_run.error_message = ""
+        phase_run.save(update_fields=["status", "retry_count", "error_message"])
+        return Response(PhaseRunSerializer(phase_run).data)
+
+    @action(detail=True, methods=["post"])
+    def skip_phase(self, request, pk=None):
+        """Mark a pending phase as skipped."""
+        scan = self.get_object()
+        phase_name = request.data.get("phase")
+        if not phase_name:
+            return Response({"error": "phase is required"}, status=400)
+        phase_run = get_object_or_404(PhaseRun, scan=scan, phase=phase_name)
+        if phase_run.status != "pending":
+            return Response(
+                {"error": f"Cannot skip phase with status '{phase_run.status}'"},
+                status=400,
+            )
+        phase_run.status = "skipped"
+        phase_run.save(update_fields=["status"])
+        return Response(PhaseRunSerializer(phase_run).data)
+
+    @action(detail=True, methods=["get"])
+    def phase_status(self, request, pk=None):
+        """Return all PhaseRun rows plus scan-level progress for polling."""
+        scan = self.get_object()
+        phase_runs = PhaseRun.objects.filter(scan=scan).order_by("sequence")
+        return Response({
+            "scan_id": str(scan.id),
+            "scan_name": scan.name,
+            "scan_status": scan.status,
+            "current_phase_index": scan.current_phase_index,
+            "phases_config": scan.phases,
+            "hosts_scanned": scan.hosts_scanned or 0,
+            "hosts_total": scan.hosts_total or 0,
+            "findings_count": scan.findings_count or 0,
+            "phases": PhaseRunSerializer(phase_runs, many=True).data,
+        })
+
+    @action(detail=True, methods=["get"])
+    def phase_export(self, request, pk=None):
+        """Export per-phase or combined results in JSON or CSV format."""
+        import csv
+        import io
+
+        scan = self.get_object()
+        fmt = request.query_params.get("fmt", "json")
+        phase_name = request.query_params.get("phase")
+
+        findings = Finding.objects.filter(scan=scan)
+        if phase_name:
+            # Best-effort: findings from hosts discovered in that phase
+            phase_run = PhaseRun.objects.filter(scan=scan, phase=phase_name).first()
+            if phase_run and phase_run.output_summary.get("findings"):
+                findings = findings.filter(id__in=phase_run.output_summary["findings"])
+
+        if fmt == "csv":
+            stream = io.StringIO()
+            writer = csv.writer(stream)
+            writer.writerow(["severity", "title", "host_ip", "port", "cve", "cvss", "endpoint"])
+            for f in findings.values_list("severity", "title", "host_ip", "port", "cve", "cvss", "endpoint"):
+                writer.writerow(f)
+            return HttpResponse(
+                stream.getvalue(), content_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{scan.name}_phase_export.csv"'},
+            )
+
+        return Response({
+            "scan_id": str(scan.id),
+            "scan_name": scan.name,
+            "phase": phase_name,
+            "findings": FindingListSerializer(findings, many=True).data,
         })
 
 
@@ -964,7 +1205,11 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
         from scanner.tasks import run_scan, _compute_deadline
 
         deadline = _compute_deadline(schedule.stop_time) if schedule.stop_time else None
-        task = run_scan.delay(str(scan.id))
+        if scan.scan_type == "discovery":
+            from scanner.tasks.discovery import run_discovery_scan
+            task = run_discovery_scan.delay(str(scan.id))
+        else:
+            task = run_scan.delay(str(scan.id))
         scan.celery_task_id = task.id
         scan.status = "running"
         scan.deadline = deadline

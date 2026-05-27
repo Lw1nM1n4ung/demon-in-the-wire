@@ -22,6 +22,28 @@ WG.phaseProgress = function(s) {
   return Math.min(99, s.hosts_scanned || 0);
 };
 
+/* Weighted progress from PhaseRun statuses for phase-based scans. Each
+ * completed/skipped phase contributes equally. Running phases count as
+ * partial. Returns 0-100. */
+WG.phaseBasedProgress = function(phases) {
+  if (!phases || !phases.length) return 0;
+  var total = phases.length;
+  var done = 0;
+  for (var i = 0; i < phases.length; i++) {
+    if (phases[i].status === 'completed' || phases[i].status === 'skipped') done++;
+  }
+  return Math.round((done / total) * 100);
+};
+
+/* CSS class for phase status badge. */
+WG.phaseStatusBadge = function(status) {
+  var map = {
+    pending: 'info', running: 'running', completed: 'success',
+    failed: 'error', cancelled: 'warning', skipped: 'muted'
+  };
+  return 'badge badge-' + (map[status] || 'info');
+};
+
 /* ── Global elapsed-time ticker ──
  * Updates every .elapsed-live element once per second. Each element carries a
  * data-started-at ISO-8601 timestamp. The ticker runs once and uses a single
@@ -192,6 +214,35 @@ WG.launchScan = function() {
   WG.closeModal('scanModal');
   document.getElementById('scanTarget').value = '';
   document.getElementById('scanName').value = '';
+};
+
+WG.launchDiscoveryScan = function() {
+  var target = (document.getElementById('discTarget').value || '').trim();
+  if (!target) { WG.toast('Target is required', 'error'); return; }
+
+  var scanData = {
+    target: target,
+    name: (document.getElementById('discName').value || '').trim() || target,
+    scan_type: 'discovery',
+    parallelism: parseInt(document.getElementById('discParallelism').value) || 10,
+    timeout: parseInt(document.getElementById('discTimeout').value) || 3600,
+    scan_unresponsive: document.getElementById('discScanUnresponsive').classList.contains('on'),
+    report_formats: 'dashboard',
+  };
+
+  WG.api('/scans/', { method: 'POST', body: JSON.stringify(scanData) }).then(function(res) {
+    if (res && res.id) {
+      WG.toast('Discovery scan launched: ' + target, 'success');
+      WG.invalidateCache('scans');
+      WG.navigate('live-discovery');
+    } else {
+      WG.toast((res && res.error) || 'Discovery scan launch failed', 'error');
+    }
+  });
+
+  WG.closeModal('discoveryModal');
+  document.getElementById('discTarget').value = '';
+  document.getElementById('discName').value = '';
 };
 
 WG.cancelScan = function(id) {

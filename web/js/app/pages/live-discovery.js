@@ -2,7 +2,8 @@
  *
  * Polls running scans for real-time discovery status. Shows live host table,
  * subnet progress, and overall scan progress. Designed for 2-second polling
- * during active discovery phases. */
+ * during active discovery phases. Supports launching standalone discovery
+ * scans, cancel, export, and per-scan-type history. */
 
 WG._discoveryPollTimer = null;
 
@@ -13,30 +14,72 @@ WG._stopDiscoveryPolling = function() {
   }
 };
 
+WG._discoveryExport = function(scanId, format) {
+  var url = '/scans/' + scanId + '/discovery_export/?export=' + format;
+  WG.api(url).then(function(data) {
+    if (!data) { WG.toast('Export failed', 'error'); return; }
+    if (format === 'json') {
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'discovery_' + scanId + '.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } else {
+      var blob = new Blob([data.csv], { type: 'text/csv' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'discovery_' + scanId + '.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+    WG.toast('Exported ' + format.toUpperCase(), 'success');
+  });
+};
+
+WG._discoveryRetry = function(scanId) {
+  WG.api('/scans/' + scanId + '/retry/', { method: 'POST' }).then(function(res) {
+    if (!res) { WG.toast('Retry failed', 'error'); return; }
+    WG.toast('Scan retry started', 'success');
+    WG.invalidateCache('scans');
+    WG.render();
+  });
+};
+
 WG.renderLiveDiscovery = function() {
   var esc = WG.escHtml;
   var scans = WG.getCached('scans', '/scans/') || [];
 
   var discoveryScans = scans.filter(function(s) {
-    return s.status === 'running' && (!s.current_phase || s.current_phase === 'discovery' || s.current_phase === 'pending');
+    return s.status === 'running' || s.scan_type === 'discovery';
   });
 
-  var html = '<div class="page-header"><h1>Live Discovery</h1>';
-  html += '<p>Real-time host discovery — hosts appear as they are found during active scans.</p></div>';
+  var activeDiscovery = discoveryScans.filter(function(s) {
+    return s.status === 'running';
+  });
 
-  if (!discoveryScans.length) {
+  var html = '<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;">';
+  html += '<div><h1>Live Discovery</h1>';
+  html += '<p>Real-time host discovery — hosts appear as they are found during active scans.</p></div>';
+  html += '<button class="btn btn-primary" onclick="WG.openModal(\'discoveryModal\')" style="flex-shrink:0;">';
+  html += '<span>&#9654;</span> New Discovery Scan</button></div>';
+
+  if (!activeDiscovery.length && !discoveryScans.length) {
     html += '<div class="empty-state"><div class="icon">&#8987;</div>';
-    html += '<h3>No active discovery scans</h3>';
-    html += '<p>Launch a scan to see hosts appear here in real time.</p>';
-    html += '<button class="btn btn-primary" onclick="WG.navigate(\'new-scan\')" style="margin-top:16px;">';
-    html += '<span>&#9654;</span> New Scan</button></div>';
+    html += '<h3>No discovery scans yet</h3>';
+    html += '<p>Launch a host discovery scan to find live hosts in your target network.</p>';
+    html += '<button class="btn btn-primary" onclick="WG.openModal(\'discoveryModal\')" style="margin-top:16px;">';
+    html += '<span>&#9654;</span> Start Discovery</button></div>';
     WG._stopDiscoveryPolling();
     return html;
   }
 
-  WG._startDiscoveryPolling();
+  if (activeDiscovery.length) {
+    WG._startDiscoveryPolling();
+  }
 
-  discoveryScans.forEach(function(scan) {
+  /* ── Active discovery scans ── */
+  activeDiscovery.forEach(function(scan) {
     var cacheKey = 'discovery_' + scan.id;
     if (!WG._cache[cacheKey]) {
       WG.api('/scans/' + scan.id + '/discovery/').then(function(data) {
@@ -52,18 +95,19 @@ WG.renderLiveDiscovery = function() {
     }
   });
 
-  discoveryScans.forEach(function(scan) {
+  activeDiscovery.forEach(function(scan) {
     var cacheKey = 'discovery_' + scan.id;
     var data = WG._cache[cacheKey];
 
     html += '<div class="card" style="margin-bottom:24px;">';
-    html += '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">';
+    html += '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
     html += '<div><h3 style="margin:0;">' + esc(scan.name) + '</h3>';
     html += '<span style="color:var(--text-secondary);font-size:0.85rem;">' + esc(scan.target) + '</span></div>';
-    html += '<div style="display:flex;align-items:center;gap:12px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
     html += '<span class="badge badge-running" style="display:flex;align-items:center;gap:4px;">';
     html += '<span class="pulse-dot"></span> Live</span>';
-    html += '<button class="btn btn-sm btn-secondary" onclick="WG.navigate(\'scan\',{id:\'' + esc(scan.id) + '\'})">View Scan</button>';
+    html += '<button class="btn btn-sm btn-secondary" onclick="WG.navigate(\'scan\',{id:\'' + esc(scan.id) + '\'})">View</button>';
+    html += '<button class="btn btn-sm btn-secondary" onclick="if(confirm(\'Cancel this discovery scan?\\n\\nPartial results will be saved.\'))WG.cancelScan(\'' + esc(scan.id) + '\')" style="color:var(--error);">Cancel</button>';
     html += '</div></div>';
 
     html += '<div class="card-body">';
@@ -119,24 +163,46 @@ WG.renderLiveDiscovery = function() {
     html += '</div></div>';
   });
 
-  var recentScans = scans.filter(function(s) {
-    return s.status === 'completed' && s.hosts_count > 0;
-  }).slice(0, 3);
+  /* ── Discovery scan history ── */
+  var historyScans = discoveryScans.filter(function(s) {
+    return s.status !== 'running' && s.scan_type === 'discovery';
+  });
 
-  if (recentScans.length > 0) {
+  if (historyScans.length > 0) {
     html += '<div style="margin-top:32px;">';
-    html += '<h3 style="margin-bottom:12px;">Recently Completed</h3>';
+    html += '<h3 style="margin-bottom:12px;">Discovery Scan History</h3>';
 
-    recentScans.forEach(function(scan) {
-      html += '<div class="card" style="margin-bottom:12px;opacity:0.75;">';
-      html += '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">';
+    historyScans.forEach(function(scan) {
+      var statusClass = scan.status === 'completed' ? 'badge-success' :
+                        scan.status === 'failed' ? 'badge-error' :
+                        scan.status === 'cancelled' ? 'badge-warning' : 'badge-info';
+
+      html += '<div class="card" style="margin-bottom:12px;' + (scan.status !== 'completed' ? 'opacity:0.75;' : '') + '">';
+      html += '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
       html += '<div><h4 style="margin:0;">' + esc(scan.name) + '</h4>';
       html += '<span style="color:var(--text-secondary);font-size:0.8rem;">' + esc(scan.target) + '</span></div>';
-      html += '<div style="display:flex;align-items:center;gap:12px;">';
-      html += '<span class="badge badge-success">Completed</span>';
-      html += '<span style="font-size:0.9rem;color:var(--text-secondary);">' + scan.hosts_count + ' hosts</span>';
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+      html += '<span class="badge ' + statusClass + '">' + esc(scan.status) + '</span>';
+      html += '<span style="font-size:0.85rem;color:var(--text-secondary);">' + (scan.hosts_count || 0) + ' hosts</span>';
+      if (scan.status === 'completed' && scan.hosts_count > 0) {
+        html += '<button class="btn btn-sm btn-secondary" onclick="WG._discoveryExport(\'' + esc(scan.id) + '\',\'json\')" title="Export JSON">JSON</button>';
+        html += '<button class="btn btn-sm btn-secondary" onclick="WG._discoveryExport(\'' + esc(scan.id) + '\',\'csv\')" title="Export CSV">CSV</button>';
+      }
+      if (scan.status === 'failed' || scan.status === 'cancelled') {
+        html += '<button class="btn btn-sm btn-primary" onclick="WG._discoveryRetry(\'' + esc(scan.id) + '\')">Retry</button>';
+      }
       html += '<button class="btn btn-sm btn-secondary" onclick="WG.navigate(\'scan\',{id:\'' + esc(scan.id) + '\'})">View</button>';
-      html += '</div></div></div>';
+      html += '</div></div>';
+
+      if (scan.error_message) {
+        html += '<div class="card-body" style="padding-top:0;"><p style="color:var(--error);font-size:0.82rem;margin:0;">' + esc(scan.error_message.substring(0, 200)) + '</p></div>';
+      }
+
+      if (scan.duration_seconds) {
+        html += '<div class="card-body" style="padding-top:0;"><span style="font-size:0.75rem;color:var(--text-dim);">Duration: ' + WG.fmtDuration(scan.duration_seconds) + ' — ' + WG.fmtDate(scan.created_at) + '</span></div>';
+      }
+
+      html += '</div>';
     });
 
     html += '</div>';
@@ -165,7 +231,7 @@ WG._startDiscoveryPolling = function() {
     }
 
     (scans || []).forEach(function(s) {
-      if (s.status === 'running') {
+      if (s.status === 'running' && (s.scan_type === 'discovery' || s.current_phase === 'discovery' || s.current_phase === 'pending')) {
         var key = 'discovery_' + s.id;
         delete WG._cache[key];
         delete WG._cacheTime[key];

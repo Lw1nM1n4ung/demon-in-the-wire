@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 # Register AD recon task with Celery autodiscover
 from .ad_recon import ad_recon_task  # noqa: F401
+from .discovery import run_discovery_scan  # noqa: F401
+from .phase_scan import run_phase  # noqa: F401
 
 
 @shared_task(bind=True, max_retries=0, time_limit=604800, soft_time_limit=518400)
@@ -904,7 +906,10 @@ def check_scheduled_scans():
         )
 
         deadline = _compute_deadline(sched.stop_time) if sched.stop_time else None
-        task = run_scan.delay(str(scan.id))
+        if scan.scan_type == "discovery":
+            task = run_discovery_scan.delay(str(scan.id))
+        else:
+            task = run_scan.delay(str(scan.id))
         scan.celery_task_id = task.id
         scan.status = "running"
         scan.deadline = deadline
