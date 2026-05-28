@@ -170,7 +170,7 @@ async def run_pipeline(
 
     if on_progress:
         on_progress("discovery", 0, 0)
-    live_ips, mac_vendor_map, dns_hostnames = await discover_hosts(
+    live_ips, mac_vendor_map, dns_hostnames, tool_provenance = await discover_hosts(
         config,
         tree,
         on_progress=_discovery_progress,
@@ -178,7 +178,10 @@ async def run_pipeline(
     )
 
     if on_discovery_complete:
-        on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames)
+        try:
+            on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames, tool_provenance)
+        except TypeError:
+            on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames)
 
     if not live_ips:
         log.warning("No live hosts discovered -- nothing to scan")

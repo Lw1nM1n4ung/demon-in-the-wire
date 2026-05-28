@@ -210,6 +210,7 @@ class HostListSerializer(serializers.ModelSerializer):
             "scan",
             "screenshot_count",
             "thumbnail_url",
+            "discovered_by",
         ]
 
     def get_thumbnail_url(self, obj):
@@ -258,6 +259,7 @@ class ScanListSerializer(serializers.ModelSerializer):
             "target",
             "scan_type",
             "status",
+            "started_at",
             "hosts_count",
             "findings_count",
             "critical_count",

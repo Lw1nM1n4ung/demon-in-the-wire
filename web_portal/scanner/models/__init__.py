@@ -247,6 +247,7 @@ class Host(models.Model):
     findings_count = models.IntegerField(default=0)
     web_endpoints = models.JSONField(default=list)
     web_titles = models.JSONField(default=dict)
+    discovered_by = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["ip"]

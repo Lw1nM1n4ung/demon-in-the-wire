@@ -134,7 +134,11 @@ def run_scan(self, scan_id):
                                 [phase, done, _scan_id_hex],
                             )
                     elif action == "discovery":
-                        _, live_ips, mac_vendor_map, dns_hostnames = item
+                        if len(item) >= 5:
+                            _, live_ips, mac_vendor_map, dns_hostnames, tool_provenance = item
+                        else:
+                            _, live_ips, mac_vendor_map, dns_hostnames = item
+                            tool_provenance = {}
                         # Use get_or_create — some hosts may already exist
                         # from incremental subnet_hosts creation.
                         for ip in live_ips:
@@ -144,6 +148,7 @@ def run_scan(self, scan_id):
                                 "vendor": vendor or "",
                                 "status": "up",
                                 "ports_count": 0,
+                                "discovered_by": list(tool_provenance.get(ip, [])),
                             }
                             # Apply DNS PTR hostname as fallback if no hostname set yet
                             dns_name = dns_hostnames.get(ip, "")
@@ -163,7 +168,11 @@ def run_scan(self, scan_id):
                         )
                         logger.info("Discovery finalized: %d host(s) total", len(live_ips))
                     elif action == "subnet_hosts":
-                        _, new_ips, mac_updates = item
+                        if len(item) >= 4:
+                            _, new_ips, mac_updates, tool_provenance = item
+                        else:
+                            _, new_ips, mac_updates = item
+                            tool_provenance = {}
                         # Create Host records for newly discovered IPs.
                         for ip in new_ips:
                             mac, vendor = mac_updates.get(ip, ("", ""))
@@ -175,6 +184,8 @@ def run_scan(self, scan_id):
                                     "vendor": vendor or "",
                                     "status": "up",
                                     "ports_count": 0,
+                                "discovered_by": list(tool_provenance.get(ip, [])),
+                                    "discovered_by": list(tool_provenance.get(ip, [])),
                                 },
                             )
                         # Apply MAC/vendor updates for IPs that just got
@@ -342,10 +353,10 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None) -> None:
+        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None, tool_provenance=None) -> None:
             try:
                 _progress_queue.put_nowait(
-                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {})
+                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {}, tool_provenance or {})
                 )
             except Exception:
                 pass
@@ -356,9 +367,9 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_subnet_complete(new_ips, mac_updates) -> None:
+        def _on_subnet_complete(new_ips, mac_updates, tool_provenance=None) -> None:
             try:
-                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates))
+                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates, tool_provenance or {}))
             except Exception:
                 pass
 

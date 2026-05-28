@@ -1,0 +1,3 @@
+FROM callmedemon/wireghost:worker
+COPY src/ /app/src/
+COPY web_portal/ /app/

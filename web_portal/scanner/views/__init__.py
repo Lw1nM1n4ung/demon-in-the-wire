@@ -122,6 +122,7 @@ class ScanViewSet(viewsets.ModelViewSet):
     MAX_CONCURRENT_DISCOVERY = 3
 
     def create(self, request):
+        from django.utils import timezone
         serializer = ScanCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -212,8 +213,9 @@ class ScanViewSet(viewsets.ModelViewSet):
             task = run_scan.delay(str(scan.id))
         if data["scan_type"] != "phase_based":
             scan.celery_task_id = task.id
+            scan.started_at = timezone.now()
             scan.status = "running"
-            scan.save(update_fields=["celery_task_id", "status"])
+            scan.save(update_fields=["celery_task_id", "status", "started_at"])
 
         return Response(ScanSerializer(scan).data, status=status.HTTP_201_CREATED)
 
@@ -249,6 +251,7 @@ class ScanViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def retry(self, request, pk=None):
         """Retry a failed or cancelled discovery scan."""
+        from django.utils import timezone
         scan = self.get_object()
         if scan.status not in ("failed", "cancelled"):
             return Response(
@@ -266,9 +269,10 @@ class ScanViewSet(viewsets.ModelViewSet):
             from scanner.tasks import run_scan
 
             task = run_scan.delay(str(scan.id))
+        scan.started_at = timezone.now()
         scan.celery_task_id = task.id
         scan.status = "running"
-        scan.save(update_fields=["celery_task_id", "status"])
+        scan.save(update_fields=["celery_task_id", "status", "started_at"])
         return Response(ScanSerializer(scan).data)
 
     @action(detail=True, methods=["get"])
@@ -280,7 +284,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             return Response({"error": "Export format must be 'json' or 'csv'"}, status=400)
 
         hosts = scan.hosts.filter(status="up").values(
-            "ip", "hostname", "mac_address", "vendor", "current_phase"
+            "ip", "hostname", "mac_address", "vendor", "current_phase", "discovered_by"
         ).order_by("ip")
 
         if fmt == "csv":
@@ -534,7 +538,7 @@ class ScanViewSet(viewsets.ModelViewSet):
         """Live host discovery status — hosts found so far and subnet progress."""
         scan = self.get_object()
         hosts = scan.hosts.filter(status="up").values(
-            "ip", "hostname", "mac_address", "vendor", "current_phase"
+            "ip", "hostname", "mac_address", "vendor", "current_phase", "discovered_by"
         ).order_by("ip")
 
         return Response({
@@ -1210,12 +1214,12 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
             task = run_discovery_scan.delay(str(scan.id))
         else:
             task = run_scan.delay(str(scan.id))
+        from django.utils import timezone
         scan.celery_task_id = task.id
         scan.status = "running"
         scan.deadline = deadline
-        scan.save(update_fields=["celery_task_id", "status", "deadline"])
-
-        from django.utils import timezone
+        scan.started_at = timezone.now()
+        scan.save(update_fields=["celery_task_id", "status", "deadline", "started_at"])
 
         schedule.last_run = timezone.now()
         schedule.save(update_fields=["last_run"])

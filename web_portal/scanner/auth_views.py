@@ -1439,6 +1439,8 @@ def tokens_revoke(request, token_id):
 
 
 @api_view(["GET", "PUT"])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
 def notifications_config(request):
     """Site-wide Telegram config.
 
@@ -1497,6 +1499,8 @@ def notifications_config(request):
 
 
 @api_view(["POST"])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
 def notifications_test(request):
     """Send a test Telegram message. Body: ``{"target": "shared"|"self"}``.
 
@@ -1635,6 +1639,8 @@ def container_processes(request):
 
 
 @api_view(["POST"])
+@authentication_classes([CsrfExemptAuth])
+@permission_classes([AllowAny])
 def telegram_link_code(request):
     """Generate a 6-digit one-time code for Telegram account linking."""
     if not request.user.is_authenticated:
