@@ -99,15 +99,24 @@ WG.renderLiveDiscovery = function() {
       } else {
         html += '<div style="overflow-x:auto;"><table class="table">';
         html += '<thead><tr>';
-        html += '<th>IP Address</th><th>Hostname</th><th>MAC Address</th><th>Vendor</th><th>Phase</th>';
+        html += '<th>IP Address</th><th>Hostname</th><th>MAC Address</th><th>Vendor</th><th>Method</th><th>Phase</th>';
         html += '</tr></thead><tbody>';
 
         hosts.forEach(function(h) {
+          var method = h.discovery_method || '';
+          var methodBadge = '';
+          if (method === 'nmap') methodBadge = '<span style="font-size:0.6rem;padding:1px 6px;border-radius:3px;background:rgba(59,130,246,0.15);color:#60a5fa;">nmap</span>';
+          else if (method === 'fping') methodBadge = '<span style="font-size:0.6rem;padding:1px 6px;border-radius:3px;background:rgba(52,211,153,0.15);color:#34d399;">fping</span>';
+          else if (method === 'fping_unreachable') methodBadge = '<span style="font-size:0.6rem;padding:1px 6px;border-radius:3px;background:rgba(251,191,36,0.15);color:#fbbf24;">unreachable</span>';
+          else if (method === 'arp') methodBadge = '<span style="font-size:0.6rem;padding:1px 6px;border-radius:3px;background:rgba(168,85,247,0.15);color:#a855f7;">ARP</span>';
+          else methodBadge = '<span style="color:var(--text-dim);font-size:0.75rem;">—</span>';
+
           html += '<tr>';
           html += '<td><code style="font-size:0.9rem;">' + esc(h.ip) + '</code></td>';
           html += '<td>' + (h.hostname ? esc(h.hostname) : '<span style="color:var(--text-muted);">—</span>') + '</td>';
           html += '<td><code style="font-size:0.8rem;">' + (h.mac_address ? esc(h.mac_address) : '<span style="color:var(--text-muted);">—</span>') + '</code></td>';
           html += '<td>' + (h.vendor ? esc(h.vendor) : '<span style="color:var(--text-muted);">—</span>') + '</td>';
+          html += '<td>' + methodBadge + '</td>';
           html += '<td><span class="badge badge-info" style="text-transform:capitalize;">' + esc(h.current_phase || 'discovery') + '</span></td>';
           html += '</tr>';
         });

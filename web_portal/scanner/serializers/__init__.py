@@ -165,6 +165,7 @@ class HostSerializer(serializers.ModelSerializer):
             "current_phase",
             "mac_address",
             "vendor",
+            "discovery_method",
             "ports_count",
             "findings_count",
             "web_endpoints",
@@ -189,6 +190,7 @@ class HostListSerializer(serializers.ModelSerializer):
             "current_phase",
             "mac_address",
             "vendor",
+            "discovery_method",
             "ports_count",
             "findings_count",
             "scan",
@@ -264,6 +266,7 @@ class ScanCreateSerializer(serializers.Serializer):
     scan_type = serializers.ChoiceField(
         choices=["full", "quick", "port", "web", "service"], default="full"
     )
+    port_range = serializers.CharField(max_length=500, default="1-65535")
     parallelism = serializers.IntegerField(default=10, min_value=1, max_value=100)
     timeout = serializers.IntegerField(default=3600, min_value=60, max_value=86400)
     report_formats = serializers.CharField(default="dashboard,html,docx,xlsx")

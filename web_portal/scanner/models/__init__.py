@@ -163,6 +163,7 @@ class Scan(models.Model):
     name = models.CharField(max_length=255)
     target = models.CharField(max_length=2000)
     scan_type = models.CharField(max_length=20, choices=SCAN_TYPE_CHOICES, default="full")
+    port_range = models.CharField(max_length=500, default="1-65535")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     current_phase = models.CharField(max_length=20, default="pending")
     hosts_scanned = models.IntegerField(default=0)
@@ -185,6 +186,11 @@ class Scan(models.Model):
     enum4linux = models.BooleanField(default=True)
     skip_nikto = models.BooleanField(default=False)
     skip_netexec = models.BooleanField(default=False)
+    skip_tls_audit = models.BooleanField(default=False)
+    skip_snmp_enum = models.BooleanField(default=False)
+    skip_nfs_enum = models.BooleanField(default=False)
+    skip_ldap_enum = models.BooleanField(default=False)
+    skip_web_crawl = models.BooleanField(default=False)
 
     # Results
     hosts_count = models.IntegerField(default=0)
@@ -236,6 +242,7 @@ class Host(models.Model):
     current_phase = models.CharField(max_length=20, default="discovery")
     mac_address = models.CharField(max_length=17, blank=True)
     vendor = models.CharField(max_length=255, blank=True)
+    discovery_method = models.CharField(max_length=30, blank=True, default="")
     ports_count = models.IntegerField(default=0)
     findings_count = models.IntegerField(default=0)
     web_endpoints = models.JSONField(default=list)

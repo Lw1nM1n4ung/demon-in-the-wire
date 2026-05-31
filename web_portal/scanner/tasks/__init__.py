@@ -56,6 +56,8 @@ def run_scan(self, scan_id):
         config = ScanConfig.load(
             target=scan.target,
             parallelism=scan.parallelism,
+            port_range=scan.port_range,
+            scan_type=scan.scan_type,
             tool_timeout=scan.timeout,
             report_formats=scan.report_formats.split(","),
             version_detect=scan.version_detect,
@@ -69,6 +71,11 @@ def run_scan(self, scan_id):
             skip_enum4linux=not scan.enum4linux,
             skip_nikto=scan.skip_nikto,
             skip_netexec=scan.skip_netexec,
+            skip_tls_audit=scan.skip_tls_audit,
+            skip_snmp_enum=scan.skip_snmp_enum,
+            skip_nfs_enum=scan.skip_nfs_enum,
+            skip_ldap_enum=scan.skip_ldap_enum,
+            skip_web_crawl=scan.skip_web_crawl,
             output_dir=str(base_output),
         )
 
@@ -132,14 +139,16 @@ def run_scan(self, scan_id):
                                 [phase, done, _scan_id_hex],
                             )
                     elif action == "discovery":
-                        _, live_ips, mac_vendor_map, dns_hostnames = item
+                        _, live_ips, mac_vendor_map, dns_hostnames, method_map = item
                         # Use get_or_create — some hosts may already exist
                         # from incremental subnet_hosts creation.
                         for ip in live_ips:
                             mac, vendor = mac_vendor_map.get(ip, ("", ""))
+                            method = method_map.get(ip, "")
                             defaults = {
                                 "mac_address": mac or "",
                                 "vendor": vendor or "",
+                                "discovery_method": method,
                                 "status": "up",
                                 "ports_count": 0,
                             }
@@ -149,11 +158,15 @@ def run_scan(self, scan_id):
                                 host_obj = _DBHost.objects.filter(scan_id=scan_id, ip=ip).first()
                                 if host_obj and not host_obj.hostname:
                                     defaults["hostname"] = dns_name
-                            _DBHost.objects.get_or_create(
+                            host_obj, created = _DBHost.objects.get_or_create(
                                 scan_id=scan_id,
                                 ip=ip,
                                 defaults=defaults,
                             )
+                            if not created and method:
+                                _DBHost.objects.filter(scan_id=scan_id, ip=ip).update(
+                                    discovery_method=method
+                                )
                         # Set final counts (atomic correction after incremental adds)
                         _Scan.objects.filter(id=scan_id).update(
                             hosts_count=len(live_ips),
@@ -161,20 +174,26 @@ def run_scan(self, scan_id):
                         )
                         logger.info("Discovery finalized: %d host(s) total", len(live_ips))
                     elif action == "subnet_hosts":
-                        _, new_ips, mac_updates = item
+                        _, new_ips, mac_updates, method_updates = item
                         # Create Host records for newly discovered IPs.
                         for ip in new_ips:
                             mac, vendor = mac_updates.get(ip, ("", ""))
-                            _DBHost.objects.get_or_create(
+                            method = method_updates.get(ip, "")
+                            host_obj, created = _DBHost.objects.get_or_create(
                                 scan_id=scan_id,
                                 ip=ip,
                                 defaults={
                                     "mac_address": mac or "",
                                     "vendor": vendor or "",
+                                    "discovery_method": method,
                                     "status": "up",
                                     "ports_count": 0,
                                 },
                             )
+                            if not created and method:
+                                _DBHost.objects.filter(scan_id=scan_id, ip=ip).update(
+                                    discovery_method=method
+                                )
                         # Apply MAC/vendor updates for IPs that just got
                         # ARP data (may include IPs discovered by earlier
                         # subnets via nmap/fping that only now got L2 data).
@@ -340,10 +359,10 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None) -> None:
+        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None, method_map=None) -> None:
             try:
                 _progress_queue.put_nowait(
-                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {})
+                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {}, method_map or {})
                 )
             except Exception:
                 pass
@@ -354,9 +373,9 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_subnet_complete(new_ips, mac_updates) -> None:
+        def _on_subnet_complete(new_ips, mac_updates, method_updates=None) -> None:
             try:
-                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates))
+                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates, method_updates or {}))
             except Exception:
                 pass
 
@@ -556,6 +575,7 @@ def _persist_results(scan, report):
             status=h.status or "up",
             mac_address=getattr(h, "mac_address", "") or "",
             vendor=getattr(h, "vendor", "") or "",
+            discovery_method=getattr(h, "discovery_method", "") or "",
             ports_count=len(h.open_ports),
             findings_count=0,  # updated below
             web_endpoints=list(getattr(h, "web_endpoints", []) or []),
@@ -886,6 +906,7 @@ def check_scheduled_scans():
             name=f"{sched.name} (scheduled)",
             target=sched.target,
             scan_type=policy.scan_type if policy else sched.scan_type,
+            port_range=policy.port_range if policy else "1-65535",
             parallelism=policy.parallelism if policy else 10,
             timeout=policy.timeout if policy else 3600,
             report_formats=policy.report_formats if policy else "dashboard,docx,xlsx",
@@ -899,6 +920,12 @@ def check_scheduled_scans():
             enum4linux=policy_tools.get("enum4linux", True),
             skip_nikto=not policy_tools.get("nikto", True),
             skip_netexec=not policy_tools.get("netexec", True),
+            scan_unresponsive=policy.scan_unresponsive if policy else False,
+            skip_tls_audit=not policy_tools.get("tls_audit", True) if policy else False,
+            skip_snmp_enum=not policy_tools.get("snmp_enum", True) if policy else False,
+            skip_nfs_enum=not policy_tools.get("nfs_enum", True) if policy else False,
+            skip_ldap_enum=not policy_tools.get("ldap_enum", True) if policy else False,
+            skip_web_crawl=not policy_tools.get("web_crawl", True) if policy else False,
             status="pending",
             created_by=sched.created_by,
         )

@@ -224,6 +224,7 @@ WG._nsLaunch = function() {
 
   var scanData = {
     scan_type: document.getElementById('nsScanType').value,
+    port_range: (document.getElementById('nsPortRange').value || '').trim() || '1-65535',
     parallelism: parseInt(document.getElementById('nsParallelism').value) || 10,
     timeout: parseInt(document.getElementById('nsTimeout').value) || 3600,
     report_formats: document.getElementById('nsReportFmt').value,
@@ -251,9 +252,17 @@ WG._nsLaunch = function() {
         frequency: freq,
         time: time,
         scan_type: scanData.scan_type,
+        port_range: scanData.port_range,
         parallelism: scanData.parallelism,
         timeout: scanData.timeout,
         report_formats: scanData.report_formats,
+        version_detect: scanData.version_detect,
+        os_detect: scanData.os_detect,
+        service_enum: scanData.service_enum,
+        skip_nuclei: scanData.skip_nuclei,
+        skip_nikto: scanData.skip_nikto,
+        skip_netexec: scanData.skip_netexec,
+        enum4linux: scanData.enum4linux,
         enabled: true,
       }) }).then(function() {
         created++;

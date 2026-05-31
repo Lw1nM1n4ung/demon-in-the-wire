@@ -162,6 +162,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             name=safe_name,
             target=safe_target,
             scan_type=data["scan_type"],
+            port_range=data.get("port_range", "1-65535"),
             parallelism=parallelism,
             timeout=timeout,
             report_formats=report_formats,
@@ -174,6 +175,13 @@ class ScanViewSet(viewsets.ModelViewSet):
             enum4linux=data.get("enum4linux", True),
             skip_nikto=data.get("skip_nikto", False),
             skip_netexec=data.get("skip_netexec", False),
+            skip_tls_audit=data.get("skip_tls_audit", False),
+            skip_snmp_enum=data.get("skip_snmp_enum", False),
+            skip_nfs_enum=data.get("skip_nfs_enum", False),
+            skip_ldap_enum=data.get("skip_ldap_enum", False),
+            skip_web_crawl=data.get("skip_web_crawl", False),
+            nuclei_templates=data.get("nuclei_templates", ""),
+            nuclei_default_templates=data.get("nuclei_default_templates", True),
             status="pending",
             created_by=request.user,
         )
@@ -441,7 +449,7 @@ class ScanViewSet(viewsets.ModelViewSet):
         """Live host discovery status — hosts found so far and subnet progress."""
         scan = self.get_object()
         hosts = scan.hosts.filter(status="up").values(
-            "ip", "hostname", "mac_address", "vendor", "current_phase"
+            "ip", "hostname", "mac_address", "vendor", "current_phase", "discovery_method"
         ).order_by("ip")
 
         return Response({
@@ -946,6 +954,7 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
         if schedule.policy:
             p = schedule.policy
             tools = normalize_policy_tools(p.tools)
+            scan.port_range = p.port_range
             scan.parallelism = p.parallelism
             scan.timeout = p.timeout
             scan.report_formats = p.report_formats
@@ -958,7 +967,13 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
             scan.enum4linux = tools.get("enum4linux", True)
             scan.skip_nikto = not tools.get("nikto", True)
             scan.skip_netexec = not tools.get("netexec", True)
+            scan.skip_tls_audit = not tools.get("tls_audit", True)
+            scan.skip_snmp_enum = not tools.get("snmp_enum", True)
+            scan.skip_nfs_enum = not tools.get("nfs_enum", True)
+            scan.skip_ldap_enum = not tools.get("ldap_enum", True)
+            scan.skip_web_crawl = not tools.get("web_crawl", True)
             scan.skip_screenshots = p.skip_screenshots
+            scan.scan_unresponsive = p.scan_unresponsive
             scan.save()
 
         from scanner.tasks import run_scan, _compute_deadline

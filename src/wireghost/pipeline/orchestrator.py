@@ -47,6 +47,15 @@ PHASE_ORDER = [
     "reports",
 ]
 
+# scan_type → phases to skip (individual skip_* flags always take precedence)
+_SCAN_TYPE_SKIP_PHASES: dict[str, set[str]] = {
+    "full": set(),
+    "quick": {"enumeration"},
+    "port": {"webdetect", "webcrawl", "vulnscan", "enumeration"},
+    "web": {"enumeration"},
+    "service": {"webdetect", "webcrawl", "vulnscan"},
+}
+
 
 def _dedup_findings(findings: list[Finding]) -> list[Finding]:
     """Remove duplicate findings across tools based on host:port:vuln identity."""
@@ -69,10 +78,10 @@ def _dedup_findings(findings: list[Finding]) -> list[Finding]:
 async def run_pipeline(
     config: ScanConfig,
     on_progress: Callable[[str, int, int], None] | None = None,
-    on_discovery_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
+    on_discovery_complete: Callable[[list[str], dict[str, tuple[str, str]], dict[str, str], dict[str, str]], None] | None = None,
     on_host_complete: Callable[[Host, list[Finding]], None] | None = None,
     on_host_phase: Callable[[str, str], None] | None = None,
-    on_subnet_complete: Callable[[list[str], dict[str, tuple[str, str]]], None] | None = None,
+    on_subnet_complete: Callable[[list[str], dict[str, tuple[str, str]], dict[str, str]], None] | None = None,
     on_artifact: Callable[[str, str, str, str, str], None] | None = None,
 ) -> ScanReport:
     """Execute the full Wire_Ghost scanning pipeline.
@@ -84,7 +93,7 @@ async def run_pipeline(
     entire pipeline.
 
     If *on_discovery_complete* is provided it is called right after
-    host discovery with the list of live IPs and the MAC/vendor map.
+    host discovery with (live_ips, mac_vendor_map, dns_hostnames, method_map).
 
     If *on_host_complete* is provided it is called after each host
     finishes its full pipeline with the populated Host and its Findings.
@@ -93,8 +102,8 @@ async def run_pipeline(
     to a new phase: ``on_host_phase(ip, phase)``.
 
     If *on_subnet_complete* is provided it is called after each subnet
-    scan during discovery with the list of newly discovered IPs and
-    MAC/vendor updates, enabling incremental host creation in the DB.
+    scan during discovery with (new_ips, mac_updates, method_updates),
+    enabling incremental host creation in the DB.
 
     If *on_artifact* is provided it is called each time a tool writes
     output that should be persisted: ``on_artifact(host_ip, tool, name,
@@ -170,7 +179,7 @@ async def run_pipeline(
 
     if on_progress:
         on_progress("discovery", 0, 0)
-    live_ips, mac_vendor_map, dns_hostnames = await discover_hosts(
+    live_ips, mac_vendor_map, dns_hostnames, method_map = await discover_hosts(
         config,
         tree,
         on_progress=_discovery_progress,
@@ -178,7 +187,7 @@ async def run_pipeline(
     )
 
     if on_discovery_complete:
-        on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames)
+        on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames, method_map)
 
     if not live_ips:
         log.warning("No live hosts discovered -- nothing to scan")
@@ -272,85 +281,80 @@ async def run_pipeline(
         if not host.hostname and ip in dns_hostnames:
             host.hostname = dns_hostnames[ip]
 
+        _skip_phases = _SCAN_TYPE_SKIP_PHASES.get(config.scan_type, set())
+
         if not host.open_ports:
             log.info("[%s] No open ports — skipping web/vuln phases", ip)
-            # Mark all remaining phases done for this host
             for ph in ("webdetect", "webcrawl", "vulnscan", "enumeration"):
                 await _advance_host_phase(ip, ph)
             snmp_findings = await enumerate_snmp(host, config, tree, sem)
             return host, snmp_findings
 
-        # Phase 3b: Web detection
-        await probe_host(host, config, tree, sem)
+        # Phase 3b: Web detection (skipped per scan_type)
+        if "webdetect" not in _skip_phases:
+            await probe_host(host, config, tree, sem)
         await _advance_host_phase(ip, "webdetect")
 
-        # Phase 3c: Web crawl + screenshot (parallel — both need confirmed web endpoints)
-        crawl_result, screenshot_findings = await asyncio.gather(
-            crawl_host(host, config, tree, sem),
-            screenshot_host(host, config, tree, sem),
-            return_exceptions=True,
-        )
+        # Phase 3c: Web crawl + screenshot (skipped per scan_type)
+        crawl_findings: list[Finding] = []
+        screenshot_findings: list[Finding] = []
+        if "webcrawl" not in _skip_phases and host.web_endpoints:
+            crawl_result, ss_result = await asyncio.gather(
+                crawl_host(host, config, tree, sem),
+                screenshot_host(host, config, tree, sem),
+                return_exceptions=True,
+            )
+            if isinstance(crawl_result, list):
+                crawl_findings = crawl_result
+            elif isinstance(crawl_result, BaseException):
+                log.error("[%s] web crawl failed", ip, exc_info=crawl_result)
+            if isinstance(ss_result, list):
+                screenshot_findings = ss_result
+            elif isinstance(ss_result, BaseException):
+                log.error("[%s] screenshot failed", ip, exc_info=ss_result)
         await _advance_host_phase(ip, "webcrawl")
 
-        if isinstance(crawl_result, BaseException):
-            log.error("[%s] web crawl failed", ip, exc_info=crawl_result)
-            crawl_findings = []
-        elif isinstance(crawl_result, list):
-            crawl_findings = crawl_result
-        else:
-            crawl_findings = []
-        if isinstance(screenshot_findings, BaseException):
-            log.error("[%s] screenshot failed", ip, exc_info=screenshot_findings)
-            screenshot_findings = []
-        elif not isinstance(screenshot_findings, list):
-            screenshot_findings = []
-
-        # Phase 3d: Vulnerability scanning (nuclei + nmap NSE vuln + searchsploit + getsploit + nikto + MSF)
-        vuln_result, msf_result = await asyncio.gather(
-            scan_host_vulns(host, config, tree, sem),
-            scan_msf(host, config, tree, sem),
-            return_exceptions=True,
-        )
+        # Phase 3d: Vulnerability scanning (skipped per scan_type)
+        vuln_findings: list[Finding] = []
+        msf_findings: list[Finding] = []
+        if "vulnscan" not in _skip_phases:
+            vuln_result, msf_result = await asyncio.gather(
+                scan_host_vulns(host, config, tree, sem),
+                scan_msf(host, config, tree, sem),
+                return_exceptions=True,
+            )
+            _emit_dir_artifacts(ip, tree.host_vuln_dir(ip), "vulnscan")
+            if isinstance(vuln_result, list):
+                vuln_findings = vuln_result
+            elif isinstance(vuln_result, BaseException):
+                log.error("[%s] vuln scan failed", ip, exc_info=vuln_result)
+            if isinstance(msf_result, list):
+                msf_findings = msf_result
+            elif isinstance(msf_result, BaseException):
+                log.error("[%s] msf scan failed", ip, exc_info=msf_result)
         await _advance_host_phase(ip, "vulnscan")
 
-        _emit_dir_artifacts(ip, tree.host_vuln_dir(ip), "vulnscan")
-
-        if isinstance(vuln_result, BaseException):
-            log.error("[%s] vuln scan failed", ip, exc_info=vuln_result)
-            vuln_findings = []
-        elif isinstance(vuln_result, list):
-            vuln_findings = vuln_result
-        else:
-            vuln_findings = []
-        if isinstance(msf_result, BaseException):
-            log.error("[%s] msf scan failed", ip, exc_info=msf_result)
-            msf_findings = []
-        elif isinstance(msf_result, list):
-            msf_findings = msf_result
-        else:
-            msf_findings = []
-
-        # Phase 3e: Service enumeration (SMB, NetExec, SNMP, NFS, LDAP, TLS, CMS, services)
-        svc_task = (
-            enumerate_services(host, config, tree, sem)
-            if config.service_enum
-            else asyncio.sleep(0, result=[])
-        )
-        enum_results = await asyncio.gather(
-            scan_cms(host, config, tree, sem),
-            svc_task,
-            enumerate_smb(host, config, tree, sem),
-            enumerate_netexec(host, config, tree, sem),
-            audit_tls(host, config, tree, sem),
-            enumerate_snmp(host, config, tree, sem),
-            enumerate_nfs(host, config, tree, sem),
-            enumerate_ldap(host, config, tree, sem),
-            return_exceptions=True,
-        )
+        # Phase 3e: Service enumeration (skipped per scan_type)
+        enum_results: list[Any] = []
+        if "enumeration" not in _skip_phases:
+            svc_task = (
+                enumerate_services(host, config, tree, sem)
+                if config.service_enum
+                else asyncio.sleep(0, result=[])
+            )
+            enum_results = list(await asyncio.gather(
+                scan_cms(host, config, tree, sem),
+                svc_task,
+                enumerate_smb(host, config, tree, sem),
+                enumerate_netexec(host, config, tree, sem),
+                audit_tls(host, config, tree, sem),
+                enumerate_snmp(host, config, tree, sem),
+                enumerate_nfs(host, config, tree, sem),
+                enumerate_ldap(host, config, tree, sem),
+                return_exceptions=True,
+            ))
+            _emit_dir_artifacts(ip, tree.host_dir(ip), "enumeration", recursive=False)
         await _advance_host_phase(ip, "enumeration")
-
-        # Emit top-level host dir files (enum outputs: enum4linux txt, nxc logs, etc.)
-        _emit_dir_artifacts(ip, tree.host_dir(ip), "enumeration", recursive=False)
 
         enum_names = [
             "cms",

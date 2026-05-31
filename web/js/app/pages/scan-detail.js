@@ -117,6 +117,7 @@ WG.renderScanDetail = function(id) {
       '<div class="info-item"><div class="info-label">Status</div><div class="info-value"><span class="status-badge ' + esc(scan.status) + '"><span class="dot"></span> ' + esc(scan.status) + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Target</div><div class="info-value"><span class="host-tag">' + esc(scan.target) + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Type</div><div class="info-value"><span class="tag">' + esc(scan.scan_type) + '</span></div></div>' +
+      '<div class="info-item"><div class="info-label">Port Range</div><div class="info-value mono">' + esc(scan.port_range || '1-65535') + '</div></div>' +
       '<div class="info-item"><div class="info-label">Started</div><div class="info-value mono">' + WG.fmtDate(scan.started_at) + '</div></div>' +
       '<div class="info-item"><div class="info-label">Duration</div><div class="info-value mono">' + (scan.status === 'running' ? '<span class="elapsed-live" data-started-at="' + (scan.started_at || '') + '">' + WG.fmtDuration(scan.elapsed_seconds || 0) + '</span>' : WG.fmtDuration(scan.duration_seconds)) + '</div></div>' +
       '<div class="info-item"><div class="info-label">Phase</div><div class="info-value mono" id="scan-phase-label">' + WG.phaseLabel(phase) + (scan.hosts_scanned && scan.hosts_total ? ' (' + scan.hosts_scanned + '/' + scan.hosts_total + ')' : '') + '</div></div>' +

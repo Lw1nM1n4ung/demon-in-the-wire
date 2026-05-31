@@ -23,6 +23,8 @@ class ScanConfig:
     target: str = ""
     output_dir: Path = field(default_factory=lambda: Path("./output"))
     parallelism: int = 10
+    port_range: str = "1-65535"
+    scan_type: str = "full"
     version_detect: bool = True
     os_detect: bool = True
     service_enum: bool = True
@@ -144,6 +146,8 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "target": "target",
         "output_dir": "output_dir",
         "parallelism": "parallelism",
+        "port_range": "port_range",
+        "scan_type": "scan_type",
         "version_detect": "version_detect",
         "os_detect": "os_detect",
         "service_enum": "service_enum",
@@ -193,6 +197,8 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_TARGET": ("target", str),
         "WIREGHOST_OUTPUT_DIR": ("output_dir", Path),
         "WIREGHOST_PARALLELISM": ("parallelism", int),
+        "WIREGHOST_PORT_RANGE": ("port_range", str),
+        "WIREGHOST_SCAN_TYPE": ("scan_type", str),
         "WIREGHOST_VERSION_DETECT": ("version_detect", bool),
         "WIREGHOST_OS_DETECT": ("os_detect", bool),
         "WIREGHOST_SERVICE_ENUM": ("service_enum", bool),

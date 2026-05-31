@@ -54,6 +54,15 @@ WG.renderHostDetail = function(id) {
       '<div class="info-item"><div class="info-label">Hostname</div><div class="info-value">' + esc(host.hostname || '\u2014') + '</div></div>' +
       '<div class="info-item"><div class="info-label">MAC Address</div><div class="info-value mono">' + esc(host.mac_address || '\u2014') + '</div></div>' +
       '<div class="info-item"><div class="info-label">Vendor</div><div class="info-value">' + esc(host.vendor || '\u2014') + '</div></div>' +
+      (function() {
+        var m = host.discovery_method || '';
+        var badge = '';
+        if (m === 'nmap') badge = '<span style="font-size:0.65rem;padding:2px 8px;border-radius:3px;background:rgba(59,130,246,0.15);color:#60a5fa;">nmap</span>';
+        else if (m === 'fping') badge = '<span style="font-size:0.65rem;padding:2px 8px;border-radius:3px;background:rgba(52,211,153,0.15);color:#34d399;">fping</span>';
+        else if (m === 'fping_unreachable') badge = '<span style="font-size:0.65rem;padding:2px 8px;border-radius:3px;background:rgba(251,191,36,0.15);color:#fbbf24;">unreachable</span>';
+        else if (m === 'arp') badge = '<span style="font-size:0.65rem;padding:2px 8px;border-radius:3px;background:rgba(168,85,247,0.15);color:#a855f7;">ARP</span>';
+        return '<div class="info-item"><div class="info-label">Discovery Method</div><div class="info-value">' + (badge || '<span style="color:var(--text-dim)">\u2014</span>') + '</div></div>';
+      })() +
       '<div class="info-item"><div class="info-label">OS</div><div class="info-value"><span class="tag">' + esc(host.os || '\u2014') + '</span></div></div>' +
       '<div class="info-item"><div class="info-label">Open Ports</div><div class="info-value mono">' + host.ports_count + '</div></div>' +
       '<div class="info-item"><div class="info-label">Findings</div><div class="info-value mono">' + host.findings_count + '</div></div>' +

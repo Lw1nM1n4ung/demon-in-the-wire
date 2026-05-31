@@ -61,6 +61,29 @@ _TCP_DISCOVERY_PORTS = "22,25,53,111,135,139,445,1433,3306,3389,5432,5985,6379,8
 # (common in enterprise environments for DNS, NTP, SNMP).
 _UDP_DISCOVERY_PORTS = "53,123,137,161,500"
 
+# Discovery method priority: lower number = stronger evidence.
+# ARP (Layer 2) is strongest — the host responded on the local segment.
+# nmap TCP/UDP ping is next, then fping ICMP echo reply.
+# fping_unreachable means the gateway knows the host but it blocks ICMP.
+_METHOD_PRIORITY: dict[str, int] = {
+    "arp": 0,
+    "nmap": 1,
+    "fping": 2,
+    "fping_unreachable": 3,
+    "": 99,
+}
+
+
+def _set_method(method_map: dict[str, str], ip: str, method: str) -> None:
+    """Set discovery method for *ip* if not already set or if *method* has higher priority.
+
+    Higher priority = lower _METHOD_PRIORITY value.  ARP evidence (Layer 2)
+    trumps ICMP probes, which trump gateway unreachable hints.
+    """
+    existing = method_map.get(ip, "")
+    if _METHOD_PRIORITY.get(method, 99) < _METHOD_PRIORITY.get(existing, 99):
+        method_map[ip] = method
+
 
 def _range_to_cidrs(target: str) -> list[ipaddress.IPv4Network] | None:
     """Convert dash-range notation like '10.0.0.0-10.0.3.255' into CIDRs.
@@ -151,6 +174,7 @@ async def _arp_scan_subnet(
     timeout: int,
     live_ips: set[str],
     mac_vendor: dict[str, tuple[str, str]],
+    method_map: dict[str, str],
     has_arpscan: bool,
     has_netdiscover: bool,
 ) -> None:
@@ -169,6 +193,7 @@ async def _arp_scan_subnet(
                 if is_valid_ipv4(ip):
                     live_ips.add(ip)
                     mac_vendor[ip] = (mac, vendor)
+                    _set_method(method_map, ip, "arp")
 
     if has_netdiscover:
         nd_result = await run_tool(
@@ -180,6 +205,7 @@ async def _arp_scan_subnet(
             for ip, mac, vendor in parse_netdiscover(nd_result.stdout):
                 if is_valid_ipv4(ip):
                     live_ips.add(ip)
+                    _set_method(method_map, ip, "arp")
                     if ip not in mac_vendor:
                         mac_vendor[ip] = (mac, vendor)
 
@@ -189,6 +215,7 @@ async def _scan_subnet(
     timeout: int,
     live_ips: set[str],
     mac_vendor: dict[str, tuple[str, str]],
+    method_map: dict[str, str],
     fping_unreachable: set[str],
     semaphore: asyncio.Semaphore,
     index: int,
@@ -197,12 +224,12 @@ async def _scan_subnet(
     has_arpscan: bool,
     has_netdiscover: bool,
     enhanced: bool = True,
-) -> tuple[set[str], dict[str, tuple[str, str]]]:
+) -> tuple[set[str], dict[str, tuple[str, str]], dict[str, str]]:
     """Scan a single subnet — nmap, fping, and ARP tools run in parallel.
 
-    Returns (new_ips, new_mac) — the delta of IPs and MAC entries
-    discovered by THIS subnet scan, computed inside the semaphore so
-    concurrent subnet scans don't inflate the per-subnet delta.
+    Returns (new_ips, new_mac, new_methods) — the delta of IPs, MAC entries,
+    and discovery methods discovered by THIS subnet scan, computed inside the
+    semaphore so concurrent subnet scans don't inflate the per-subnet delta.
     """
     async with semaphore:
         before_ips = set(live_ips)
@@ -232,6 +259,7 @@ async def _scan_subnet(
                 for ip in _IPV4_RE.findall(result.stdout):
                     if is_valid_ipv4(ip):
                         live_ips.add(ip)
+                        _set_method(method_map, ip, "nmap")
 
         async def _run_fping() -> None:
             result = await run_tool(
@@ -243,6 +271,7 @@ async def _scan_subnet(
                 for ip in _IPV4_RE.findall(result.stdout):
                     if is_valid_ipv4(ip):
                         live_ips.add(ip)
+                        _set_method(method_map, ip, "fping")
             # ICMP Host Unreachable → host exists but blocks ICMP (firewall/WAF).
             # These are NOT the same as silent/unresponsive — the gateway knows
             # about them.  Always include them in the scan.
@@ -262,6 +291,7 @@ async def _scan_subnet(
                     timeout,
                     live_ips,
                     mac_vendor,
+                    method_map,
                     has_arpscan,
                     has_netdiscover,
                 )
@@ -273,12 +303,13 @@ async def _scan_subnet(
                 log.error("Discovery tool failed for %s: %s", subnet, result)
 
         # Compute the delta INSIDE the semaphore — concurrent subnet scans
-        # have not yet modified live_ips/mac_vendor, so each subnet only
-        # reports its own discoveries.
+        # have not yet modified live_ips/mac_vendor/method_map, so each
+        # subnet only reports its own discoveries.
         new_ips = live_ips - before_ips
         new_mac = {ip: mac_vendor[ip] for ip in mac_vendor if ip not in before_mac_keys}
+        new_methods = {ip: method_map[ip] for ip in new_ips if ip in method_map}
 
-    return new_ips, new_mac
+    return new_ips, new_mac, new_methods
 
 
 async def _dns_sweep_subnet(
@@ -317,8 +348,8 @@ async def discover_hosts(
     config: ScanConfig,
     tree: OutputTree,
     on_progress: "Callable[[str, int, int], None] | None" = None,
-    on_subnet_complete: "Callable[[list[str], dict[str, tuple[str, str]]], None] | None" = None,
-) -> tuple[list[str], dict[str, tuple[str, str]], dict[str, str]]:
+    on_subnet_complete: "Callable[[list[str], dict[str, tuple[str, str]], dict[str, str]], None] | None" = None,
+) -> tuple[list[str], dict[str, tuple[str, str]], dict[str, str], dict[str, str]]:
     """Run nmap -sn, fping, ARP tools, and passive DNS against *config.target*.
 
     Large CIDRs (>/24) are automatically partitioned into /24 subnets
@@ -329,14 +360,15 @@ async def discover_hosts(
     after each subnet scan completes.
 
     If *on_subnet_complete* is provided it is called after each subnet
-    scan with the list of newly discovered IPs and any MAC/vendor updates,
-    so the caller can persist hosts incrementally rather than waiting for
-    every subnet to finish.
+    scan with (new_ips, mac_updates, method_updates) so the caller can
+    persist hosts incrementally rather than waiting for every subnet to
+    finish.
 
     Returns
     -------
-    tuple[list[str], dict[str, tuple[str, str]]]
-        Sorted list of live IPs and a dict mapping ip → (mac_address, vendor).
+    tuple[list[str], dict[str, tuple[str, str]], dict[str, str], dict[str, str]]
+        Sorted list of live IPs, a dict mapping ip → (mac_address, vendor),
+        a dict mapping ip → dns_hostname, and a dict mapping ip → discovery_method.
     """
     target = config.target
     timeout = int(config.tool_timeout)
@@ -381,6 +413,7 @@ async def discover_hosts(
     live_ips: set[str] = set()
     mac_vendor: dict[str, tuple[str, str]] = {}
     fping_unreachable: set[str] = set()
+    method_map: dict[str, str] = {}
 
     # Discovery is I/O-bound (waiting on nmap/fping timeouts) — use a
     # dedicated high-concurrency semaphore so large CIDRs (/16 → 256 /24s)
@@ -397,11 +430,12 @@ async def discover_hosts(
 
     async def _tracked_scan_subnet(subnet: str, idx: int) -> None:
         nonlocal subnets_done
-        new_ips, new_mac = await _scan_subnet(
+        new_ips, new_mac, new_methods = await _scan_subnet(
             subnet,
             timeout,
             live_ips,
             mac_vendor,
+            method_map,
             fping_unreachable,
             semaphore,
             idx,
@@ -413,7 +447,7 @@ async def discover_hosts(
         )
         subnets_done += 1
         if on_subnet_complete and (new_ips or new_mac):
-            on_subnet_complete(list(new_ips), new_mac)
+            on_subnet_complete(list(new_ips), new_mac, new_methods)
         if on_progress:
             on_progress("discovery", subnets_done, total)
 
@@ -481,6 +515,8 @@ async def discover_hosts(
                 "fping unreachable: %d firewalled host(s) added to scan targets",
                 len(new_fpx_unreachable),
             )
+            for ip in new_fpx_unreachable:
+                _set_method(method_map, ip, "fping_unreachable")
             live_ips |= new_fpx_unreachable
         else:
             log.info(
@@ -540,4 +576,4 @@ async def discover_hosts(
     )
 
     log.info("Discovery found %d live host(s) across %d subnet(s)", len(sorted_ips), total)
-    return sorted_ips, mac_vendor, dns_hostnames
+    return sorted_ips, mac_vendor, dns_hostnames, method_map

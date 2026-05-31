@@ -99,6 +99,7 @@ class Host:
     status: str = "up"
     mac_address: str = ""
     vendor: str = ""
+    discovery_method: str = ""  # "arp", "nmap", "fping", or "fping_unreachable"
     ports: list[Port] = field(default_factory=list)
     web_endpoints: list[str] = field(default_factory=list)
     web_titles: dict[str, str] = field(default_factory=dict)  # url → page title
