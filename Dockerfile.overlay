@@ -1,0 +1,2 @@
+FROM callmedemon/wireghost:worker
+COPY src/ /app/src/

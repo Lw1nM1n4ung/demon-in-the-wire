@@ -33,7 +33,7 @@ WG.renderNewScan = function() {
           '<div class="panel-body" style="display:flex;flex-direction:column;gap:14px;">' +
             '<div class="form-row">' +
               '<div class="form-group"><label class="form-label">Scan Type</label>' +
-                '<select class="form-select" id="nsScanType" onchange="WG._nsUpdateType(this.value)"><option value="full">Full Scan (All Tools)</option><option value="quick">Quick Scan (Nmap + Nuclei)</option><option value="port">Port Scan Only</option><option value="web">Web Application Scan</option><option value="service">Service Enumeration</option></select></div>' +
+                '<select class="form-select" id="nsScanType" onchange="WG._nsUpdateType(this.value)"><option value="full">Full Scan (All Tools)</option><option value="quick">Quick Scan (Nmap + Nuclei)</option><option value="port">Port Scan Only</option><option value="web">Web Application Scan</option><option value="service">Service Enumeration</option><option value="discovery">Host Discovery (Live Hosts Only)</option><option value="phase_based">Phase-Based Scan (Manual Review)</option></select></div>' +
               '<div class="form-group"><label class="form-label">Port Range</label>' +
                 '<input class="form-input" id="nsPortRange" value="1-65535" placeholder="1-65535"></div>' +
             '</div>' +
@@ -179,12 +179,38 @@ WG._nsUpdateType = function(type) {
     port: { ports: '1-65535', parallel: 10, tools: ['nmap'] },
     web: { ports: '80,443,8080,8443,8000,3000', parallel: 10, tools: ['nmap','nuclei','wpscan','nikto'] },
     service: { ports: '1-65535', parallel: 5, tools: ['nmap','searchsploit','service_enum','enum4linux','netexec'] },
+    discovery: { ports: '1-65535', parallel: 50, tools: [] },
+    phase_based: { ports: '1-65535', parallel: 10, tools: ['nmap','nuclei','searchsploit','service_enum','enum4linux','nikto','netexec'] },
   };
   var p = presets[type] || presets.full;
   document.getElementById('nsPortRange').value = p.ports;
   document.getElementById('nsParallelism').value = p.parallel;
   document.querySelectorAll('#nsTools [data-tool]').forEach(function(t) {
     t.classList.toggle('on', p.tools.indexOf(t.dataset.tool) !== -1);
+  });
+
+  // Discovery scans: hide tools, nuclei, and detection panels (they're irrelevant)
+  // Phase-based scans: same — phases have their own per-phase tool config
+  var isMinimal = type === 'discovery' || type === 'phase_based';
+  var toolPanels = document.querySelectorAll('#nsTools').length ? document.querySelector('#nsTools').closest('.panel') : null;
+  var nucleiPanel = document.getElementById('nsNucleiPanel');
+  var detectPanel = document.getElementById('nsNucleiPanel') ? document.getElementById('nsNucleiPanel').nextElementSibling : null;
+  // Walk back from nuclei panel to find detection panel
+  if (nucleiPanel) {
+    var next = nucleiPanel.nextElementSibling;
+    if (next && next.querySelector('.panel-title') && next.querySelector('.panel-title').textContent.includes('Detection')) {
+      detectPanel = next;
+    }
+  }
+  // Actually, just query all panels and hide the tools/nuclei/detection ones
+  var panels = document.querySelectorAll('#mainContent .panel');
+  panels.forEach(function(panel) {
+    var title = panel.querySelector('.panel-title');
+    if (!title) return;
+    var t = title.textContent.trim();
+    if (t === 'Tools' || t === 'Nuclei Templates' || t === 'Detection & Reporting') {
+      panel.style.display = isMinimal ? 'none' : '';
+    }
   });
 };
 
@@ -222,8 +248,9 @@ WG._nsLaunch = function() {
   }
   if (!targets.length) { WG.toast('Enter at least one target', 'error'); return; }
 
+  var scanType = document.getElementById('nsScanType').value;
   var scanData = {
-    scan_type: document.getElementById('nsScanType').value,
+    scan_type: scanType,
     port_range: (document.getElementById('nsPortRange').value || '').trim() || '1-65535',
     parallelism: parseInt(document.getElementById('nsParallelism').value) || 10,
     timeout: parseInt(document.getElementById('nsTimeout').value) || 3600,
@@ -238,6 +265,30 @@ WG._nsLaunch = function() {
     nuclei_templates: (document.getElementById('nsNucleiTemplates').value || '').trim(),
     nuclei_default_templates: document.getElementById('nsNucleiDefaults').classList.contains('on'),
   };
+
+  // Discovery scans: strip irrelevant fields, add discovery-specific flags
+  if (scanType === 'discovery') {
+    scanData.skip_screenshots = true;
+    scanData.skip_nuclei = true;
+    scanData.skip_nikto = true;
+    scanData.skip_netexec = true;
+    scanData.report_formats = 'dashboard';
+  }
+
+  // Phase-based: create scan, then init phases, then navigate to workflow
+  if (scanType === 'phase_based') {
+    WG.api('/scans/', { method: 'POST', body: JSON.stringify(
+      Object.assign({}, scanData, { target: targets.join(','), name: name || targets[0] })
+    ) }).then(function(res) {
+      if (!res || !res.id) { WG.toast('Failed to create scan', 'error'); return; }
+      WG.api('/scans/' + res.id + '/init_phases/', { method: 'POST', body: JSON.stringify({}) }).then(function() {
+        WG.invalidateCache('scans');
+        WG.toast('Phases initialized — ready for review', 'success');
+        WG.navigate('phase-workflow', { id: res.id });
+      });
+    });
+    return;
+  }
 
   // Check if scheduled
   var scheduled = document.getElementById('nsScheduleEnabled').classList.contains('on');

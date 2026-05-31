@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 # Register AD recon task with Celery autodiscover
 from .ad_recon import ad_recon_task  # noqa: F401
+from .discovery import run_discovery_scan  # noqa: F401
+from .phase_scan import run_phase  # noqa: F401
 
 
 @shared_task(bind=True, max_retries=0, time_limit=604800, soft_time_limit=518400)
@@ -139,7 +141,15 @@ def run_scan(self, scan_id):
                                 [phase, done, _scan_id_hex],
                             )
                     elif action == "discovery":
-                        _, live_ips, mac_vendor_map, dns_hostnames, method_map = item
+                        if len(item) >= 6:
+                            _, live_ips, mac_vendor_map, dns_hostnames, method_map, tool_provenance = item
+                        elif len(item) >= 5:
+                            _, live_ips, mac_vendor_map, dns_hostnames, method_map = item
+                            tool_provenance = {}
+                        else:
+                            _, live_ips, mac_vendor_map, dns_hostnames = item
+                            method_map = {}
+                            tool_provenance = {}
                         # Use get_or_create — some hosts may already exist
                         # from incremental subnet_hosts creation.
                         for ip in live_ips:
@@ -151,6 +161,7 @@ def run_scan(self, scan_id):
                                 "discovery_method": method,
                                 "status": "up",
                                 "ports_count": 0,
+                                "discovered_by": list(tool_provenance.get(ip, [])),
                             }
                             # Apply DNS PTR hostname as fallback if no hostname set yet
                             dns_name = dns_hostnames.get(ip, "")
@@ -174,7 +185,15 @@ def run_scan(self, scan_id):
                         )
                         logger.info("Discovery finalized: %d host(s) total", len(live_ips))
                     elif action == "subnet_hosts":
-                        _, new_ips, mac_updates, method_updates = item
+                        if len(item) >= 5:
+                            _, new_ips, mac_updates, method_updates, tool_provenance = item
+                        elif len(item) >= 4:
+                            _, new_ips, mac_updates, method_updates = item
+                            tool_provenance = {}
+                        else:
+                            _, new_ips, mac_updates = item
+                            method_updates = {}
+                            tool_provenance = {}
                         # Create Host records for newly discovered IPs.
                         for ip in new_ips:
                             mac, vendor = mac_updates.get(ip, ("", ""))
@@ -188,6 +207,8 @@ def run_scan(self, scan_id):
                                     "discovery_method": method,
                                     "status": "up",
                                     "ports_count": 0,
+                                "discovered_by": list(tool_provenance.get(ip, [])),
+                                    "discovered_by": list(tool_provenance.get(ip, [])),
                                 },
                             )
                             if not created and method:
@@ -359,10 +380,10 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None, method_map=None) -> None:
+        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames=None, method_map=None, tool_provenance=None) -> None:
             try:
                 _progress_queue.put_nowait(
-                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {}, method_map or {})
+                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {}, method_map or {}, tool_provenance or {})
                 )
             except Exception:
                 pass
@@ -373,9 +394,9 @@ def run_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_subnet_complete(new_ips, mac_updates, method_updates=None) -> None:
+        def _on_subnet_complete(new_ips, mac_updates, method_updates=None, tool_provenance=None) -> None:
             try:
-                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates, method_updates or {}))
+                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates, method_updates or {}, tool_provenance or {}))
             except Exception:
                 pass
 
@@ -931,7 +952,10 @@ def check_scheduled_scans():
         )
 
         deadline = _compute_deadline(sched.stop_time) if sched.stop_time else None
-        task = run_scan.delay(str(scan.id))
+        if scan.scan_type == "discovery":
+            task = run_discovery_scan.delay(str(scan.id))
+        else:
+            task = run_scan.delay(str(scan.id))
         scan.celery_task_id = task.id
         scan.status = "running"
         scan.deadline = deadline

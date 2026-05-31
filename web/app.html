@@ -117,6 +117,7 @@
       <a class="sidebar-item" data-page="scheduled" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-clock"/></svg> Scheduled Scans</a>
       <a class="sidebar-item" data-page="policies" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-settings"/></svg> Scan Policies</a>
       <a class="sidebar-item" data-page="ad-recon" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-network"/></svg> AD Recon</a>
+      <a class="sidebar-item" data-page="phase-workflow" data-role="engineer+"><svg class="icon" viewBox="0 0 24 24"><use href="#i-layers"/></svg> Phase Scans</a>
     </div>
     <div class="sidebar-section" data-role="engineer+">
       <div class="sidebar-parent collapsed" data-collapsible="vulnscanning">
@@ -155,6 +156,56 @@
 
   <!-- ═══ MAIN CONTENT ═══ -->
   <main class="main" id="mainContent"></main>
+</div>
+
+<!-- ═══ DISCOVERY SCAN MODAL ═══ -->
+<div class="modal-overlay" id="discoveryModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New Discovery Scan</h2>
+      <p>Discover live hosts on a target network without port scanning</p>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Target <span style="color:var(--error);">*</span></label>
+        <input class="form-input" id="discTarget" type="text" placeholder="192.168.1.0/24 or 10.0.0.0/16">
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:4px;">CIDR range, single IP, or comma-separated list</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Scan Name</label>
+        <input class="form-input" id="discName" type="text" placeholder="Office Network Discovery">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Parallelism</label>
+          <select class="form-select" id="discParallelism">
+            <option value="10">10 (Default)</option>
+            <option value="5">5 (Conservative)</option>
+            <option value="25">25 (Moderate)</option>
+            <option value="50">50 (Aggressive)</option>
+            <option value="100">100 (Maximum)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Timeout (seconds)</label>
+          <input class="form-input" id="discTimeout" type="number" value="3600">
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="form-toggle" onclick="this.querySelector('.toggle-track').classList.toggle('on')">
+          <div class="toggle-track on" id="discScanUnresponsive"></div>
+          <span class="toggle-label">Scan unresponsive hosts</span>
+          <div style="font-size:0.68rem;color:var(--text-dim);margin-top:2px;">Also scan hosts that don't respond to ICMP ping (wider scope)</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="WG.closeModal('discoveryModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="WG.launchDiscoveryScan()">
+        <span>&#9654;</span> Start Discovery
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ NEW SCAN MODAL ═══ -->

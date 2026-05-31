@@ -269,6 +269,49 @@
 .status-badge.failed { background: var(--critical-dim); color: var(--critical); }
 .status-badge.cancelled { background: rgba(255,255,255,0.06); color: var(--text-dim); }
 
+/* ── Tool badges (live-discovery provenance) ── */
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.tool-badge.nmap        { background: rgba(59,130,246,0.12); color: #60a5fa; }
+.tool-badge.fping       { background: rgba(16,185,129,0.12); color: #34d399; }
+.tool-badge.arp-scan    { background: rgba(245,158,11,0.12); color: #fbbf24; }
+.tool-badge.netdiscover { background: rgba(139,92,246,0.12); color: #a78bfa; }
+.tool-badge.passive-dns { background: rgba(236,72,153,0.12); color: #f472b6; }
+
+/* ── Tool filter tabs ── */
+.tool-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.tool-tab {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  transition: all 0.15s;
+}
+.tool-tab:hover { color: var(--text-bright); border-color: var(--text-dim); }
+.tool-tab.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
 /* ── Tags ── */
 .tag {
   display: inline-flex;

@@ -150,6 +150,7 @@ class Scan(models.Model):
         ("completed", "Completed"),
         ("failed", "Failed"),
         ("cancelled", "Cancelled"),
+        ("paused", "Paused"),
     ]
     SCAN_TYPE_CHOICES = [
         ("full", "Full Scan"),
@@ -157,6 +158,8 @@ class Scan(models.Model):
         ("port", "Port Scan Only"),
         ("web", "Web Application Scan"),
         ("service", "Service Enumeration"),
+        ("discovery", "Host Discovery"),
+        ("phase_based", "Phase-Based Scan"),
     ]
 
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
@@ -183,6 +186,10 @@ class Scan(models.Model):
     # If True, ICMP-silent hosts get port-scanned too (nmap -Pn path). Default
     # False because it can blow up scope on big CIDRs.
     scan_unresponsive = models.BooleanField(default=False)
+    phases = models.JSONField(default=list, blank=True,
+        help_text="Ordered list of enabled phase names for phase-based scans")
+    current_phase_index = models.IntegerField(default=-1,
+        help_text="0-based index of the currently executing/completed phase")
     enum4linux = models.BooleanField(default=True)
     skip_nikto = models.BooleanField(default=False)
     skip_netexec = models.BooleanField(default=False)
@@ -247,6 +254,7 @@ class Host(models.Model):
     findings_count = models.IntegerField(default=0)
     web_endpoints = models.JSONField(default=list)
     web_titles = models.JSONField(default=dict)
+    discovered_by = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["ip"]
@@ -812,6 +820,54 @@ class ScanArtifact(models.Model):
     def __str__(self):
         host_part = f" @ {self.host.ip}" if self.host else ""
         return f"{self.tool}/{self.name}{host_part}"
+
+
+class PhaseRun(models.Model):
+    """Per-phase execution record for phase-based scans.
+
+    Each phase in a phase_based scan gets one PhaseRun row. The row tracks
+    status, timing, retries, tool configuration overrides, and a lightweight
+    output summary so the frontend can render the phase timeline without
+    querying the full findings/hosts tables.
+    """
+
+    PHASE_CHOICES = [
+        ("discovery", "Discovery"),
+        ("portscan", "Port Scan"),
+        ("webdetect", "Web Detect"),
+        ("webcrawl", "Web Crawl"),
+        ("vulnscan", "Vulnerability Scan"),
+        ("enumeration", "Enumeration"),
+    ]
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("running", "Running"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+        ("cancelled", "Cancelled"),
+        ("skipped", "Skipped"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    scan = models.ForeignKey("Scan", on_delete=models.CASCADE, related_name="phase_runs")
+    phase = models.CharField(max_length=20, choices=PHASE_CHOICES)
+    sequence = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.IntegerField(default=0)
+    error_message = models.TextField(blank=True)
+    retry_count = models.IntegerField(default=0)
+    tool_config = models.JSONField(default=dict)
+    output_summary = models.JSONField(default=dict)
+    celery_task_id = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["scan", "sequence"]
+        unique_together = (("scan", "phase"),)
+
+    def __str__(self):
+        return f"{self.scan.name} / {self.phase} ({self.status})"
 
 
 from .ad_recon import *  # noqa: F403

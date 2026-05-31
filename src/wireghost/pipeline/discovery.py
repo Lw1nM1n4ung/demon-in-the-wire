@@ -177,10 +177,14 @@ async def _arp_scan_subnet(
     method_map: dict[str, str],
     has_arpscan: bool,
     has_netdiscover: bool,
+    tool_provenance: dict[str, set[str]] | None = None,
 ) -> None:
     """Run arp-scan and/or netdiscover on a subnet, collect MAC/vendor."""
     from wireghost.parsers.arpscan import parse_arpscan
     from wireghost.parsers.netdiscover import parse_netdiscover
+
+    if tool_provenance is None:
+        tool_provenance = {}
 
     if has_arpscan:
         arp_result = await run_tool(
@@ -194,6 +198,7 @@ async def _arp_scan_subnet(
                     live_ips.add(ip)
                     mac_vendor[ip] = (mac, vendor)
                     _set_method(method_map, ip, "arp")
+                    tool_provenance.setdefault(ip, set()).add("arp-scan")
 
     if has_netdiscover:
         nd_result = await run_tool(
@@ -208,6 +213,7 @@ async def _arp_scan_subnet(
                     _set_method(method_map, ip, "arp")
                     if ip not in mac_vendor:
                         mac_vendor[ip] = (mac, vendor)
+                    tool_provenance.setdefault(ip, set()).add("netdiscover")
 
 
 async def _scan_subnet(
@@ -224,13 +230,18 @@ async def _scan_subnet(
     has_arpscan: bool,
     has_netdiscover: bool,
     enhanced: bool = True,
-) -> tuple[set[str], dict[str, tuple[str, str]], dict[str, str]]:
+    tool_provenance: dict[str, set[str]] | None = None,
+) -> tuple[set[str], dict[str, tuple[str, str]], dict[str, str], dict[str, set[str]]]:
     """Scan a single subnet — nmap, fping, and ARP tools run in parallel.
 
-    Returns (new_ips, new_mac, new_methods) — the delta of IPs, MAC entries,
-    and discovery methods discovered by THIS subnet scan, computed inside the
-    semaphore so concurrent subnet scans don't inflate the per-subnet delta.
+    Returns (new_ips, new_mac, new_methods, new_provenance) — the delta of
+    IPs, MAC entries, discovery methods, and tool provenance discovered by
+    THIS subnet scan, computed inside the semaphore so concurrent subnet
+    scans don't inflate the per-subnet delta.
     """
+    if tool_provenance is None:
+        tool_provenance = {}
+
     async with semaphore:
         before_ips = set(live_ips)
         before_mac_keys = set(mac_vendor.keys())
@@ -260,6 +271,7 @@ async def _scan_subnet(
                     if is_valid_ipv4(ip):
                         live_ips.add(ip)
                         _set_method(method_map, ip, "nmap")
+                        tool_provenance.setdefault(ip, set()).add("nmap")
 
         async def _run_fping() -> None:
             result = await run_tool(
@@ -272,6 +284,7 @@ async def _scan_subnet(
                     if is_valid_ipv4(ip):
                         live_ips.add(ip)
                         _set_method(method_map, ip, "fping")
+                        tool_provenance.setdefault(ip, set()).add("fping")
             # ICMP Host Unreachable → host exists but blocks ICMP (firewall/WAF).
             # These are NOT the same as silent/unresponsive — the gateway knows
             # about them.  Always include them in the scan.
@@ -279,6 +292,7 @@ async def _scan_subnet(
                 for ip in _FPING_UNREACHABLE_RE.findall(result.stderr):
                     if is_valid_ipv4(ip):
                         fping_unreachable.add(ip)
+                        tool_provenance.setdefault(ip, set()).add("fping")
 
         tasks = [
             _run_nmap(),
@@ -294,6 +308,7 @@ async def _scan_subnet(
                     method_map,
                     has_arpscan,
                     has_netdiscover,
+                    tool_provenance,
                 )
             )
 
@@ -308,8 +323,13 @@ async def _scan_subnet(
         new_ips = live_ips - before_ips
         new_mac = {ip: mac_vendor[ip] for ip in mac_vendor if ip not in before_mac_keys}
         new_methods = {ip: method_map[ip] for ip in new_ips if ip in method_map}
+        new_provenance = {
+            ip: tool_provenance[ip]
+            for ip in tool_provenance
+            if ip not in before_ips
+        }
 
-    return new_ips, new_mac, new_methods
+    return new_ips, new_mac, new_methods, new_provenance
 
 
 async def _dns_sweep_subnet(
@@ -430,7 +450,7 @@ async def discover_hosts(
 
     async def _tracked_scan_subnet(subnet: str, idx: int) -> None:
         nonlocal subnets_done
-        new_ips, new_mac, new_methods = await _scan_subnet(
+        new_ips, new_mac, new_methods, new_provenance = await _scan_subnet(
             subnet,
             timeout,
             live_ips,
@@ -447,7 +467,12 @@ async def discover_hosts(
         )
         subnets_done += 1
         if on_subnet_complete and (new_ips or new_mac):
-            on_subnet_complete(list(new_ips), new_mac, new_methods)
+            try:
+                on_subnet_complete(list(new_ips), new_mac, new_methods, {
+                    ip: sorted(list(tools)) for ip, tools in new_provenance.items()
+                })
+            except TypeError:
+                on_subnet_complete(list(new_ips), new_mac, new_methods)
         if on_progress:
             on_progress("discovery", subnets_done, total)
 
@@ -566,6 +591,11 @@ async def discover_hosts(
             )
         effective_ips = live_ips
 
+    # Build per-IP tool provenance from incremental subnet callbacks.
+    # The _tracked_scan_subnet closure accumulates per-subnet provenance
+    # via on_subnet_complete; here we build the full map for the return.
+    tool_provenance: dict[str, set[str]] = {}
+
     sorted_ips = sorted(effective_ips, key=_ip_sort_key)
 
     # Persist to disk
@@ -576,4 +606,4 @@ async def discover_hosts(
     )
 
     log.info("Discovery found %d live host(s) across %d subnet(s)", len(sorted_ips), total)
-    return sorted_ips, mac_vendor, dns_hostnames, method_map
+    return sorted_ips, mac_vendor, dns_hostnames, method_map, tool_provenance
