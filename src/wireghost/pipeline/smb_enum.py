@@ -35,35 +35,33 @@ def _has_smb(host: Host) -> bool:
 async def enumerate_smb(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Run enum4linux against a host if it has SMB services detected."""
-    async with sem:
-        if config.skip_enum4linux:
-            return []
+    if config.skip_enum4linux:
+        return []
 
-        smb_open = _has_smb(host)
-        if not smb_open:
-            return []
+    smb_open = _has_smb(host)
+    if not smb_open:
+        return []
 
-        if not shutil.which("enum4linux"):
-            log.info("[%s] enum4linux not installed — skipping SMB enumeration", host.ip)
-            return []
+    if not shutil.which("enum4linux"):
+        log.info("[%s] enum4linux not installed — skipping SMB enumeration", host.ip)
+        return []
 
-        vuln_dir = tree.host_vuln_dir(host.ip)
-        out_file = vuln_dir / "enum4linux.txt"
+    vuln_dir = tree.host_vuln_dir(host.ip)
+    out_file = vuln_dir / "enum4linux.txt"
 
-        result = await run_tool(
-            ["enum4linux", "-a", host.ip],
-            timeout=int(config.tool_timeout),
-            label=f"enum4linux {host.ip}",
-        )
+    result = await run_tool(
+        ["enum4linux", "-a", host.ip],
+        timeout=int(config.tool_timeout),
+        label=f"enum4linux {host.ip}",
+    )
 
-        output = (result.stdout or "") + (result.stderr or "")
-        if output.strip():
-            out_file.write_text(output, encoding="utf-8")
+    output = (result.stdout or "") + (result.stderr or "")
+    if output.strip():
+        out_file.write_text(output, encoding="utf-8")
 
-        findings = parse_enum4linux_output(output, host_ip=host.ip)
-        log.info("[%s] enum4linux: %d finding(s)", host.ip, len(findings))
-        return findings
+    findings = parse_enum4linux_output(output, host_ip=host.ip)
+    log.info("[%s] enum4linux: %d finding(s)", host.ip, len(findings))
+    return findings

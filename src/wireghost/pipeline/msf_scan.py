@@ -335,8 +335,7 @@ def _build_rc_script(
 async def scan_msf(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Run Metasploit auxiliary/scanner modules against a host."""
     if config.skip_msf_scan:
@@ -351,43 +350,42 @@ async def scan_msf(
     if not modules:
         return []
 
-    async with sem:
-        vuln_dir = tree.host_vuln_dir(host.ip)
-        spool_path = vuln_dir / "msf_spool.txt"
-        rc_path = vuln_dir / "msf_scan.rc"
+    vuln_dir = tree.host_vuln_dir(host.ip)
+    spool_path = vuln_dir / "msf_spool.txt"
+    rc_path = vuln_dir / "msf_scan.rc"
 
-        rc_content = _build_rc_script(host.ip, modules, spool_path)
-        rc_path.write_text(rc_content, encoding="utf-8")
+    rc_content = _build_rc_script(host.ip, modules, spool_path)
+    rc_path.write_text(rc_content, encoding="utf-8")
 
-        log.info(
-            "[%s] MSF scan: %d module(s) across %d port(s)",
-            host.ip,
-            len(modules),
-            len({p for _, p in modules}),
-        )
+    log.info(
+        "[%s] MSF scan: %d module(s) across %d port(s)",
+        host.ip,
+        len(modules),
+        len({p for _, p in modules}),
+    )
 
-        result = await run_tool(
-            ["msfconsole", "-q", "-r", str(rc_path)],
-            timeout=min(600, int(config.tool_timeout)),
-            label=f"msfconsole {host.ip}",
-        )
+    result = await run_tool(
+        ["msfconsole", "-q", "-r", str(rc_path)],
+        timeout=min(600, int(config.tool_timeout)),
+        label=f"msfconsole {host.ip}",
+    )
 
+    if result.returncode != 0:
+        log.warning("[%s] msfconsole exited with rc=%d", host.ip, result.returncode)
+
+    output = ""
+    if spool_path.exists():
+        output = spool_path.read_text(encoding="utf-8", errors="replace")
+    elif result.stdout:
+        output = result.stdout
+
+    if not output.strip():
         if result.returncode != 0:
-            log.warning("[%s] msfconsole exited with rc=%d", host.ip, result.returncode)
+            log.warning(
+                "[%s] msfconsole produced no output (rc=%d)", host.ip, result.returncode
+            )
+        return []
 
-        output = ""
-        if spool_path.exists():
-            output = spool_path.read_text(encoding="utf-8", errors="replace")
-        elif result.stdout:
-            output = result.stdout
-
-        if not output.strip():
-            if result.returncode != 0:
-                log.warning(
-                    "[%s] msfconsole produced no output (rc=%d)", host.ip, result.returncode
-                )
-            return []
-
-        findings = parse_msf_output(output, host.ip)
-        log.info("[%s] MSF scan: %d finding(s)", host.ip, len(findings))
-        return findings
+    findings = parse_msf_output(output, host.ip)
+    log.info("[%s] MSF scan: %d finding(s)", host.ip, len(findings))
+    return findings

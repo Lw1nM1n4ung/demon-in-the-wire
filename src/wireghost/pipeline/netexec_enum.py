@@ -39,45 +39,43 @@ _PORT_FALLBACK: dict[int, str] = {
 async def enumerate_netexec(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Run nxc against a host for each supported protocol with open ports."""
-    async with sem:
-        if config.skip_netexec:
-            return []
+    if config.skip_netexec:
+        return []
 
-        if not shutil.which("nxc"):
-            log.info("[%s] nxc not installed — skipping NetExec enumeration", host.ip)
-            return []
+    if not shutil.which("nxc"):
+        log.info("[%s] nxc not installed — skipping NetExec enumeration", host.ip)
+        return []
 
-        protos: set[str] = set()
-        for p in host.open_ports:
-            svc = p.service_name
-            proto = _SERVICE_PROTOS.get(svc)
-            if proto:
-                protos.add(proto)
-            elif not svc and p.number in _PORT_FALLBACK:
-                protos.add(_PORT_FALLBACK[p.number])
+    protos: set[str] = set()
+    for p in host.open_ports:
+        svc = p.service_name
+        proto = _SERVICE_PROTOS.get(svc)
+        if proto:
+            protos.add(proto)
+        elif not svc and p.number in _PORT_FALLBACK:
+            protos.add(_PORT_FALLBACK[p.number])
 
-        if not protos:
-            return []
+    if not protos:
+        return []
 
-        vuln_dir = tree.host_vuln_dir(host.ip)
-        all_findings: list[Finding] = []
-        seen_ids: set[str] = set()
+    vuln_dir = tree.host_vuln_dir(host.ip)
+    all_findings: list[Finding] = []
+    seen_ids: set[str] = set()
 
-        for proto in sorted(protos):
-            findings = await _run_proto(proto, host.ip, config, vuln_dir)
-            for f in findings:
-                if f.template_id and f.template_id in seen_ids:
-                    continue
-                if f.template_id:
-                    seen_ids.add(f.template_id)
-                all_findings.append(f)
+    for proto in sorted(protos):
+        findings = await _run_proto(proto, host.ip, config, vuln_dir)
+        for f in findings:
+            if f.template_id and f.template_id in seen_ids:
+                continue
+            if f.template_id:
+                seen_ids.add(f.template_id)
+            all_findings.append(f)
 
-        log.info("[%s] netexec: %d finding(s)", host.ip, len(all_findings))
-        return all_findings
+    log.info("[%s] netexec: %d finding(s)", host.ip, len(all_findings))
+    return all_findings
 
 
 async def _run_proto(

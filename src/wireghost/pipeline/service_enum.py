@@ -471,46 +471,44 @@ _PORT_CHECKS: dict[int, object] = {
 async def enumerate_services(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Pure Python service enumeration. No brute force."""
-    async with sem:
-        if not host.open_ports:
-            return []
+    if not host.open_ports:
+        return []
 
-        tasks: list[asyncio.Task] = []
-        checked: set[int] = set()
+    tasks: list[asyncio.Task] = []
+    checked: set[int] = set()
 
-        for port in host.open_ports:
-            svc = port.service_name
-            # Skip HTTP — already covered by nuclei + httpx
-            if svc in ("http", "https", "http-proxy", "http-alt"):
-                # But check well-known ports
-                if port.number in _PORT_CHECKS:
-                    tasks.append(
-                        asyncio.create_task(_PORT_CHECKS[port.number](host.ip, port.number))
-                    )
-                    checked.add(port.number)
-                continue
-
-            fn = _CHECKS.get(svc)
-            if fn and port.number not in checked:
-                tasks.append(asyncio.create_task(fn(host.ip, port.number)))
+    for port in host.open_ports:
+        svc = port.service_name
+        # Skip HTTP — already covered by nuclei + httpx
+        if svc in ("http", "https", "http-proxy", "http-alt"):
+            # But check well-known ports
+            if port.number in _PORT_CHECKS:
+                tasks.append(
+                    asyncio.create_task(_PORT_CHECKS[port.number](host.ip, port.number))
+                )
                 checked.add(port.number)
+            continue
 
-            # Also check by well-known port
-            if port.number in _PORT_CHECKS and port.number not in checked:
-                tasks.append(asyncio.create_task(_PORT_CHECKS[port.number](host.ip, port.number)))
-                checked.add(port.number)
+        fn = _CHECKS.get(svc)
+        if fn and port.number not in checked:
+            tasks.append(asyncio.create_task(fn(host.ip, port.number)))
+            checked.add(port.number)
 
-        if not tasks:
-            return []
+        # Also check by well-known port
+        if port.number in _PORT_CHECKS and port.number not in checked:
+            tasks.append(asyncio.create_task(_PORT_CHECKS[port.number](host.ip, port.number)))
+            checked.add(port.number)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        all_findings: list[Finding] = []
-        for r in results:
-            if isinstance(r, list):
-                all_findings.extend(r)
-        log.info("Service enum %s: %d finding(s)", host.ip, len(all_findings))
-        return all_findings
+    if not tasks:
+        return []
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    all_findings: list[Finding] = []
+    for r in results:
+        if isinstance(r, list):
+            all_findings.extend(r)
+    log.info("Service enum %s: %d finding(s)", host.ip, len(all_findings))
+    return all_findings

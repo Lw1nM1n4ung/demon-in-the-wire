@@ -36,8 +36,7 @@ def _has_nfs(host: Host) -> bool:
 async def enumerate_nfs(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Run showmount -e if NFS-related services are detected on *host*."""
     if config.skip_nfs_enum:
@@ -48,19 +47,18 @@ async def enumerate_nfs(
     if not _has_nfs(host):
         return []
 
-    async with sem:
-        log.info("[%s] NFS enum via showmount", host.ip)
-        result = await run_tool(
-            ["showmount", "-e", host.ip],
-            timeout=15,
-            label=f"showmount -e {host.ip}",
-        )
-        if result.returncode != 0:
-            return []
+    log.info("[%s] NFS enum via showmount", host.ip)
+    result = await run_tool(
+        ["showmount", "-e", host.ip],
+        timeout=15,
+        label=f"showmount -e {host.ip}",
+    )
+    if result.returncode != 0:
+        return []
 
-        out_path = tree.host_vuln_dir(host.ip) / "showmount.txt"
-        out_path.write_text(result.stdout, encoding="utf-8")
+    out_path = tree.host_vuln_dir(host.ip) / "showmount.txt"
+    out_path.write_text(result.stdout, encoding="utf-8")
 
-        findings = parse_showmount(result.stdout, host.ip)
-        log.info("[%s] NFS enum: %d finding(s)", host.ip, len(findings))
-        return findings
+    findings = parse_showmount(result.stdout, host.ip)
+    log.info("[%s] NFS enum: %d finding(s)", host.ip, len(findings))
+    return findings

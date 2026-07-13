@@ -214,8 +214,7 @@ async def _detect_technologies(
 async def probe_host(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> None:
     """Probe open ports on *host* for HTTP and HTTPS endpoints.
 
@@ -232,78 +231,77 @@ async def probe_host(
     Discovered URLs are appended to ``host.web_endpoints`` and written to
     disk under the host web directory and the global web directory.
     """
-    async with sem:
-        # ── Filter ports to web candidates ──
-        candidates: list[Port] = []
-        skipped: list[str] = []
-        for port in host.open_ports:
-            ok, reason = _should_probe(port)
-            if ok:
-                candidates.append(port)
-            else:
-                skipped.append(f"{port.number}/{port.protocol} ({reason})")
-
-        if skipped:
-            log.info(
-                "Web detect %s: skipping %d non-web port(s) -- %s",
-                host.ip,
-                len(skipped),
-                "; ".join(skipped[:5]),
-            )
-
-        if not candidates:
-            log.info(
-                "Web detect %s: no web candidates among %d open port(s)",
-                host.ip,
-                len(host.open_ports),
-            )
-            return
-
-        endpoints: list[str] = []
-
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-
-        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            for port in candidates:
-                # Try HTTP first
-                http_url = f"http://{host.ip}:{port.number}"
-                if await _try_url(session, http_url):
-                    endpoints.append(http_url)
-                    continue
-
-                # Then HTTPS
-                https_url = f"https://{host.ip}:{port.number}"
-                if await _try_url(session, https_url):
-                    endpoints.append(https_url)
-
-        host.web_endpoints = endpoints
-
-        if endpoints:
-            log.info(
-                "Web detect %s: %d endpoint(s) from %d candidate(s)",
-                host.ip,
-                len(endpoints),
-                len(candidates),
-            )
-
-            # Write per-host file
-            web_file = tree.host_web_dir(host.ip) / "endpoints.txt"
-            web_file.write_text("\n".join(endpoints) + "\n", encoding="utf-8")
-
-            # Append to global web file
-            global_file = tree.web_dir / "all_endpoints.txt"
-            with open(global_file, "a", encoding="utf-8") as fh:
-                for url in endpoints:
-                    fh.write(url + "\n")
+    # ── Filter ports to web candidates ──
+    candidates: list[Port] = []
+    skipped: list[str] = []
+    for port in host.open_ports:
+        ok, reason = _should_probe(port)
+        if ok:
+            candidates.append(port)
         else:
-            log.info(
-                "Web detect %s: no web endpoints responded among %d candidate(s)",
-                host.ip,
-                len(candidates),
-            )
+            skipped.append(f"{port.number}/{port.protocol} ({reason})")
 
-        # Run httpx tech detection on discovered endpoints
-        await _detect_technologies(host, tree, config.tool_timeout)
+    if skipped:
+        log.info(
+            "Web detect %s: skipping %d non-web port(s) -- %s",
+            host.ip,
+            len(skipped),
+            "; ".join(skipped[:5]),
+        )
+
+    if not candidates:
+        log.info(
+            "Web detect %s: no web candidates among %d open port(s)",
+            host.ip,
+            len(host.open_ports),
+        )
+        return
+
+    endpoints: list[str] = []
+
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        for port in candidates:
+            # Try HTTP first
+            http_url = f"http://{host.ip}:{port.number}"
+            if await _try_url(session, http_url):
+                endpoints.append(http_url)
+                continue
+
+            # Then HTTPS
+            https_url = f"https://{host.ip}:{port.number}"
+            if await _try_url(session, https_url):
+                endpoints.append(https_url)
+
+    host.web_endpoints = endpoints
+
+    if endpoints:
+        log.info(
+            "Web detect %s: %d endpoint(s) from %d candidate(s)",
+            host.ip,
+            len(endpoints),
+            len(candidates),
+        )
+
+        # Write per-host file
+        web_file = tree.host_web_dir(host.ip) / "endpoints.txt"
+        web_file.write_text("\n".join(endpoints) + "\n", encoding="utf-8")
+
+        # Append to global web file
+        global_file = tree.web_dir / "all_endpoints.txt"
+        with open(global_file, "a", encoding="utf-8") as fh:
+            for url in endpoints:
+                fh.write(url + "\n")
+    else:
+        log.info(
+            "Web detect %s: no web endpoints responded among %d candidate(s)",
+            host.ip,
+            len(candidates),
+        )
+
+    # Run httpx tech detection on discovered endpoints
+    await _detect_technologies(host, tree, config.tool_timeout)

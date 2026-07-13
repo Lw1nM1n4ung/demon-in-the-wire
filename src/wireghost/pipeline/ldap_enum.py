@@ -56,8 +56,7 @@ def _parse_rootdse(stdout: str) -> dict[str, list[str]]:
 async def enumerate_ldap(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Run ldapsearch rootDSE query on LDAP ports."""
     if config.skip_ldap_enum:
@@ -73,92 +72,91 @@ async def enumerate_ldap(
     findings: list[Finding] = []
 
     for port in ldap_ports:
-        async with sem:
-            svc_lower = port.service_name.lower()
-            is_ssl = "ssl" in svc_lower or "ldaps" in svc_lower or svc_lower == "ldapssl"
-            scheme = "ldaps" if is_ssl else "ldap"
-            uri = f"{scheme}://{host.ip}:{port.number}"
+        svc_lower = port.service_name.lower()
+        is_ssl = "ssl" in svc_lower or "ldaps" in svc_lower or svc_lower == "ldapssl"
+        scheme = "ldaps" if is_ssl else "ldap"
+        uri = f"{scheme}://{host.ip}:{port.number}"
 
-            log.info("[%s] LDAP rootDSE query on %s", host.ip, uri)
+        log.info("[%s] LDAP rootDSE query on %s", host.ip, uri)
 
-            out_path = tree.host_vuln_dir(host.ip) / f"ldapsearch_rootdse_{port.number}.txt"
-            result = await run_tool(
-                [
-                    "ldapsearch",
-                    "-x",
-                    "-H",
-                    uri,
-                    "-b",
-                    "",
-                    "-s",
-                    "base",
-                    "+",
-                    "*",
-                ],
-                timeout=15,
-                label=f"ldapsearch rootDSE {host.ip}:{port.number}",
+        out_path = tree.host_vuln_dir(host.ip) / f"ldapsearch_rootdse_{port.number}.txt"
+        result = await run_tool(
+            [
+                "ldapsearch",
+                "-x",
+                "-H",
+                uri,
+                "-b",
+                "",
+                "-s",
+                "base",
+                "+",
+                "*",
+            ],
+            timeout=15,
+            label=f"ldapsearch rootDSE {host.ip}:{port.number}",
+        )
+
+        if result.returncode != 0:
+            log.debug(
+                "[%s] ldapsearch on port %d exited rc=%d: %s",
+                host.ip,
+                port.number,
+                result.returncode,
+                (result.stderr or "")[:200],
             )
+            continue
 
-            if result.returncode != 0:
-                log.debug(
-                    "[%s] ldapsearch on port %d exited rc=%d: %s",
-                    host.ip,
-                    port.number,
-                    result.returncode,
-                    (result.stderr or "")[:200],
-                )
-                continue
+        out_path.write_text(result.stdout, encoding="utf-8")
+        attrs = _parse_rootdse(result.stdout)
 
-            out_path.write_text(result.stdout, encoding="utf-8")
-            attrs = _parse_rootdse(result.stdout)
+        # Anonymous bind succeeded — this is a finding
+        findings.append(
+            Finding(
+                source="ldap_enum",
+                host=host.ip,
+                port=str(port.number),
+                protocol="tcp",
+                severity=Severity.HIGH,
+                title="LDAP anonymous bind allowed",
+                description=f"LDAP server at {uri} accepts anonymous bind, exposing directory structure.",
+            )
+        )
 
-            # Anonymous bind succeeded — this is a finding
+        # Naming contexts
+        naming_contexts = attrs.get("namingContexts", [])
+        if naming_contexts:
             findings.append(
                 Finding(
                     source="ldap_enum",
                     host=host.ip,
                     port=str(port.number),
                     protocol="tcp",
-                    severity=Severity.HIGH,
-                    title="LDAP anonymous bind allowed",
-                    description=f"LDAP server at {uri} accepts anonymous bind, exposing directory structure.",
+                    severity=Severity.MEDIUM,
+                    title=f"LDAP naming contexts exposed ({len(naming_contexts)})",
+                    description="Naming contexts:\n" + "\n".join(naming_contexts),
                 )
             )
 
-            # Naming contexts
-            naming_contexts = attrs.get("namingContexts", [])
-            if naming_contexts:
+        # Domain functional level
+        for key in (
+            "domainFunctionality",
+            "forestFunctionality",
+            "domainControllerFunctionality",
+        ):
+            vals = attrs.get(key, [])
+            if vals:
                 findings.append(
                     Finding(
                         source="ldap_enum",
                         host=host.ip,
                         port=str(port.number),
                         protocol="tcp",
-                        severity=Severity.MEDIUM,
-                        title=f"LDAP naming contexts exposed ({len(naming_contexts)})",
-                        description="Naming contexts:\n" + "\n".join(naming_contexts),
+                        severity=Severity.INFO,
+                        title=f"LDAP {key}: {vals[0]}",
+                        description=f"{key} = {vals[0]}",
                     )
                 )
-
-            # Domain functional level
-            for key in (
-                "domainFunctionality",
-                "forestFunctionality",
-                "domainControllerFunctionality",
-            ):
-                vals = attrs.get(key, [])
-                if vals:
-                    findings.append(
-                        Finding(
-                            source="ldap_enum",
-                            host=host.ip,
-                            port=str(port.number),
-                            protocol="tcp",
-                            severity=Severity.INFO,
-                            title=f"LDAP {key}: {vals[0]}",
-                            description=f"{key} = {vals[0]}",
-                        )
-                    )
 
     log.info("[%s] LDAP enum: %d finding(s)", host.ip, len(findings))
     return findings

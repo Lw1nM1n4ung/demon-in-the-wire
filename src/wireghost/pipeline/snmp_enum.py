@@ -93,8 +93,7 @@ def _build_findings(
 async def enumerate_snmp(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Blind SNMP probe on *host* followed by full walk if community found."""
     if config.skip_snmp_enum:
@@ -103,25 +102,24 @@ async def enumerate_snmp(
         log.info("[%s] snmpget not found — skipping SNMP enum", host.ip)
         return []
 
-    async with sem:
-        working_community = await _probe_communities(host.ip)
-        if not working_community:
-            return []
+    working_community = await _probe_communities(host.ip)
+    if not working_community:
+        return []
 
-        log.info("[%s] SNMP community '%s' accepted — running snmpwalk", host.ip, working_community)
+    log.info("[%s] SNMP community '%s' accepted — running snmpwalk", host.ip, working_community)
 
-        walk_stdout = ""
-        if shutil.which("snmpwalk"):
-            out_path = tree.host_vuln_dir(host.ip) / "snmpwalk.txt"
-            result = await run_tool(
-                ["snmpwalk", "-v2c", "-c", working_community, "-OQn", host.ip],
-                timeout=min(60, int(config.tool_timeout)),
-                label=f"snmpwalk {host.ip}",
-            )
-            if result.returncode == 0:
-                walk_stdout = result.stdout
-                out_path.write_text(walk_stdout, encoding="utf-8")
+    walk_stdout = ""
+    if shutil.which("snmpwalk"):
+        out_path = tree.host_vuln_dir(host.ip) / "snmpwalk.txt"
+        result = await run_tool(
+            ["snmpwalk", "-v2c", "-c", working_community, "-OQn", host.ip],
+            timeout=min(60, int(config.tool_timeout)),
+            label=f"snmpwalk {host.ip}",
+        )
+        if result.returncode == 0:
+            walk_stdout = result.stdout
+            out_path.write_text(walk_stdout, encoding="utf-8")
 
-        findings = _build_findings(host.ip, working_community, walk_stdout)
-        log.info("[%s] SNMP enum: %d finding(s)", host.ip, len(findings))
-        return findings
+    findings = _build_findings(host.ip, working_community, walk_stdout)
+    log.info("[%s] SNMP enum: %d finding(s)", host.ip, len(findings))
+    return findings

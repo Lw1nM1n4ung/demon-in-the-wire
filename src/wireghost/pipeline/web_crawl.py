@@ -28,8 +28,7 @@ def _safe_filename(url: str) -> str:
 async def crawl_host(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Spider all web endpoints on *host* with katana.
 
@@ -50,31 +49,30 @@ async def crawl_host(
     existing = set(host.web_endpoints)
 
     for endpoint in list(host.web_endpoints):
-        async with sem:
-            out_path = tree.host_web_dir(host.ip) / f"katana_{_safe_filename(endpoint)}.txt"
-            result = await run_tool(
-                [
-                    "katana",
-                    "-u",
-                    endpoint,
-                    "-d",
-                    "3",
-                    "-jc",
-                    "-kf",
-                    "-ef",
-                    "css,png,jpg,gif,svg,woff,woff2,ico,ttf,eot",
-                    "-silent",
-                    "-nc",
-                ],
-                timeout=min(120, int(config.tool_timeout)),
-                label=f"katana {endpoint}",
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                out_path.write_text(result.stdout, encoding="utf-8")
-                for line in result.stdout.strip().splitlines():
-                    url = line.strip()
-                    if url and url not in existing and url not in new_urls:
-                        new_urls.add(url)
+        out_path = tree.host_web_dir(host.ip) / f"katana_{_safe_filename(endpoint)}.txt"
+        result = await run_tool(
+            [
+                "katana",
+                "-u",
+                endpoint,
+                "-d",
+                "3",
+                "-jc",
+                "-kf",
+                "-ef",
+                "css,png,jpg,gif,svg,woff,woff2,ico,ttf,eot",
+                "-silent",
+                "-nc",
+            ],
+            timeout=min(120, int(config.tool_timeout)),
+            label=f"katana {endpoint}",
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            out_path.write_text(result.stdout, encoding="utf-8")
+            for line in result.stdout.strip().splitlines():
+                url = line.strip()
+                if url and url not in existing and url not in new_urls:
+                    new_urls.add(url)
 
     host.web_endpoints.extend(sorted(new_urls))
     log.info("[%s] katana discovered %d new URL(s)", host.ip, len(new_urls))

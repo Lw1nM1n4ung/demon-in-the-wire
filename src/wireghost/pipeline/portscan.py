@@ -52,7 +52,7 @@ async def _run_nmap(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_base = str(nmap_dir / "portscan")
     xml_path = nmap_dir / "portscan.xml"
     port_range = getattr(config, "port_range", "") or "1-65535"
-    cmd = ["nmap", "--open", "-p" + port_range, "-Pn", "-oA", out_base, ip]
+    cmd = ["nmap", "--open", "-p" + port_range, "-Pn", "--host-timeout", "1h", "-oA", out_base, ip]
     result = await run_tool(
         cmd,
         timeout=int(config.nmap_timeout or config.tool_timeout),
@@ -130,7 +130,7 @@ async def _analyze_services(
     nmap_dir = tree.host_nmap_xml_dir(host.ip)
     xml_path = nmap_dir / "service_analysis.xml"
 
-    cmd = ["nmap", "-sV", "-sC", "-Pn", "-p", port_csv]
+    cmd = ["nmap", "-sV", "-sC", "-Pn", "--host-timeout", "1h", "-p", port_csv]
     if config.os_detect:
         cmd.append("-O")
     cmd.extend(["-oX", str(xml_path), host.ip])
@@ -294,8 +294,7 @@ def _merge_fpx_results(
 async def scan_host(
     ip: str,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> Host:
     """Port discovery (nmap → naabu → masscan) + targeted service analysis.
 
@@ -309,47 +308,46 @@ async def scan_host(
     """
     import wireghost.pipeline.portscan as _mod
 
-    async with sem:
-        for name, fn_name, tool_bin in _SCANNERS:
-            if name != "nmap" and not _is_tool_available(tool_bin):
-                log.debug("Skipping %s for %s (not installed)", name, ip)
-                continue
+    for name, fn_name, tool_bin in _SCANNERS:
+        if name != "nmap" and not _is_tool_available(tool_bin):
+            log.debug("Skipping %s for %s (not installed)", name, ip)
+            continue
 
-            log.info("Trying %s for %s", name, ip)
-            scanner_fn = getattr(_mod, fn_name)
-            host = await scanner_fn(ip, config, tree)
+        log.info("Trying %s for %s", name, ip)
+        scanner_fn = getattr(_mod, fn_name)
+        host = await scanner_fn(ip, config, tree)
 
-            if host.open_ports:
-                log.info("%s found %d open port(s) on %s", name, len(host.open_ports), ip)
-                host = await _analyze_services(host, config, tree)
+        if host.open_ports:
+            log.info("%s found %d open port(s) on %s", name, len(host.open_ports), ip)
+            host = await _analyze_services(host, config, tree)
 
-                # fingerprintx: second source of truth for service detection.
-                # Augments ports where nmap -sV was uncertain — runs on all
-                # open ports so downstream phases (service_enum, MSF, vulnscan,
-                # web detection) all benefit from corrected service names.
-                if (
-                    not config.skip_fingerprintx
-                    and shutil.which("fingerprintx")
-                    and host.open_ports
-                ):
-                    fpx_timeout = min(30, int(config.tool_timeout))
-                    fpx_results = await _run_fingerprintx(
-                        host.ip,
-                        host.open_ports,
-                        fpx_timeout,
-                    )
-                    if fpx_results:
-                        augmented = _merge_fpx_results(host, fpx_results)
-                        if augmented:
-                            log.info(
-                                "[%s] fingerprintx augmented %d port(s) nmap could not identify",
-                                host.ip,
-                                augmented,
-                            )
+            # fingerprintx: second source of truth for service detection.
+            # Augments ports where nmap -sV was uncertain — runs on all
+            # open ports so downstream phases (service_enum, MSF, vulnscan,
+            # web detection) all benefit from corrected service names.
+            if (
+                not config.skip_fingerprintx
+                and shutil.which("fingerprintx")
+                and host.open_ports
+            ):
+                fpx_timeout = min(30, int(config.tool_timeout))
+                fpx_results = await _run_fingerprintx(
+                    host.ip,
+                    host.open_ports,
+                    fpx_timeout,
+                )
+                if fpx_results:
+                    augmented = _merge_fpx_results(host, fpx_results)
+                    if augmented:
+                        log.info(
+                            "[%s] fingerprintx augmented %d port(s) nmap could not identify",
+                            host.ip,
+                            augmented,
+                        )
 
-                return host
+            return host
 
-            log.info("%s found no open ports on %s, trying next scanner", name, ip)
+        log.info("%s found no open ports on %s, trying next scanner", name, ip)
 
-        log.warning("All scanners found no open ports on %s", ip)
-        return Host(ip=ip, status="up")
+    log.warning("All scanners found no open ports on %s", ip)
+    return Host(ip=ip, status="up")

@@ -58,36 +58,34 @@ async def _run_wpscan(
 async def scan_cms(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Run CMS-specific scanners based on detected technologies.
 
     Currently supports: WordPress (via WPScan).
     Future: JoomScan for Joomla, droopescan for Drupal.
     """
-    async with sem:
-        findings: list[Finding] = []
+    findings: list[Finding] = []
 
-        # Check for WordPress in detected technologies
-        wp_urls: list[str] = []
-        for tech in host.technologies:
-            if tech.name.lower() in ("wordpress", "wp", "wordpress.org"):
-                if tech.url and tech.url not in wp_urls:
-                    wp_urls.append(tech.url)
+    # Check for WordPress in detected technologies
+    wp_urls: list[str] = []
+    for tech in host.technologies:
+        if tech.name.lower() in ("wordpress", "wp", "wordpress.org"):
+            if tech.url and tech.url not in wp_urls:
+                wp_urls.append(tech.url)
 
-        # Also check web endpoints for /wp-login.php or /wp-admin patterns
-        for ep in host.web_endpoints:
-            if any(wp in ep.lower() for wp in ("/wp-", "wordpress")):
-                base = ep.split("/wp-")[0] if "/wp-" in ep else ep
-                if base not in wp_urls:
-                    wp_urls.append(base)
+    # Also check web endpoints for /wp-login.php or /wp-admin patterns
+    for ep in host.web_endpoints:
+        if any(wp in ep.lower() for wp in ("/wp-", "wordpress")):
+            base = ep.split("/wp-")[0] if "/wp-" in ep else ep
+            if base not in wp_urls:
+                wp_urls.append(base)
 
-        if wp_urls and shutil.which("wpscan"):
-            for url in wp_urls:
-                log.info("WordPress detected at %s -- running WPScan", url)
-                findings.extend(await _run_wpscan(url, host.ip, config, tree))
-        elif wp_urls:
-            log.info("WordPress detected but wpscan not installed -- skipping CMS scan")
+    if wp_urls and shutil.which("wpscan"):
+        for url in wp_urls:
+            log.info("WordPress detected at %s -- running WPScan", url)
+            findings.extend(await _run_wpscan(url, host.ip, config, tree))
+    elif wp_urls:
+        log.info("WordPress detected but wpscan not installed -- skipping CMS scan")
 
-        return findings
+    return findings

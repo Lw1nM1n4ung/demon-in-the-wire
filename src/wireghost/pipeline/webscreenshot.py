@@ -35,8 +35,7 @@ def _safe_filename(url: str) -> str:
 async def screenshot_host(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> None:
     """Capture screenshots of all web endpoints on *host* using gowitness."""
     if config.skip_screenshots:
@@ -54,30 +53,29 @@ async def screenshot_host(
         url_path = url_file.name
 
     try:
-        async with sem:
-            await run_tool(
-                [
-                    "gowitness",
-                    "scan",
-                    "file",
-                    "-f",
-                    url_path,
-                    "--screenshot-path",
-                    str(out_dir),
-                    "--timeout",
-                    "10",
-                    "--delay",
-                    "2",
-                    "--chrome-window-x",
-                    "1280",
-                    "--chrome-window-y",
-                    "720",
-                    "--screenshot-format",
-                    "png",
-                ],
-                timeout=int(config.tool_timeout),
-                label=f"gowitness:{host.ip}",
-            )
+        await run_tool(
+            [
+                "gowitness",
+                "scan",
+                "file",
+                "-f",
+                url_path,
+                "--screenshot-path",
+                str(out_dir),
+                "--timeout",
+                "10",
+                "--delay",
+                "2",
+                "--chrome-window-x",
+                "1280",
+                "--chrome-window-y",
+                "720",
+                "--screenshot-format",
+                "png",
+            ],
+            timeout=int(config.tool_timeout),
+            label=f"gowitness:{host.ip}",
+        )
     except Exception:
         log.warning("[%s] gowitness failed — skipping screenshots", host.ip, exc_info=True)
         return

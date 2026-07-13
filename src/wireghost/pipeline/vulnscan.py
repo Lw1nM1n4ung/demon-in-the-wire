@@ -518,52 +518,50 @@ async def run_getsploit(
 async def scan_host_vulns(
     host: Host,
     config: ScanConfig,
-    tree: OutputTree,
-    sem: asyncio.Semaphore,
+    tree: OutputTree
 ) -> list[Finding]:
     """Run nuclei, nmap vuln, and searchsploit concurrently for a single host.
 
     *sem* limits how many hosts are scanned in parallel.
     """
-    async with sem:
-        tasks: list[asyncio.Task[list[Finding]]] = []
+    tasks: list[asyncio.Task[list[Finding]]] = []
 
-        if not config.skip_nuclei:
-            tasks.append(asyncio.create_task(run_nuclei(host, config, tree)))
+    if not config.skip_nuclei:
+        tasks.append(asyncio.create_task(run_nuclei(host, config, tree)))
 
-        if not config.skip_vuln:
-            tasks.append(asyncio.create_task(run_nmap_vuln(host, config, tree)))
+    if not config.skip_vuln:
+        tasks.append(asyncio.create_task(run_nmap_vuln(host, config, tree)))
 
-        # Searchsploit: auto-find exploits for detected services (if installed)
-        tasks.append(asyncio.create_task(run_searchsploit(host, config, tree)))
+    # Searchsploit: auto-find exploits for detected services (if installed)
+    tasks.append(asyncio.create_task(run_searchsploit(host, config, tree)))
 
-        # Getsploit: Vulners API exploit search (Exploit-DB + Metasploit + Packetstorm + more)
-        if not config.skip_getsploit:
-            tasks.append(asyncio.create_task(run_getsploit(host, config, tree)))
+    # Getsploit: Vulners API exploit search (Exploit-DB + Metasploit + Packetstorm + more)
+    if not config.skip_getsploit:
+        tasks.append(asyncio.create_task(run_getsploit(host, config, tree)))
 
-        # Nikto: web server misconfiguration scanner (if enabled and web endpoints exist)
-        if not config.skip_nikto and host.web_endpoints:
-            tasks.append(asyncio.create_task(run_nikto(host, config, tree)))
+    # Nikto: web server misconfiguration scanner (if enabled and web endpoints exist)
+    if not config.skip_nikto and host.web_endpoints:
+        tasks.append(asyncio.create_task(run_nikto(host, config, tree)))
 
-        # NVD CVE search (first pass): uses structured version data from nmap -sV
-        # and httpx. Second pass in orchestrator adds enumeration-tool findings.
-        tasks.append(asyncio.create_task(scan_cve_search(host, [], config)))
+    # NVD CVE search (first pass): uses structured version data from nmap -sV
+    # and httpx. Second pass in orchestrator adds enumeration-tool findings.
+    tasks.append(asyncio.create_task(scan_cve_search(host, [], config)))
 
-        if not tasks:
-            return []
+    if not tasks:
+        return []
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        findings: list[Finding] = []
-        for result in results:
-            if isinstance(result, BaseException):
-                log.error("Vuln scan error for %s: %s", host.ip, result, exc_info=result)
-            else:
-                findings.extend(result)
+    findings: list[Finding] = []
+    for result in results:
+        if isinstance(result, BaseException):
+            log.error("Vuln scan error for %s: %s", host.ip, result, exc_info=result)
+        else:
+            findings.extend(result)
 
-        log.info(
-            "Vuln scan %s: %d total finding(s)",
-            host.ip,
-            len(findings),
-        )
-        return findings
+    log.info(
+        "Vuln scan %s: %d total finding(s)",
+        host.ip,
+        len(findings),
+    )
+    return findings
