@@ -49,11 +49,10 @@ def _parse_ldap_timestamp(value):
 def _get_dns_domain_from_json(tmpdir):
     """Extract the DNS domain from ldapdomaindump JSON output.
 
-    ldapdomaindump writes ``domain_users.json``, ``domain_computers.json``, etc.
-    These files contain ``distinguishedName`` fields like
-    ``CN=Administrator,CN=Users,DC=asa-myanmar,DC=com``.  We parse the first
-    entry from any JSON file and reconstruct the DNS domain from the DC=
-    components.  Returns ``None`` if no DNS domain can be extracted.
+    ldapdomaindump writes JSON entries with a top-level ``dn`` field:
+    ``CN=Admin,OU=Users,DC=asa-myanmar,DC=com``.  We parse the first entry
+    from any JSON file and reconstruct the DNS domain from the DC= components.
+    Returns ``None`` if no DNS domain can be extracted.
     """
     import re
     import json as json_mod
@@ -70,15 +69,40 @@ def _get_dns_domain_from_json(tmpdir):
             continue
         if not isinstance(data, list) or not data:
             continue
-        # Try distinguishedName first, then canonicalName / dnshostname fallbacks
-        for field in ("distinguishedName", "canonicalName", "dnshostname", "dnshostname"):
-            raw = str(data[0].get(field) or "")
+        # ldapdomaindump stores DN at both top-level "dn" and nested "attributes"/"distinguishedName"
+        for entry in data[:5]:  # check first 5 entries in case some have no DN
+            raw = str(entry.get("dn") or "")
             parts = dc_pat.findall(raw)
             if len(parts) >= 2:
                 dns = ".".join(parts).lower()
                 log.info("_get_dns_domain_from_json: discovered DNS domain '%s' from %s", dns, fname)
                 return dns
     return None
+
+
+def _first(entry, attr):
+    """Return the first element of ``entry[\"attributes\"][attr]`` (ldapdomaindump stores
+    most values as single-element lists), or the scalar value if it is not a list."""
+    val = _attr(entry, attr)
+    if isinstance(val, list):
+        return val[0] if val else None
+    return val
+
+
+def _attr(entry, attr):
+    """Return the value of ``attr`` from ldapdomaindump's nested ``attributes`` dict."""
+    return (entry.get("attributes") or {}).get(attr)
+
+
+def _bool_attr(entry, attr, predicate, default):
+    """Evaluate *predicate* on an attributes value; return *default* if absent."""
+    val = _first(entry, attr)
+    if val is None:
+        return default
+    try:
+        return predicate(val)
+    except (TypeError, ValueError):
+        return default
 
 
 def _parse_ldapdomaindump(tmpdir, session):
@@ -117,16 +141,16 @@ def _parse_ldapdomaindump(tmpdir, session):
             users = [
                 ADUser(
                     session=session,
-                    sam_account_name=str(entry.get("sAMAccountName", "") or ""),
-                    upn=str(entry.get("userPrincipalName", "") or ""),
-                    display_name=str(entry.get("displayName", "") or ""),
-                    description=str(entry.get("description", "") or ""),
-                    enabled=bool(entry.get("enabled", True)),
-                    admin_count=int(entry.get("adminCount") or 0),
-                    last_logon=_parse_ldap_timestamp(entry.get("lastLogon")),
-                    member_of=list(entry.get("memberOf") or []),
-                    pwd_last_set=_parse_ldap_timestamp(entry.get("pwdLastSet")),
-                    spn_count=len(entry.get("servicePrincipalName") or []),
+                    sam_account_name=str(_first(entry, "sAMAccountName") or ""),
+                    upn=str(_first(entry, "userPrincipalName") or ""),
+                    display_name=str(_first(entry, "displayName") or ""),
+                    description=str(_first(entry, "description") or ""),
+                    enabled=not _bool_attr(entry, "userAccountControl", lambda v: (int(v or 0) & 2) == 0, True),
+                    admin_count=int(_first(entry, "adminCount") or 0),
+                    last_logon=_parse_ldap_timestamp(_first(entry, "lastLogon")),
+                    member_of=list(_attr(entry, "memberOf") or []),
+                    pwd_last_set=_parse_ldap_timestamp(_first(entry, "pwdLastSet")),
+                    spn_count=len(_attr(entry, "servicePrincipalName") or []),
                 )
                 for entry in data
             ]
@@ -138,12 +162,12 @@ def _parse_ldapdomaindump(tmpdir, session):
             groups = [
                 ADGroup(
                     session=session,
-                    name=str(entry.get("name", "") or ""),
-                    sam_account_name=str(entry.get("sAMAccountName", "") or ""),
-                    description=str(entry.get("description", "") or ""),
-                    members=list(entry.get("member") or []),
-                    member_count=len(entry.get("member") or []),
-                    admin_count=int(entry.get("adminCount") or 0),
+                    name=str(_first(entry, "name") or ""),
+                    sam_account_name=str(_first(entry, "sAMAccountName") or ""),
+                    description=str(_first(entry, "description") or ""),
+                    members=list(_attr(entry, "member") or []),
+                    member_count=len(_attr(entry, "member") or []),
+                    admin_count=int(_first(entry, "adminCount") or 0),
                 )
                 for entry in data
             ]
@@ -155,13 +179,13 @@ def _parse_ldapdomaindump(tmpdir, session):
             computers = [
                 ADComputer(
                     session=session,
-                    name=str(entry.get("sAMAccountName", "") or ""),
-                    dns_hostname=str(entry.get("dNSHostName", "") or ""),
-                    os=str(entry.get("operatingSystem", "") or ""),
-                    os_version=str(entry.get("operatingSystemVersion", "") or ""),
-                    enabled=bool(entry.get("enabled", True)),
-                    last_logon=_parse_ldap_timestamp(entry.get("lastLogon")),
-                    member_of=list(entry.get("memberOf") or []),
+                    name=str(_first(entry, "sAMAccountName") or "").rstrip("$"),
+                    dns_hostname=str(_first(entry, "dNSHostName") or ""),
+                    os=str(_first(entry, "operatingSystem") or ""),
+                    os_version=str(_first(entry, "operatingSystemVersion") or ""),
+                    enabled=not _bool_attr(entry, "userAccountControl", lambda v: (int(v or 0) & 2) != 0, False),
+                    last_logon=_parse_ldap_timestamp(_first(entry, "lastLogon")),
+                    member_of=list(_attr(entry, "memberOf") or []),
                 )
                 for entry in data
             ]
