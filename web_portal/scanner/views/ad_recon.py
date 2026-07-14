@@ -143,3 +143,143 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
                 "shares": shares,
             }
         )
+
+    @action(detail=True, methods=["get"])
+    def tree(self, request, pk=None):
+        """Build an AD tree topology from the DNs of users, computers, and groups.
+
+        Returns a nested hierarchy: domain root -> OUs/containers -> leaf objects.
+        Each node has {id, label, type, dn, children, counts}.
+        type: 'domain', 'ou', 'container', or 'leaf'
+        """
+        session = self.get_object()
+
+        # Collect all DNs and their types
+        nodes = []  # (dn, label, obj_type)
+        for u in ADUser.objects.filter(session=session).values_list("dn", "display_name"):
+            if u[0]:
+                nodes.append((u[0], u[1] or u[0].split(",")[0].replace("CN=", ""), "user"))
+        for c in ADComputer.objects.filter(session=session).values_list("dn", "name"):
+            if c[0]:
+                nodes.append((c[0], c[1] or c[0].split(",")[0].replace("CN=", ""), "computer"))
+        for g in ADGroup.objects.filter(session=session).values_list("dn", "name"):
+            if g[0]:
+                nodes.append((g[0], g[1] or g[0].split(",")[0].replace("CN=", ""), "group"))
+
+        if not nodes:
+            return Response({"id": "empty", "label": "No data", "type": "domain", "dn": "", "children": [], "counts": {"users": 0, "computers": 0, "groups": 0}})
+
+        # Reverse DNs to build tree bottom-up
+        def parse_dn(dn):
+            """Split DN into RDN components, return list (most specific first)."""
+            parts = []
+            current = ""
+            in_quotes = False
+            for ch in dn:
+                if ch == '"':
+                    in_quotes = not in_quotes
+                    current += ch
+                elif ch == "," and not in_quotes:
+                    parts.append(current.strip())
+                    current = ""
+                else:
+                    current += ch
+            if current.strip():
+                parts.append(current.strip())
+            return parts  # [CN=..., OU=..., OU=..., DC=..., DC=...]
+
+        # Find the domain root
+        all_parts = [parse_dn(dn) for dn, _, _ in nodes]
+        # Extract DC= components from the last DN to build domain root
+        dc_parts = []
+        for part in reversed(all_parts[0]):
+            if part.upper().startswith("DC="):
+                dc_parts.insert(0, part)
+            else:
+                break
+        domain_dn = ",".join(dc_parts)
+        domain_label = ".".join(p.replace("DC=", "") for p in dc_parts)
+
+        # Build tree: map dn_path -> node
+        tree_root = {
+            "id": "root",
+            "label": domain_label,
+            "type": "domain",
+            "dn": domain_dn,
+            "children": [],
+            "counts": {"users": 0, "computers": 0, "groups": 0},
+        }
+
+        # Map of dn -> node reference for inserting children
+        dn_map = {domain_dn.lower(): tree_root}
+
+        for dn, label, obj_type in nodes:
+            parts = parse_dn(dn)
+            # Walk from domain root down, creating OU nodes as needed
+            # parts go from most-specific (CN=user) to least (DC=com)
+            # We need to insert from domain root downward
+            reversed_parts = list(reversed(parts))  # [DC=com, DC=asa-myanmar, OU=..., CN=...]
+
+            # Find the insertion point: skip DC components, start from OUs
+            start_idx = 0
+            while start_idx < len(reversed_parts) and reversed_parts[start_idx].upper().startswith("DC="):
+                start_idx += 1
+
+            parent = tree_root
+            parent_dn_parts = list(dc_parts)  # ["DC=asa-myanmar", "DC=com"]
+
+            for i in range(start_idx, len(reversed_parts)):
+                part = reversed_parts[i]
+                current_dn_parts = parent_dn_parts + [part]
+                current_dn = ",".join(reversed(current_dn_parts))
+                current_key = current_dn.lower()
+
+                if current_key not in dn_map:
+                    # Create OU/container node
+                    is_ou = part.upper().startswith("OU=")
+                    ou_node = {
+                        "id": "ou-" + str(len(dn_map)),
+                        "label": part.split("=", 1)[1] if "=" in part else part,
+                        "type": "ou" if is_ou else "container",
+                        "dn": current_dn,
+                        "children": [],
+                        "counts": {"users": 0, "computers": 0, "groups": 0},
+                    }
+                    dn_map[current_key] = ou_node
+                    parent["children"].append(ou_node)
+
+                parent = dn_map[current_key]
+                parent_dn_parts = current_dn_parts
+
+                # Update counts
+                parent["counts"][obj_type + "s"] = parent["counts"].get(obj_type + "s", 0) + 1
+
+            # Add the leaf node under its parent OU
+            leaf = {
+                "id": "leaf-" + str(len(dn_map)),
+                "label": label,
+                "type": obj_type,
+                "dn": dn,
+                "children": [],
+                "counts": {},
+            }
+            dn_map[dn.lower()] = leaf
+            parent["children"].append(leaf)
+
+        # Update root counts
+        tree_root["counts"]["users"] = sum(1 for _, _, t in nodes if t == "user")
+        tree_root["counts"]["computers"] = sum(1 for _, _, t in nodes if t == "computer")
+        tree_root["counts"]["groups"] = sum(1 for _, _, t in nodes if t == "group")
+
+        # Sort children at each level: OUs first, then leaf objects
+        def sort_tree(node):
+            if node.get("children"):
+                node["children"].sort(key=lambda c: (
+                    0 if c["type"] in ("ou", "container") else 1,
+                    c["label"].lower()
+                ))
+                for child in node["children"]:
+                    sort_tree(child)
+
+        sort_tree(tree_root)
+        return Response(tree_root)

@@ -4,18 +4,8 @@
  *   Left:  Credential profiles list + Quick Unauth form
  *   Right: Session history table with status polling
  *
- * API surface (all under /api/ad-recon/):
- *   GET    /profiles/            — list user's credential profiles
- *   POST   /profiles/            — create profile (password accepted, never returned)
- *   PUT    /profiles/<id>/       — update profile
- *   DELETE /profiles/<id>/       — delete profile
- *   GET    /sessions/            — list all sessions
- *   POST   /sessions/            — create + dispatch session
- *   GET    /sessions/<id>/       — session detail
- *   GET    /sessions/<id>/users/      — domain users
- *   GET    /sessions/<id>/groups/     — domain groups
- *   GET    /sessions/<id>/computers/  — domain computers
- *   GET    /sessions/<id>/findings/   — SPNs, ACLs, cert services, trusts */
+ * Session detail (/ad-recon/<id>): full-page view with tabs:
+ *   Overview, AD Tree, Users, Computers, Groups */
 
 WG.AD = WG.AD || {};
 WG.AD._pollTimer = null;
@@ -25,7 +15,6 @@ WG.AD._pollTimer = null;
 WG.renderADRecon = function() {
   var esc = WG.escHtml;
 
-  /* Kick off async data loads — they populate the DOM when they resolve. */
   WG.AD.loadProfiles();
   WG.AD.loadSessions();
 
@@ -39,10 +28,7 @@ WG.renderADRecon = function() {
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">' +
 
-      /* ── Left column ── */
       '<div>' +
-
-        /* Credential Profiles card */
         '<div class="panel" style="margin-bottom:20px;">' +
           '<div class="panel-header" style="display:flex;justify-content:space-between;align-items:center;">' +
             '<div><h2 style="margin:0;font-size:0.95rem;">Credential Profiles</h2>' +
@@ -52,7 +38,6 @@ WG.renderADRecon = function() {
           '<div class="panel-body" id="adProfilesList"><div class="panel-empty">Loading...</div></div>' +
         '</div>' +
 
-        /* Quick Unauth card */
         '<div class="panel">' +
           '<div class="panel-header"><h2 style="margin:0;font-size:0.95rem;">Quick Start &mdash; Unauthenticated</h2></div>' +
           '<div class="panel-body">' +
@@ -63,10 +48,8 @@ WG.renderADRecon = function() {
             '<button class="btn btn-primary btn-block" onclick="WG.AD.startUnauth()">Run Unauth Recon</button>' +
           '</div>' +
         '</div>' +
-
       '</div>' +
 
-      /* ── Right column ── */
       '<div class="panel">' +
         '<div class="panel-header"><h2 style="margin:0;font-size:0.95rem;">Session History</h2></div>' +
         '<div class="panel-body" id="adSessionList"><div class="panel-empty">Loading...</div></div>' +
@@ -74,7 +57,7 @@ WG.renderADRecon = function() {
 
     '</div>' +
 
-    /* ── Profile editor modal ── */
+    /* Profile editor modal */
     '<div class="modal-overlay" id="profileModal">' +
       '<div class="modal" style="width:480px;">' +
         '<div class="modal-header"><h2 id="profileModalTitle">New Profile</h2></div>' +
@@ -98,7 +81,7 @@ WG.renderADRecon = function() {
       '</div>' +
     '</div>' +
 
-    /* ── New session modal ── */
+    /* New session modal */
     '<div class="modal-overlay" id="sessionModal">' +
       '<div class="modal" style="width:480px;">' +
         '<div class="modal-header"><h2>New AD Recon Session</h2></div>' +
@@ -113,17 +96,6 @@ WG.renderADRecon = function() {
         '<div class="modal-footer">' +
           '<button class="btn btn-secondary" onclick="WG.closeModal(\'sessionModal\')">Cancel</button>' +
           '<button class="btn btn-primary" onclick="WG.AD.startSession()">Start Recon</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>' +
-
-    /* ── Session detail modal ── */
-    '<div class="modal-overlay" id="sessionDetailModal">' +
-      '<div class="modal" style="width:720px;max-height:80vh;">' +
-        '<div class="modal-header"><h2 id="sessDetailTitle">Session Detail</h2></div>' +
-        '<div class="modal-body" id="sessDetailBody" style="max-height:55vh;overflow-y:auto;"></div>' +
-        '<div class="modal-footer">' +
-          '<button class="btn btn-secondary" onclick="WG.closeModal(\'sessionDetailModal\')">Close</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -232,17 +204,16 @@ WG.AD.loadSessions = function() {
       var statusClass = s.status === 'complete' ? 'completed' : s.status === 'failed' ? 'cancelled' : s.status === 'running' ? 'info' : '';
 
       html += '<tr>' +
-        '<td style="font-weight:600;">' + esc(s.domain) + '</td>' +
+        '<td style="font-weight:600;"><a href="javascript:void(0)" onclick="WG.navigate(\'ad-recon-session\',{id:\'' + s.id + '\'})" style="color:var(--accent);text-decoration:none;">' + esc(s.domain) + '</a></td>' +
         '<td class="mono" style="font-size:0.78rem;">' + esc(s.dc_ip) + '</td>' +
         '<td><span class="tag" style="font-size:0.62rem;">' + esc(s.scope) + '</span></td>' +
         '<td><span class="status-badge ' + statusClass + '"><span class="dot"></span> ' + esc(s.status) + '</span></td>' +
         '<td>' +
-          '<button class="btn btn-xs btn-ghost" onclick="WG.AD.viewSession(\'' + s.id + '\')">View</button>' +
+          '<a href="javascript:void(0)" onclick="WG.navigate(\'ad-recon-session\',{id:\'' + s.id + '\'})" class="btn btn-xs btn-ghost">View</a>' +
           (s.status !== 'running' ? '<button class="btn btn-xs btn-ghost" onclick="WG.AD.rerunSession(\'' + s.id + '\')">Re-run</button>' : '') +
         '</td>' +
         '</tr>';
 
-      /* Auto-poll running sessions */
       if (s.status === 'running' || s.status === 'pending') {
         WG.AD._startPolling(s.id);
       }
@@ -255,7 +226,6 @@ WG.AD.loadSessions = function() {
 
 
 WG.AD.openSessionModal = function() {
-  /* Populate profile dropdown */
   WG.fetchData('/ad-recon/profiles/').then(function(profiles) {
     var sel = document.getElementById('sessProfile');
     sel.innerHTML = '<option value="">-- None (Unauthenticated) --</option>';
@@ -327,6 +297,11 @@ WG.AD._startPolling = function(sessionId) {
         WG.AD._pollTimer = null;
       }
       WG.AD.loadSessions();
+      /* Refresh detail page if viewing this session */
+      var detailEl = document.getElementById('adDetailPage');
+      if (detailEl && detailEl.dataset.sessionId === sessionId) {
+        WG.AD._refreshDetailTabs(s);
+      }
     });
   }, 3000);
 };
@@ -348,14 +323,19 @@ WG.AD.rerunSession = function(id) {
 };
 
 
-/* ── Session detail view ── */
+/* ── Session Detail Page (full-page with tabs) ── */
 
-WG.AD.viewSession = function(id) {
+WG.AD.renderSessionDetail = function(id) {
   WG.api('/ad-recon/sessions/' + id + '/').then(function(s) {
-    if (!s) return;
-    var esc = WG.escHtml;
+    if (!s) {
+      document.getElementById('mainContent').innerHTML = '<div class="panel-empty">Session not found. <a href="javascript:void(0)" onclick="WG.navigate(\'ad-recon\')">Back to AD Recon</a></div>';
+      return;
+    }
 
-    /* Build tool status table */
+    var esc = WG.escHtml;
+    var statusClass = s.status === 'complete' ? 'completed' : s.status === 'failed' ? 'cancelled' : s.status === 'running' ? 'info' : '';
+
+    /* Tool status rows */
     var toolRows = '';
     var statuses = s.tool_status || {};
     Object.keys(statuses).forEach(function(name) {
@@ -366,51 +346,326 @@ WG.AD.viewSession = function(id) {
         '</tr>';
     });
 
-    document.getElementById('sessDetailTitle').textContent = 'Session: ' + s.domain + ' (' + esc(s.scope) + ')';
-    document.getElementById('sessDetailBody').innerHTML = '' +
-      '<div class="info-grid" style="margin-bottom:16px;">' +
-        '<div class="info-item"><div class="info-label">Status</div><div class="info-value"><span class="status-badge ' + (s.status === 'complete' ? 'completed' : s.status === 'failed' ? 'cancelled' : 'info') + '"><span class="dot"></span> ' + esc(s.status) + '</span></div></div>' +
-        '<div class="info-item"><div class="info-label">DC IP</div><div class="info-value mono">' + esc(s.dc_ip) + '</div></div>' +
-        '<div class="info-item"><div class="info-label">Scope</div><div class="info-value">' + esc(s.scope) + '</div></div>' +
-        '<div class="info-item"><div class="info-label">Profile</div><div class="info-value">' + esc(s.profile_name || 'N/A') + '</div></div>' +
-        (s.error ? '<div class="info-item" style="grid-column:1/-1;"><div class="info-label">Error</div><div class="info-value" style="color:var(--critical);">' + esc(s.error) + '</div></div>' : '') +
+    var html = '' +
+      '<div class="page-header">' +
+        '<div class="page-header-left">' +
+          '<a href="javascript:void(0)" onclick="WG.navigate(\'ad-recon\')" style="color:var(--text-dim);font-size:0.8rem;text-decoration:none;">&larr; Back to AD Recon</a>' +
+          '<h1>' + esc(s.domain) + ' <span class="tag" style="font-size:0.65rem;vertical-align:middle;">' + esc(s.scope) + '</span></h1>' +
+          '<p style="margin:0;">DC: <span class="mono">' + esc(s.dc_ip) + '</span> &middot; Status: <span class="status-badge ' + statusClass + '"><span class="dot"></span> ' + esc(s.status) + '</span></p>' +
+        '</div>' +
+        '<div class="page-header-actions">' +
+          (s.status !== 'running' ? '<button class="btn btn-primary" onclick="WG.AD.rerunSession(\'' + s.id + '\')">Re-run</button>' : '') +
+        '</div>' +
       '</div>' +
 
-      (toolRows ? '<h3 style="font-size:0.85rem;margin-bottom:8px;">Tool Status</h3>' +
-      '<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Tool</th><th>Result</th></tr></thead><tbody>' + toolRows + '</tbody></table></div>' : '') +
+      '<div class="tabs" style="margin-bottom:16px;" id="adDetailTabs">' +
+        '<button class="tab active" data-tab="overview" onclick="WG.AD._switchTab(\'' + s.id + '\',\'overview\')">Overview</button>' +
+        '<button class="tab" data-tab="tree" onclick="WG.AD._switchTab(\'' + s.id + '\',\'tree\')">AD Tree</button>' +
+        '<button class="tab" data-tab="users" onclick="WG.AD._switchTab(\'' + s.id + '\',\'users\')">Users</button>' +
+        '<button class="tab" data-tab="computers" onclick="WG.AD._switchTab(\'' + s.id + '\',\'computers\')">Computers</button>' +
+        '<button class="tab" data-tab="groups" onclick="WG.AD._switchTab(\'' + s.id + '\',\'groups\')">Groups</button>' +
+      '</div>' +
 
-      /* Load detailed findings */
-      '<div id="sessFindings" style="margin-top:16px;"><div class="panel-empty">Loading findings...</div></div>';
+      '<div id="adDetailPage" data-session-id="' + s.id + '" data-session-status="' + s.status + '">' +
+        /* Overview tab (default) */
+        '<div id="adTab-overview" class="ad-tab-content">' +
+          (s.error ? '<div class="panel" style="border-left:3px solid var(--critical);margin-bottom:16px;"><div class="panel-body" style="color:var(--critical);">' + esc(s.error) + '</div></div>' : '') +
 
-    WG.openModal('sessionDetailModal');
+          '<div class="panel" style="margin-bottom:16px;">' +
+            '<div class="panel-header"><h3 style="margin:0;font-size:0.85rem;">Session Info</h3></div>' +
+            '<div class="panel-body">' +
+              '<div class="info-grid">' +
+                '<div class="info-item"><div class="info-label">Domain</div><div class="info-value">' + esc(s.domain) + '</div></div>' +
+                '<div class="info-item"><div class="info-label">DC IP</div><div class="info-value mono">' + esc(s.dc_ip) + '</div></div>' +
+                '<div class="info-item"><div class="info-label">Scope</div><div class="info-value">' + esc(s.scope) + '</div></div>' +
+                '<div class="info-item"><div class="info-label">Profile</div><div class="info-value">' + esc(s.profile_name || 'N/A') + '</div></div>' +
+                '<div class="info-item"><div class="info-label">Created</div><div class="info-value">' + esc(s.created_at || '') + '</div></div>' +
+                (s.completed_at ? '<div class="info-item"><div class="info-label">Completed</div><div class="info-value">' + esc(s.completed_at) + '</div></div>' : '') +
+              '</div>' +
+            '</div>' +
+          '</div>' +
 
-    /* Fetch findings from the nested endpoint */
-    WG.api('/ad-recon/sessions/' + id + '/findings/').then(function(f) {
-      var fel = document.getElementById('sessFindings');
-      if (!fel || !f) { if (fel) fel.innerHTML = ''; return; }
+          (toolRows ? '<div class="panel" style="margin-bottom:16px;">' +
+            '<div class="panel-header"><h3 style="margin:0;font-size:0.85rem;">Tool Status</h3></div>' +
+            '<div class="panel-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Tool</th><th>Result</th></tr></thead><tbody>' + toolRows + '</tbody></table></div></div>' +
+          '</div>' : '') +
 
-      var html = '';
-      function section(title, items, fields) {
-        if (!items || !items.length) return '';
-        var h = '<h3 style="font-size:0.82rem;margin:12px 0 6px;color:var(--text-bright);">' + esc(title) + ' (' + items.length + ')</h3>' +
-          '<div style="overflow-x:auto;"><table class="data-table" style="font-size:0.72rem;"><thead><tr>';
-        fields.forEach(function(fld) { h += '<th>' + esc(fld) + '</th>'; });
-        h += '</tr></thead><tbody>';
-        items.forEach(function(item) {
-          h += '<tr>';
-          fields.forEach(function(fld) { h += '<td>' + esc(String(item[fld] || '')) + '</td>'; });
-          h += '</tr>';
-        });
-        h += '</tbody></table></div>';
-        return h;
-      }
+          '<div class="panel">' +
+            '<div class="panel-header"><h3 style="margin:0;font-size:0.85rem;">Findings</h3></div>' +
+            '<div class="panel-body" id="sessOverviewFindings"><div class="panel-empty">Loading...</div></div>' +
+          '</div>' +
+        '</div>' +
 
-      html += section('SPNs', f.spns, ['service_name', 'sam_account_name', 'host', 'category']);
-      html += section('Interesting ACLs', f.acls, ['identity', 'active_directory_rights', 'object_dn']);
-      html += section('Certificate Services', f.cert_services, ['ca_name', 'host', 'vulnerable_template']);
-      html += section('Domain Trusts', f.trusts, ['source_domain', 'target_domain', 'direction', 'trust_type']);
+        /* AD Tree tab */
+        '<div id="adTab-tree" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adTreeContainer"><div class="panel-empty">Loading tree...</div></div></div></div>' +
 
-      fel.innerHTML = html || '<div class="panel-empty">No findings available.</div>';
+        /* Users tab */
+        '<div id="adTab-users" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adUsersContainer"><div class="panel-empty">Loading users...</div></div></div></div>' +
+
+        /* Computers tab */
+        '<div id="adTab-computers" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adComputersContainer"><div class="panel-empty">Loading computers...</div></div></div></div>' +
+
+        /* Groups tab */
+        '<div id="adTab-groups" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adGroupsContainer"><div class="panel-empty">Loading groups...</div></div></div></div>' +
+      '</div>';
+
+    return html;
+  });
+};
+
+
+WG.AD._switchTab = function(sessionId, tabName) {
+  /* Update tab button active states */
+  document.querySelectorAll('#adDetailTabs .tab').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+
+  /* Show/hide tab content */
+  document.querySelectorAll('#adDetailPage .ad-tab-content').forEach(function(el) {
+    el.style.display = 'none';
+  });
+  var target = document.getElementById('adTab-' + tabName);
+  if (target) target.style.display = '';
+
+  /* Lazy-load tab content */
+  switch (tabName) {
+    case 'overview':
+      WG.AD._loadOverviewFindings(sessionId);
+      break;
+    case 'tree':
+      WG.AD._loadTree(sessionId);
+      break;
+    case 'users':
+      WG.AD._loadDataTable(sessionId, 'users', 'adUsersContainer', ['sam_account_name', 'upn', 'display_name', 'dn'], ['SAM', 'UPN', 'Display Name', 'DN']);
+      break;
+    case 'computers':
+      WG.AD._loadDataTable(sessionId, 'computers', 'adComputersContainer', ['name', 'dns_hostname', 'os', 'os_version', 'dn'], ['Name', 'DNS Hostname', 'OS', 'Version', 'DN']);
+      break;
+    case 'groups':
+      WG.AD._loadDataTable(sessionId, 'groups', 'adGroupsContainer', ['name', 'sam_account_name', 'member_count', 'dn'], ['Name', 'SAM', 'Members', 'DN']);
+      break;
+  }
+};
+
+
+WG.AD._refreshDetailTabs = function(s) {
+  /* Update status badge */
+  var detailEl = document.getElementById('adDetailPage');
+  if (!detailEl) return;
+
+  var oldStatus = detailEl.dataset.sessionStatus;
+  if (oldStatus !== s.status) {
+    detailEl.dataset.sessionStatus = s.status;
+    /* Refresh current tab */
+    var activeTab = document.querySelector('#adDetailTabs .tab.active');
+    if (activeTab) {
+      WG.AD._switchTab(detailEl.dataset.sessionId, activeTab.dataset.tab);
+    }
+  }
+};
+
+
+/* ── Overview: Findings ── */
+
+WG.AD._loadOverviewFindings = function(sessionId) {
+  var el = document.getElementById('sessOverviewFindings');
+  if (!el || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+
+  WG.api('/ad-recon/sessions/' + sessionId + '/findings/').then(function(f) {
+    if (!f) { el.innerHTML = '<div class="panel-empty">No findings.</div>'; return; }
+    var esc = WG.escHtml;
+
+    function section(title, items, fields) {
+      if (!items || !items.length) return '';
+      var h = '<h4 style="font-size:0.78rem;margin:12px 0 6px;color:var(--text-bright);">' + esc(title) + ' (' + items.length + ')</h4>' +
+        '<div style="overflow-x:auto;"><table class="data-table" style="font-size:0.72rem;"><thead><tr>';
+      fields.forEach(function(fld) { h += '<th>' + esc(fld) + '</th>'; });
+      h += '</tr></thead><tbody>';
+      items.forEach(function(item) {
+        h += '<tr>';
+        fields.forEach(function(fld) { h += '<td>' + esc(String(item[fld] || '')) + '</td>'; });
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+      return h;
+    }
+
+    var html = '';
+    html += section('SPNs', f.spns, ['service_name', 'sam_account_name', 'host', 'category']);
+    html += section('Interesting ACLs', f.acls, ['identity', 'active_directory_rights', 'object_dn']);
+    html += section('Certificate Services', f.cert_services, ['ca_name', 'host', 'vulnerable_template']);
+    html += section('Domain Trusts', f.trusts, ['source_domain', 'target_domain', 'direction', 'trust_type']);
+    html += section('Shares', f.shares, ['name', 'path', 'access']);
+
+    el.innerHTML = html || '<div class="panel-empty">No findings available.</div>';
+  });
+};
+
+
+/* ── AD Tree Visualization ── */
+
+WG.AD._loadTree = function(sessionId) {
+  var el = document.getElementById('adTreeContainer');
+  if (!el || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+
+  WG.api('/ad-recon/sessions/' + sessionId + '/tree/').then(function(tree) {
+    if (!tree) { el.innerHTML = '<div class="panel-empty">No tree data available.</div>'; return; }
+    el.innerHTML = WG.AD._renderTree(tree);
+    WG.AD._initTreeInteractions();
+  });
+};
+
+
+WG.AD._renderTree = function(node, level) {
+  level = level || 0;
+  var esc = WG.escHtml;
+
+  var typeColors = {
+    domain: 'var(--accent)',
+    ou: '#22c55e',
+    container: '#94a3b8',
+    user: '#f59e0b',
+    computer: '#8b5cf6',
+    group: '#3b82f6'
+  };
+  var typeIcons = {
+    domain: '\u{1F310}',
+    ou: '\u{1F4C2}',
+    container: '\u{1F4C1}',
+    user: '\u{1F464}',
+    computer: '\u{1F5A5}',
+    group: '\u{1F465}'
+  };
+
+  var color = typeColors[node.type] || 'var(--text-dim)';
+  var icon = typeIcons[node.type] || '';
+
+  var hasChildren = node.children && node.children.length > 0;
+  var isLeaf = node.type !== 'domain' && node.type !== 'ou' && node.type !== 'container';
+
+  var countsHtml = '';
+  if (node.counts && (node.counts.users || node.counts.computers || node.counts.groups)) {
+    var parts = [];
+    if (node.counts.users) parts.push(node.counts.users + ' users');
+    if (node.counts.computers) parts.push(node.counts.computers + ' computers');
+    if (node.counts.groups) parts.push(node.counts.groups + ' groups');
+    countsHtml = ' <span style="font-size:0.65rem;color:var(--text-dim);">(' + parts.join(', ') + ')</span>';
+  }
+
+  var html = '<div class="tree-node" style="margin-left:' + (level * 24) + 'px;">';
+
+  if (hasChildren) {
+    html += '<span class="tree-toggle" onclick="WG.AD._toggleTreeNode(this)" style="cursor:pointer;user-select:none;display:inline-block;width:18px;">\u25BC</span>';
+  } else {
+    html += '<span style="display:inline-block;width:18px;"></span>';
+  }
+
+  html += '<span style="color:' + color + ';font-weight:' + (level === 0 ? '700' : '500') + ';font-size:' + (level === 0 ? '0.9rem' : (0.82 - level * 0.02) + 'rem') + ';">';
+  html += icon + ' ' + esc(node.label);
+  html += '</span>';
+
+  if (!isLeaf) {
+    html += countsHtml;
+  }
+
+  html += '</div>';
+
+  if (hasChildren) {
+    html += '<div class="tree-children">';
+    node.children.forEach(function(child) {
+      html += WG.AD._renderTree(child, level + 1);
     });
+    html += '</div>';
+  }
+
+  return html;
+};
+
+
+WG.AD._initTreeInteractions = function() {
+  /* Tree nodes are already rendered with onclick handlers */
+};
+
+
+WG.AD._toggleTreeNode = function(toggleEl) {
+  var children = toggleEl.parentElement.nextElementSibling;
+  if (!children || !children.classList.contains('tree-children')) return;
+
+  var isOpen = children.style.display !== 'none';
+  if (isOpen) {
+    children.style.display = 'none';
+    toggleEl.textContent = '\u25B6';
+  } else {
+    children.style.display = '';
+    toggleEl.textContent = '\u25BC';
+  }
+};
+
+
+/* ── Data Tables ── */
+
+WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, headers) {
+  var el = document.getElementById(containerId);
+  if (!el || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+
+  var esc = WG.escHtml;
+
+  WG.api('/ad-recon/sessions/' + sessionId + '/' + endpoint + '/?page_size=500').then(function(data) {
+    if (!data || !data.results || !data.results.length) {
+      el.innerHTML = '<div class="panel-empty">No ' + endpoint + ' found.</div>';
+      return;
+    }
+
+    var items = data.results;
+    var total = data.count || items.length;
+
+    /* Search box */
+    var html = '<div style="margin-bottom:8px;">' +
+      '<input class="form-input" id="adSearch-' + endpoint + '" placeholder="Search ' + total + ' ' + endpoint + '..." ' +
+      'oninput="WG.AD._filterTable(\'adTable-' + endpoint + '\', this.value)" style="max-width:300px;">' +
+      '</div>';
+
+    html += '<div style="overflow-x:auto;"><table class="data-table" id="adTable-' + endpoint + '" style="font-size:0.75rem;">';
+    html += '<thead><tr>';
+    headers.forEach(function(h) { html += '<th>' + esc(h) + '</th>'; });
+    html += '</tr></thead><tbody>';
+
+    items.forEach(function(item) {
+      html += '<tr>';
+      fields.forEach(function(fld) {
+        var val = item[fld];
+        if (fld === 'dn' && val) {
+          /* Truncate DN for display */
+          var display = val.length > 80 ? val.substring(0, 77) + '...' : val;
+          html += '<td title="' + esc(val) + '" style="font-size:0.68rem;color:var(--text-dim);">' + esc(display) + '</td>';
+        } else {
+          html += '<td>' + esc(String(val || '')) + '</td>';
+        }
+      });
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+
+    if (total > items.length) {
+      html += '<div style="text-align:center;padding:8px;color:var(--text-dim);font-size:0.75rem;">Showing ' + items.length + ' of ' + total + ' ' + endpoint + '</div>';
+    }
+
+    el.innerHTML = html;
+  });
+};
+
+
+WG.AD._filterTable = function(tableId, query) {
+  var table = document.getElementById(tableId);
+  if (!table) return;
+  var rows = table.querySelectorAll('tbody tr');
+  var q = query.toLowerCase();
+  rows.forEach(function(row) {
+    var text = row.textContent.toLowerCase();
+    row.style.display = q === '' || text.indexOf(q) !== -1 ? '' : 'none';
   });
 };
