@@ -270,9 +270,9 @@ async def run_pipeline(
         """Run the full scan pipeline for a single host."""
         async with sem:
             # Phase 3a: Port scan (with fallback chain) + service detection
+            await _advance_host_phase(ip, "portscan")
             host = await scan_host(ip, config, tree)
             _emit_dir_artifacts(ip, tree.host_nmap_xml_dir(ip), "nmap")
-            await _advance_host_phase(ip, "portscan")
 
             # Enrich with ARP data from discovery phase
             mac, vendor = mac_vendor_map.get(ip, ("", ""))
@@ -295,11 +295,12 @@ async def run_pipeline(
                 return host, snmp_findings
 
             # Phase 3b: Web detection (skipped per scan_type)
+            await _advance_host_phase(ip, "webdetect")
             if "webdetect" not in _skip_phases:
                 await probe_host(host, config, tree)
-            await _advance_host_phase(ip, "webdetect")
 
             # Phase 3c: Web crawl + screenshot (skipped per scan_type)
+            await _advance_host_phase(ip, "webcrawl")
             crawl_findings: list[Finding] = []
             screenshot_findings: list[Finding] = []
             if "webcrawl" not in _skip_phases and host.web_endpoints:
@@ -316,9 +317,9 @@ async def run_pipeline(
                     screenshot_findings = ss_result
                 elif isinstance(ss_result, BaseException):
                     log.error("[%s] screenshot failed", ip, exc_info=ss_result)
-            await _advance_host_phase(ip, "webcrawl")
 
             # Phase 3d: Vulnerability scanning (skipped per scan_type)
+            await _advance_host_phase(ip, "vulnscan")
             vuln_findings: list[Finding] = []
             msf_findings: list[Finding] = []
             if "vulnscan" not in _skip_phases:
@@ -336,9 +337,9 @@ async def run_pipeline(
                     msf_findings = msf_result
                 elif isinstance(msf_result, BaseException):
                     log.error("[%s] msf scan failed", ip, exc_info=msf_result)
-            await _advance_host_phase(ip, "vulnscan")
 
             # Phase 3e: Service enumeration (skipped per scan_type)
+            await _advance_host_phase(ip, "enumeration")
             enum_results: list[Any] = []
             if "enumeration" not in _skip_phases:
                 svc_task = (
@@ -358,7 +359,6 @@ async def run_pipeline(
                     return_exceptions=True,
                 ))
                 _emit_dir_artifacts(ip, tree.host_dir(ip), "enumeration", recursive=False)
-            await _advance_host_phase(ip, "enumeration")
 
             enum_names = [
                 "cms",
