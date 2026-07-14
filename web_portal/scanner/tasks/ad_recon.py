@@ -321,6 +321,14 @@ def ad_recon_task(self, session_id):
         # ── Phase 2: BloodHound ──
         log.info("AD recon %s: Phase 2 -- BloodHound", session_id)
 
+        # Resolve DC hostname and add to /etc/hosts (bloodhound-python -dc rejects IPs)
+        dc_hostname = domain.upper()
+        _run_tool(
+            "hosts_fix",
+            ["sh", "-c", "grep -q '%s' /etc/hosts || echo '%s %s' >> /etc/hosts" % (dc_hostname, dc_ip, dc_hostname)],
+            timeout=5,
+        )
+
         bh_args = [
             "bloodhound-python",
             "-c",
@@ -328,8 +336,8 @@ def ad_recon_task(self, session_id):
             "--zip",
             "-d",
             domain,
-            "-ns",
-            dc_ip,
+            "-dc",
+            dc_hostname,
             "--dns-tcp",
         ]
         if is_auth:
