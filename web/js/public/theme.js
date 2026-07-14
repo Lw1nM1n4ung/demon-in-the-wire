@@ -173,6 +173,12 @@ WG.loadPrefsFromServer = function() {
       if (data.notifications) {
         localStorage.setItem('wg_notifs', JSON.stringify(data.notifications));
       }
+
+      // Cache dashboard widget config
+      if (data.dashboard_config) {
+        WG._dashboardConfig = data.dashboard_config;
+        localStorage.setItem('wg_dashboard_config', JSON.stringify(data.dashboard_config));
+      }
     }
   });
 };

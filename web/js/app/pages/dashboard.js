@@ -3,11 +3,58 @@
  * Strategic view over every scan ever run: KPIs, severity trend, newly-
  * discovered assets, top exposures, top technologies, and a filterable
  * asset inventory. Backed by GET /api/dashboard/ and GET /api/assets/.
- * Chart instances are kept on WG._charts so they can be destroyed on nav. */
+ * Chart instances are kept on WG._charts so they can be destroyed on nav.
+ *
+ * Users customize their dashboard via the Customize panel — widget
+ * visibility and order are stored per-user in /api/preferences/. */
 
 WG._charts = WG._charts || {};
 WG._asmAssetsCache = null;
 WG._asmAssetsParams = { search: '', status: '', min_risk: '', has_cve: '' };
+
+/* Widget metadata — id → human-readable label for the customize panel. */
+WG._WIDGET_LABELS = {
+  kpis:              'KPI Summary',
+  severity_trend:    'Severity Trend (30d)',
+  newly_discovered:  'Newly Discovered (7d)',
+  risk_by_source:    'Risk by Source',
+  top_exposures:     'Top Exposures',
+  top_technologies:  'Top Technologies',
+  web_surface:       'Web Surface Screenshots',
+  asset_inventory:   'Asset Inventory',
+};
+
+/* Default widget config — all visible, standard order. */
+WG._DEFAULT_DASHBOARD_CONFIG = {
+  widgets: [
+    { id: 'kpis', visible: true },
+    { id: 'severity_trend', visible: true },
+    { id: 'newly_discovered', visible: true },
+    { id: 'risk_by_source', visible: true },
+    { id: 'top_exposures', visible: true },
+    { id: 'top_technologies', visible: true },
+    { id: 'web_surface', visible: true },
+    { id: 'asset_inventory', visible: true },
+  ]
+};
+
+/* Get dashboard config — localStorage first, then WG._dashboardConfig, then default. */
+WG._getDashboardConfig = function() {
+  if (!WG._dashboardConfig) {
+    try {
+      var cached = localStorage.getItem('wg_dashboard_config');
+      if (cached) WG._dashboardConfig = JSON.parse(cached);
+    } catch (e) {}
+  }
+  return WG._dashboardConfig || WG._DEFAULT_DASHBOARD_CONFIG;
+};
+
+/* Check if a widget is visible in the current config. */
+WG._isWidgetVisible = function(id) {
+  var cfg = WG._getDashboardConfig();
+  var w = (cfg.widgets || []).filter(function(w) { return w.id === id; })[0];
+  return w ? w.visible !== false : true; // default visible if not in config
+};
 
 /* Helper — safe HTML assignment. All inputs are already escaped via WG.escHtml. */
 WG._setHtml = function(el, html) {
@@ -103,31 +150,42 @@ WG._buildAsm = function() {
   var kpis = data.kpis || {};
   var loaded = WG._cache['asm'] != null;
   var scoreColor = WG._scoreColor(kpis.attack_surface_score);
+  var w = WG._isWidgetVisible;  // shorthand
+  var canView = WG._dashboardCanViewAssets();
 
-  return '' +
+  var html = '' +
     '<div class="page-header">' +
       '<div class="page-header-left">' +
         '<h1>Attack Surface</h1>' +
         '<p>Continuous inventory of every asset seen across all scans</p>' +
       '</div>' +
       '<div class="page-header-actions">' +
+        '<button class="btn btn-ghost btn-sm" onclick="WG._toggleCustomizePanel()">&#9881; Customize</button>' +
         '<button class="btn btn-secondary btn-sm" onclick="WG.invalidateCache();WG.render()">&#8635; Refresh</button>' +
-        (WG._dashboardCanViewAssets() ? '<button class="btn btn-primary" onclick="WG.openModal(\'scanModal\')"><span>+</span> New Scan</button>' : '') +
+        (canView ? '<button class="btn btn-primary" onclick="WG.openModal(\'scanModal\')"><span>+</span> New Scan</button>' : '') +
       '</div>' +
-    '</div>' +
+    '</div>';
 
-    /* ══ KPI band ══ */
-    '<div class="asm-kpis">' +
+  /* ══ KPI band ══ */
+  if (w('kpis')) {
+    html += '<div class="asm-kpis" data-widget="kpis">' +
       WG._kpiTile('Total Assets',        kpis.total_assets,        '--info',     'open ports observed', 'anim-reveal-1') +
       WG._kpiTile('Critical Exposures',  kpis.critical_exposures,  '--critical', 'open critical findings', 'anim-reveal-2') +
       WG._kpiTile('New (7d)',            kpis.new_assets_7d,       '--high',     'first seen in last 7 days', 'anim-reveal-3') +
       WG._kpiTile('With CVEs',           kpis.assets_with_cves,    '--medium',   'assets linked to known issues', 'anim-reveal-4') +
       WG._kpiScoreTile(kpis.attack_surface_score, scoreColor) +
-    '</div>' +
+    '</div>';
+  }
 
-    /* ══ Row 2 — severity trend + newly discovered ══ */
-    '<div class="asm-row-2">' +
-      '<div class="panel anim-reveal" style="animation-delay:0.30s;">' +
+  /* ══ Row 2 — severity trend + newly discovered ══ */
+  var hasTrend = w('severity_trend');
+  var hasNewly = w('newly_discovered');
+  if (hasTrend || hasNewly) {
+    var trendClass = (hasTrend && !hasNewly) ? ' widget-full' : '';
+    var newlyClass = (hasNewly && !hasTrend) ? ' widget-full' : '';
+    html += '<div class="asm-row-2">';
+    if (hasTrend) {
+      html += '<div class="panel anim-reveal' + trendClass + '" style="animation-delay:0.30s;" data-widget="severity_trend">' +
         '<div class="panel-header">' +
           '<div class="panel-title">Severity Trend <span class="count">30d</span></div>' +
           '<div style="display:flex;gap:10px;font-size:0.68rem;color:var(--text-dim);">' +
@@ -141,9 +199,10 @@ WG._buildAsm = function() {
         '<div class="panel-body" style="padding:14px 10px 18px;">' +
           '<div style="position:relative;height:220px;"><canvas id="chartSeverityTrend"></canvas></div>' +
         '</div>' +
-      '</div>' +
-
-      '<div class="panel anim-reveal" style="animation-delay:0.35s;">' +
+      '</div>';
+    }
+    if (hasNewly) {
+      html += '<div class="panel anim-reveal' + newlyClass + '" style="animation-delay:0.35s;" data-widget="newly_discovered">' +
         '<div class="panel-header">' +
           '<div class="panel-title">Newly Discovered <span class="count">' + (data.newly_discovered || []).length + '</span></div>' +
           '<span style="font-size:0.68rem;color:var(--text-dim);">last 7 days</span>' +
@@ -151,12 +210,20 @@ WG._buildAsm = function() {
         '<div class="panel-body asm-discovery-list" style="padding:6px 0;">' +
           WG._newlyDiscoveredHtml(data.newly_discovered || [], loaded) +
         '</div>' +
-      '</div>' +
-    '</div>' +
+      '</div>';
+    }
+    html += '</div>';
+  }
 
-    /* ══ Row 3 — risk source donut + top exposures ══ */
-    '<div class="asm-row-3">' +
-      '<div class="panel anim-reveal" style="animation-delay:0.40s;">' +
+  /* ══ Row 3 — risk source donut + top exposures ══ */
+  var hasRisk = w('risk_by_source');
+  var hasTop = w('top_exposures');
+  if (hasRisk || hasTop) {
+    var riskClass = (hasRisk && !hasTop) ? ' widget-full' : '';
+    var topClass = (hasTop && !hasRisk) ? ' widget-full' : '';
+    html += '<div class="asm-row-3">';
+    if (hasRisk) {
+      html += '<div class="panel anim-reveal' + riskClass + '" style="animation-delay:0.40s;" data-widget="risk_by_source">' +
         '<div class="panel-header"><div class="panel-title">Risk by Source</div></div>' +
         '<div class="panel-body" style="padding:14px 10px 18px;">' +
           '<div class="asm-donut-wrap"><canvas id="chartRiskBySource"></canvas>' +
@@ -167,25 +234,31 @@ WG._buildAsm = function() {
           '</div>' +
           '<div class="asm-donut-legend" id="asmDonutLegend"></div>' +
         '</div>' +
-      '</div>' +
-
-      '<div class="panel anim-reveal" style="animation-delay:0.45s;">' +
+      '</div>';
+    }
+    if (hasTop) {
+      html += '<div class="panel anim-reveal' + topClass + '" style="animation-delay:0.45s;" data-widget="top_exposures">' +
         '<div class="panel-header">' +
           '<div class="panel-title">Top Exposures</div>' +
           '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'findings\')">View all</button>' +
         '</div>' +
         WG._topExposuresHtml(data.top_exposures || [], loaded) +
-      '</div>' +
-    '</div>' +
+      '</div>';
+    }
+    html += '</div>';
+  }
 
-    /* ══ Row 4 — technology bars ══ */
-    '<div class="panel anim-reveal" style="animation-delay:0.50s;margin-bottom:18px;">' +
+  /* ══ Row 4 — technology bars ══ */
+  if (w('top_technologies')) {
+    html += '<div class="panel anim-reveal" style="animation-delay:0.50s;margin-bottom:18px;" data-widget="top_technologies">' +
       '<div class="panel-header"><div class="panel-title">Top Technologies</div></div>' +
       '<div class="panel-body">' + WG._topTechHtml(data.top_technologies || [], loaded) + '</div>' +
-    '</div>' +
+    '</div>';
+  }
 
-    /* ══ Web Surface screenshots ══ */
-    '<div class="panel anim-reveal" style="animation-delay:0.52s;margin-bottom:18px;">' +
+  /* ══ Web Surface screenshots ══ */
+  if (w('web_surface')) {
+    html += '<div class="panel anim-reveal" style="animation-delay:0.52s;margin-bottom:18px;" data-widget="web_surface">' +
       '<div class="panel-header">' +
         '<div class="panel-title">Web Surface</div>' +
         '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'hosts\')">View all hosts</button>' +
@@ -193,11 +266,12 @@ WG._buildAsm = function() {
       '<div class="web-surface-grid" id="webSurfaceGrid">' +
         '<div class="spinner" style="margin:20px auto;"></div>' +
       '</div>' +
-    '</div>' +
+    '</div>';
+  }
 
-    /* ══ Asset inventory table — hidden for Viewers who lack host:read ══ */
-    (WG._dashboardCanViewAssets() ?
-    '<div class="panel anim-reveal" style="animation-delay:0.55s;">' +
+  /* ══ Asset inventory table — hidden for Viewers who lack host:read ══ */
+  if (w('asset_inventory') && canView) {
+    html += '<div class="panel anim-reveal" style="animation-delay:0.55s;" data-widget="asset_inventory">' +
       '<div class="panel-header">' +
         '<div class="panel-title">Asset Inventory</div>' +
         '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'hosts\')">Hosts view</button>' +
@@ -223,7 +297,13 @@ WG._buildAsm = function() {
         '</select>' +
       '</div>' +
       '<div id="asmAssetTableWrap">' + WG._assetInventoryHtml() + '</div>' +
-    '</div>' : '');
+    '</div>';
+  }
+
+  /* ══ Customize panel (hidden by default) ══ */
+  html += WG._buildCustomizePanel();
+
+  return html;
 };
 
 /* ── KPI tiles ───────────────────────────────────────────────────────── */
@@ -584,4 +664,171 @@ WG._kNumber = function(n) {
   if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + 'M';
   if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'k';
   return String(Math.round(n));
+};
+
+/* ═══════════════ Dashboard Customization Panel ═══════════════════════════ */
+
+/* Build the slide-out customize panel HTML. */
+WG._buildCustomizePanel = function() {
+  var cfg = WG._getDashboardConfig();
+  var widgets = cfg.widgets || [];
+  var esc = WG.escHtml;
+  var rows = '';
+  widgets.forEach(function(w, i) {
+    var label = WG._WIDGET_LABELS[w.id] || w.id;
+    var checked = w.visible ? ' checked' : '';
+    rows += '<div class="customize-widget-row' + (w.visible ? '' : ' is-hidden') + '" data-cust-widget="' + esc(w.id) + '">' +
+      '<div class="customize-drag-handle">&#9776;</div>' +
+      '<label class="customize-toggle">' +
+        '<input type="checkbox"' + checked + ' onchange="WG._toggleWidgetVisibility(\'' + esc(w.id) + '\')">' +
+        '<span class="customize-toggle-slider"></span>' +
+      '</label>' +
+      '<span class="customize-label">' + esc(label) + '</span>' +
+      '<div class="customize-arrows">' +
+        '<button class="btn btn-ghost btn-xs" onclick="WG._moveWidgetUp(\'' + esc(w.id) + '\')" title="Move up"' + (i === 0 ? ' disabled' : '') + '>&#9650;</button>' +
+        '<button class="btn btn-ghost btn-xs" onclick="WG._moveWidgetDown(\'' + esc(w.id) + '\')" title="Move down"' + (i === widgets.length - 1 ? ' disabled' : '') + '>&#9660;</button>' +
+      '</div>' +
+    '</div>';
+  });
+
+  return '<div class="customize-overlay" id="customizeOverlay" onclick="WG._toggleCustomizePanel()"></div>' +
+    '<div class="customize-panel" id="customizePanel">' +
+      '<div class="customize-header">' +
+        '<h3>Customize Dashboard</h3>' +
+        '<button class="btn btn-ghost btn-sm" onclick="WG._toggleCustomizePanel()">&times;</button>' +
+      '</div>' +
+      '<div class="customize-body">' +
+        '<p class="customize-hint">Toggle visibility and reorder widgets. Changes are saved to your account.</p>' +
+        '<div class="customize-list">' + rows + '</div>' +
+      '</div>' +
+      '<div class="customize-footer">' +
+        '<button class="btn btn-secondary btn-sm" onclick="WG._resetDashboardConfig()">Reset to default</button>' +
+        '<button class="btn btn-primary btn-sm" onclick="WG._saveDashboardConfig()">Save &amp; Reload</button>' +
+      '</div>' +
+    '</div>';
+};
+
+/* Open / close the customize panel. */
+WG._toggleCustomizePanel = function() {
+  var panel = document.getElementById('customizePanel');
+  var overlay = document.getElementById('customizeOverlay');
+  if (panel && overlay) {
+    var open = panel.classList.contains('is-open');
+    if (open) {
+      panel.classList.remove('is-open');
+      overlay.classList.remove('is-open');
+    } else {
+      // Rebuild panel to reflect current config
+      var main = document.getElementById('mainContent');
+      var oldPanel = main.querySelector('.customize-panel');
+      var oldOverlay = main.querySelector('.customize-overlay');
+      if (oldPanel) oldPanel.remove();
+      if (oldOverlay) oldOverlay.remove();
+      var tmp = document.createElement('div');
+      tmp.innerHTML = WG._buildCustomizePanel();
+      while (tmp.firstChild) main.appendChild(tmp.firstChild);
+      setTimeout(function() {
+        document.getElementById('customizePanel').classList.add('is-open');
+        document.getElementById('customizeOverlay').classList.add('is-open');
+      }, 10);
+    }
+  }
+};
+
+/* Toggle a single widget's visibility in the local config (not saved yet). */
+WG._toggleWidgetVisibility = function(id) {
+  var cfg = WG._getDashboardConfig();
+  var widgets = cfg.widgets || [];
+  for (var i = 0; i < widgets.length; i++) {
+    if (widgets[i].id === id) {
+      widgets[i].visible = !widgets[i].visible;
+      break;
+    }
+  }
+  WG._dashboardConfig = cfg;
+  try { localStorage.setItem('wg_dashboard_config', JSON.stringify(cfg)); } catch (e) {}
+  // Update the row styling
+  var row = document.querySelector('[data-cust-widget="' + id + '"]');
+  if (row) {
+    var w = widgets.filter(function(x) { return x.id === id; })[0];
+    row.classList.toggle('is-hidden', !(w && w.visible));
+    var cb = row.querySelector('input[type="checkbox"]');
+    if (cb) cb.checked = !!(w && w.visible);
+  }
+};
+
+/* Move a widget up one position. */
+WG._moveWidgetUp = function(id) {
+  WG._moveWidget(id, -1);
+};
+
+/* Move a widget down one position. */
+WG._moveWidgetDown = function(id) {
+  WG._moveWidget(id, 1);
+};
+
+/* Move a widget by offset positions (negative = up, positive = down). */
+WG._moveWidget = function(id, offset) {
+  var cfg = WG._getDashboardConfig();
+  var widgets = cfg.widgets || [];
+  var idx = -1;
+  for (var i = 0; i < widgets.length; i++) {
+    if (widgets[i].id === id) { idx = i; break; }
+  }
+  if (idx < 0) return;
+  var newIdx = idx + offset;
+  if (newIdx < 0 || newIdx >= widgets.length) return;
+  // Swap
+  var tmp = widgets[idx];
+  widgets[idx] = widgets[newIdx];
+  widgets[newIdx] = tmp;
+  WG._dashboardConfig = cfg;
+  try { localStorage.setItem('wg_dashboard_config', JSON.stringify(cfg)); } catch (e) {}
+  // Refresh the panel
+  WG._refreshCustomizePanel();
+};
+
+/* Refresh the customize panel DOM after reorder. */
+WG._refreshCustomizePanel = function() {
+  var main = document.getElementById('mainContent');
+  var oldPanel = main.querySelector('.customize-panel');
+  var oldOverlay = main.querySelector('.customize-overlay');
+  var wasOpen = oldPanel && oldPanel.classList.contains('is-open');
+  if (oldPanel) oldPanel.remove();
+  if (oldOverlay) oldOverlay.remove();
+  var tmp = document.createElement('div');
+  tmp.innerHTML = WG._buildCustomizePanel();
+  while (tmp.firstChild) main.appendChild(tmp.firstChild);
+  if (wasOpen) {
+    setTimeout(function() {
+      document.getElementById('customizePanel').classList.add('is-open');
+      document.getElementById('customizeOverlay').classList.add('is-open');
+    }, 10);
+  }
+};
+
+/* Save config to server and reload the dashboard. */
+WG._saveDashboardConfig = function() {
+  var cfg = WG._getDashboardConfig();
+  var body = JSON.stringify({ dashboard_config: cfg });
+  WG.api('/preferences/', { method: 'PUT', body: body }).then(function(res) {
+    if (res && !res.error) {
+      WG._dashboardConfig = res.dashboard_config || cfg;
+      try { localStorage.setItem('wg_dashboard_config', JSON.stringify(WG._dashboardConfig)); } catch (e) {}
+      // Close panel and reload
+      var panel = document.getElementById('customizePanel');
+      var overlay = document.getElementById('customizeOverlay');
+      if (panel) panel.classList.remove('is-open');
+      if (overlay) overlay.classList.remove('is-open');
+      WG.invalidateCache();
+      WG.render();
+    }
+  });
+};
+
+/* Reset dashboard config to default and reload. */
+WG._resetDashboardConfig = function() {
+  WG._dashboardConfig = WG._DEFAULT_DASHBOARD_CONFIG;
+  try { localStorage.setItem('wg_dashboard_config', JSON.stringify(WG._dashboardConfig)); } catch (e) {}
+  WG._saveDashboardConfig();
 };

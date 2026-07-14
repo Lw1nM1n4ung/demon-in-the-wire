@@ -457,6 +457,12 @@ class UserPreference(models.Model):
         help_text="Telegram integer user ID for auth resolution",
     )
 
+    # Dashboard customization — per-user widget layout config.
+    # Stored as a JSON dict: {"widgets": [{"id": "kpis", "visible": true}, ...]}
+    # Order in the array determines render order. Widgets not in the list
+    # are treated as hidden. Default: all 8 widgets visible in standard order.
+    dashboard_config = models.JSONField(default=dict, blank=True)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

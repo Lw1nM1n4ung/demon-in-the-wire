@@ -1147,10 +1147,29 @@ _CHAT_ID_RE_STR = r"^-?\d+$|^@[\w]{5,}$"
 
 
 def _serialize_prefs(prefs):
+    # Build default dashboard config for users who haven't set one yet.
+    default_dashboard = {
+        "widgets": [
+            {"id": "kpis", "visible": True},
+            {"id": "severity_trend", "visible": True},
+            {"id": "newly_discovered", "visible": True},
+            {"id": "risk_by_source", "visible": True},
+            {"id": "top_exposures", "visible": True},
+            {"id": "top_technologies", "visible": True},
+            {"id": "web_surface", "visible": True},
+            {"id": "asset_inventory", "visible": True},
+        ]
+    }
+    config = prefs.dashboard_config or {}
+    # Merge: if user config is empty or missing widgets, fill from default.
+    if not config.get("widgets"):
+        config = default_dashboard
+
     return {
         "theme_mode": prefs.theme_mode,
         "accent_color": prefs.accent_color,
         "font_size": prefs.font_size,
+        "dashboard_config": config,
         "notifications": {
             "scanComplete": prefs.notif_scan_complete,
             "scanFailed": prefs.notif_scan_failed,
@@ -1218,6 +1237,26 @@ def user_preferences(request):
             prefs.telegram_chat_id = cid
         if "enabled" in t:
             prefs.telegram_enabled = bool(t["enabled"])
+
+    # Dashboard widget config
+    if "dashboard_config" in data:
+        cfg = data["dashboard_config"]
+        if isinstance(cfg, dict) and isinstance(cfg.get("widgets"), list):
+            valid_ids = {
+                "kpis", "severity_trend", "newly_discovered", "risk_by_source",
+                "top_exposures", "top_technologies", "web_surface", "asset_inventory",
+            }
+            widgets = []
+            seen = set()
+            for w in cfg["widgets"]:
+                if isinstance(w, dict) and w.get("id") in valid_ids and w["id"] not in seen:
+                    widgets.append({"id": w["id"], "visible": bool(w.get("visible", True))})
+                    seen.add(w["id"])
+            # Keep any missing valid widgets at the end, hidden
+            for wid in valid_ids - seen:
+                widgets.append({"id": wid, "visible": False})
+            prefs.dashboard_config = {"widgets": widgets}
+
     prefs.save()
 
     return Response(_serialize_prefs(prefs))
