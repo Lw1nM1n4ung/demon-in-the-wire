@@ -271,7 +271,7 @@ services:
     networks: [public]
     ports:
       - "127.0.0.1:2006:443"
-      - "0.0.0.0:2007:80"
+      - "0.0.0.0:2007:443"
     volumes:
       - ./certs:/etc/nginx/certs:ro
       - ${WIREGHOST_LOG_DIR:-./logs}/nginx:/var/log/nginx
