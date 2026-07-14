@@ -412,45 +412,45 @@ async def run_pipeline(
                 on_host_complete(host, findings)
             return host, findings
 
-        results = await asyncio.gather(
-            *[_host_pipeline(ip) for ip in live_ips],
-            return_exceptions=True,
-        )
+    results = await asyncio.gather(
+        *[_host_pipeline(ip) for ip in live_ips],
+        return_exceptions=True,
+    )
 
-        hosts: list[Host] = []
-        all_findings: list[Finding] = []
-        for i, r in enumerate(results):
-            if isinstance(r, BaseException):
-                log.error("Host pipeline failed for %s", live_ips[i], exc_info=r)
-                continue
-            host, findings = r
-            hosts.append(host)
-            all_findings.extend(findings)
-            # on_host_complete was already called inside _host_pipeline
-            # when the host finished — no need to call it again here.
+    hosts: list[Host] = []
+    all_findings: list[Finding] = []
+    for i, r in enumerate(results):
+        if isinstance(r, BaseException):
+            log.error("Host pipeline failed for %s", live_ips[i], exc_info=r)
+            continue
+        host, findings = r
+        hosts.append(host)
+        all_findings.extend(findings)
+        # on_host_complete was already called inside _host_pipeline
+        # when the host finished — no need to call it again here.
 
-        scan_end = datetime.now()
-        report = ScanReport(
-            target=config.target,
-            hosts=hosts,
-            findings=all_findings,
-            scan_start=scan_start,
-            scan_end=scan_end,
-        )
+    scan_end = datetime.now()
+    report = ScanReport(
+        target=config.target,
+        hosts=hosts,
+        findings=all_findings,
+        scan_start=scan_start,
+        scan_end=scan_end,
+    )
 
-        log.info(
-            "Scan complete: %d host(s), %d open port(s), %d finding(s)",
-            len(report.hosts),
-            report.total_open_ports,
-            len(report.findings),
-        )
+    log.info(
+        "Scan complete: %d host(s), %d open port(s), %d finding(s)",
+        len(report.hosts),
+        report.total_open_ports,
+        len(report.findings),
+    )
 
-        # --- Phase 4: Report generation ---
-        if on_progress:
-            on_progress("reports", 0, 0)
-        _generate_reports(config, report, tree)
+    # --- Phase 4: Report generation ---
+    if on_progress:
+        on_progress("reports", 0, 0)
+    _generate_reports(config, report, tree)
 
-        return report
+    return report
 
 
 def _generate_reports(config: ScanConfig, report: ScanReport, tree: object) -> None:
