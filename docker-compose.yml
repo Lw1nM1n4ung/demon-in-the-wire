@@ -120,7 +120,7 @@ services:
       DJANGO_SETTINGS_MODULE: wireghost_web.settings
       DJANGO_DEBUG: "false"
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,${WIREGHOST_HOST:-localhost}"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,api,${WIREGHOST_HOST:-localhost}"
       WIREGHOST_HOST: ${WIREGHOST_HOST:-localhost}
       WIREGHOST_PORT: ${WIREGHOST_PORT:-443}
       WIREGHOST_PROTO: ${WIREGHOST_PROTO:-https}
@@ -141,6 +141,7 @@ services:
       - report_assets:/data/assets
       - ${WIREGHOST_LOG_DIR:-./logs}/api:/app/logs
       - ${WIREGHOST_LOG_DIR:-./logs}/nginx:/app/logs/nginx:ro
+      - ./web_portal/scanner/migrations:/app/scanner/migrations:ro
     depends_on:
       db:
         condition: service_healthy
@@ -172,7 +173,6 @@ services:
       context: .
       dockerfile: web_portal/Dockerfile
     restart: unless-stopped
-    mem_limit: 6g
     user: "0:0"
     networks: [public, internal]
     environment: *api-env
@@ -271,9 +271,11 @@ services:
     networks: [public]
     ports:
       - "127.0.0.1:2006:443"
+      - "0.0.0.0:2007:80"
     volumes:
       - ./certs:/etc/nginx/certs:ro
       - ${WIREGHOST_LOG_DIR:-./logs}/nginx:/var/log/nginx
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - api
     healthcheck:
