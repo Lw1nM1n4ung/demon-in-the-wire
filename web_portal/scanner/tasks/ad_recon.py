@@ -2,15 +2,156 @@
 
 from __future__ import annotations
 
+import json as json_mod
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from celery import shared_task
 from django.utils import timezone
 
 log = logging.getLogger(__name__)
+
+
+def _normalize_username(username, domain):
+    """Strip the domain prefix from *username* if it already matches *domain*.
+
+    CredentialProfile stores usernames in ``DOMAIN\\user`` format but the task
+    code composes auth strings as ``domain\\user``.  If the stored value
+    already has the right domain prefix we strip it to avoid a double prefix
+    (e.g. ``asa-myanmar\\asa-myanmar\\vaptuser01``) which breaks NTLM auth.
+    """
+    if username and "\\" in username:
+        parts = username.split("\\", 1)
+        if parts[0].upper() == (domain or "").upper():
+            return parts[1]
+    return username
+
+
+def _parse_ldap_timestamp(value):
+    """Convert a Windows LDAP filetime (100-ns ticks since 1601-01-01) to a
+    timezone-aware UTC datetime.  Returns *None* for 0, sentinel values, or
+    unparseable input."""
+    if not value:
+        return None
+    try:
+        ts = int(value)
+        if ts == 0 or ts == 9223372036854775807:  # never / infinity
+            return None
+        return datetime(1601, 1, 1, tzinfo=dt_timezone.utc) + timedelta(microseconds=ts / 10)
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _parse_ldapdomaindump(tmpdir, session):
+    """Parse ldapdomaindump JSON output files and bulk-create AD model records.
+
+    ldapdomaindump writes ``<domain>_users.json``, ``<domain>_groups.json``,
+    ``<domain>_computers.json`` and ``<domain>_trusts.json`` into *tmpdir*.
+    This function globs for those JSON files, maps field names from the
+    ldapdomaindump schema onto the Django ORM, and bulk-creates the
+    corresponding rows.  Idempotent: call it after every Phase-1 run.
+    """
+    from scanner.models.ad_recon import ADComputer, ADGroup, ADTrust, ADUser
+
+    json_files = sorted(
+        [f for f in os.listdir(tmpdir) if f.endswith(".json")]
+    )
+    log.info("_parse_ldapdomaindump: %d JSON files in %s", len(json_files), tmpdir)
+
+    stats = {"users": 0, "groups": 0, "computers": 0, "trusts": 0}
+
+    for fname in json_files:
+        fpath = os.path.join(tmpdir, fname)
+        try:
+            with open(fpath, "r") as fh:
+                data = json_mod.load(fh)
+        except (json_mod.JSONDecodeError, OSError) as e:
+            log.warning("_parse_ldapdomaindump: skipped %s -- %s", fname, e)
+            continue
+
+        if not isinstance(data, list) or not data:
+            continue
+
+        fl = fname.lower()
+
+        if "_users" in fl:
+            users = [
+                ADUser(
+                    session=session,
+                    sam_account_name=str(entry.get("sAMAccountName", "") or ""),
+                    upn=str(entry.get("userPrincipalName", "") or ""),
+                    display_name=str(entry.get("displayName", "") or ""),
+                    description=str(entry.get("description", "") or ""),
+                    enabled=bool(entry.get("enabled", True)),
+                    admin_count=int(entry.get("adminCount") or 0),
+                    last_logon=_parse_ldap_timestamp(entry.get("lastLogon")),
+                    member_of=list(entry.get("memberOf") or []),
+                    pwd_last_set=_parse_ldap_timestamp(entry.get("pwdLastSet")),
+                    spn_count=len(entry.get("servicePrincipalName") or []),
+                )
+                for entry in data
+            ]
+            ADUser.objects.bulk_create(users, ignore_conflicts=True)
+            stats["users"] = len(users)
+            log.info("_parse_ldapdomaindump: bulk-created %d ADUser records", len(users))
+
+        elif "_groups" in fl:
+            groups = [
+                ADGroup(
+                    session=session,
+                    name=str(entry.get("name", "") or ""),
+                    sam_account_name=str(entry.get("sAMAccountName", "") or ""),
+                    description=str(entry.get("description", "") or ""),
+                    members=list(entry.get("member") or []),
+                    member_count=len(entry.get("member") or []),
+                    admin_count=int(entry.get("adminCount") or 0),
+                )
+                for entry in data
+            ]
+            ADGroup.objects.bulk_create(groups, ignore_conflicts=True)
+            stats["groups"] = len(groups)
+            log.info("_parse_ldapdomaindump: bulk-created %d ADGroup records", len(groups))
+
+        elif "_computers" in fl:
+            computers = [
+                ADComputer(
+                    session=session,
+                    name=str(entry.get("sAMAccountName", "") or ""),
+                    dns_hostname=str(entry.get("dNSHostName", "") or ""),
+                    os=str(entry.get("operatingSystem", "") or ""),
+                    os_version=str(entry.get("operatingSystemVersion", "") or ""),
+                    enabled=bool(entry.get("enabled", True)),
+                    last_logon=_parse_ldap_timestamp(entry.get("lastLogon")),
+                    member_of=list(entry.get("memberOf") or []),
+                )
+                for entry in data
+            ]
+            ADComputer.objects.bulk_create(computers, ignore_conflicts=True)
+            stats["computers"] = len(computers)
+            log.info("_parse_ldapdomaindump: bulk-created %d ADComputer records", len(computers))
+
+        elif "_trusts" in fl:
+            trusts = [
+                ADTrust(
+                    session=session,
+                    source_domain=str(entry.get("SourceDomain", entry.get("sourceDomain", "")) or ""),
+                    target_domain=str(entry.get("TargetDomain", entry.get("targetDomain", "")) or ""),
+                    direction=str(entry.get("Direction", entry.get("direction", "")) or ""),
+                    trust_type=str(entry.get("Type", entry.get("type", "")) or ""),
+                    transitive=bool(entry.get("Transitive", entry.get("transitive", False))),
+                )
+                for entry in data
+            ]
+            ADTrust.objects.bulk_create(trusts, ignore_conflicts=True)
+            stats["trusts"] = len(trusts)
+            log.info("_parse_ldapdomaindump: bulk-created %d ADTrust records", len(trusts))
+
+    return stats
+
 
 TIMEOUTS = {
     "ldapdomaindump": 120,
@@ -106,6 +247,9 @@ def ad_recon_task(self, session_id):
         dc_ip = session.dc_ip
         domain = session.domain
         username = profile.username if profile else None
+        # Normalize: stored usernames may already include the domain prefix
+        if username:
+            username = _normalize_username(username, domain)
         is_auth = session.scope == "authenticated" and username and (password or nt_hash)
 
         tmpdir = tempfile.mkdtemp(prefix="ad_recon_")
@@ -148,6 +292,9 @@ def ad_recon_task(self, session_id):
             timeout=TIMEOUTS["ldapdomaindump"],
         )
         _record_tool(ts, "ldapdomaindump", rc, err)
+
+        # Parse ldapdomaindump JSON output into AD models
+        _parse_ldapdomaindump(tmpdir, session)
 
         shares_cmd = ["nxc", "smb", dc_ip]
         if is_auth:
