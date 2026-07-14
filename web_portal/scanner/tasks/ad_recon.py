@@ -46,6 +46,24 @@ def _parse_ldap_timestamp(value):
         return None
 
 
+def _get_dns_domain_from_json(tmpdir):
+    """Extract the DNS domain from ldapdomaindump JSON filenames.
+
+    ldapdomaindump names its output files ``domain_<dns_domain>_users.json``.
+    This scans the *tmpdir* for such files and returns the DNS domain part
+    (e.g. ``asa-myanmar.com``).  Returns ``None`` if no JSON files are found.
+    """
+    import re
+
+    pattern = re.compile(r"^domain_(.+)_(?:users|groups|computers|trusts)\.json$", re.I)
+    for fname in sorted(os.listdir(tmpdir)):
+        m = pattern.match(fname)
+        if m:
+            log.info("_get_dns_domain_from_json: discovered DNS domain '%s' from %s", m.group(1), fname)
+            return m.group(1)
+    return None
+
+
 def _parse_ldapdomaindump(tmpdir, session):
     """Parse ldapdomaindump JSON output files and bulk-create AD model records.
 
@@ -296,6 +314,12 @@ def ad_recon_task(self, session_id):
         # Parse ldapdomaindump JSON output into AD models
         _parse_ldapdomaindump(tmpdir, session)
 
+        # Auto-discover the real DNS domain from ldapdomaindump filenames.
+        # session.domain is the NETBIOS name (e.g. "asa-myanmar"); bloodhound
+        # needs the DNS domain (e.g. "asa-myanmar.com") for SRV resolution.
+        dns_domain = _get_dns_domain_from_json(tmpdir) or domain
+        log.info("AD recon %s: DNS domain=%s (NETBIOS=%s)", session_id, dns_domain, domain)
+
         shares_cmd = ["nxc", "smb", dc_ip]
         if is_auth:
             shares_cmd += ["-u", username, "-p", password]
@@ -321,27 +345,23 @@ def ad_recon_task(self, session_id):
         # ── Phase 2: BloodHound ──
         log.info("AD recon %s: Phase 2 -- BloodHound", session_id)
 
-        # Resolve DC hostname and add to /etc/hosts (bloodhound-python -dc rejects IPs)
-        dc_hostname = domain.upper()
-        _run_tool(
-            "hosts_fix",
-            ["sh", "-c", "grep -q '%s' /etc/hosts || echo '%s %s' >> /etc/hosts" % (dc_hostname, dc_ip, dc_hostname)],
-            timeout=5,
-        )
-
+        # bloodhound-python uses dnspython (NOT /etc/hosts) for DNS resolution.
+        # -d needs the DNS domain (e.g. asa-myanmar.com, NOT the NETBIOS name).
+        # -ns points at the DC as DNS server; --dns-tcp avoids UDP truncation.
+        # Omit -dc to let bloodhound auto-discover the DC FQDN via SRV records.
         bh_args = [
             "bloodhound-python",
             "-c",
             "All",
             "--zip",
             "-d",
-            domain,
-            "-dc",
-            dc_hostname,
+            dns_domain,
+            "-ns",
+            dc_ip,
             "--dns-tcp",
         ]
         if is_auth:
-            bh_args += ["-u", "%s@%s" % (username, domain), "-p", password]
+            bh_args += ["-u", "%s@%s" % (username, dns_domain), "-p", password]
             if nt_hash:
                 bh_args += ["--hashes", ":%s" % nt_hash]
         rc, out, err = _run_tool(
