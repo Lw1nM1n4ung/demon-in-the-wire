@@ -47,20 +47,37 @@ def _parse_ldap_timestamp(value):
 
 
 def _get_dns_domain_from_json(tmpdir):
-    """Extract the DNS domain from ldapdomaindump JSON filenames.
+    """Extract the DNS domain from ldapdomaindump JSON output.
 
-    ldapdomaindump names its output files ``domain_<dns_domain>_users.json``.
-    This scans the *tmpdir* for such files and returns the DNS domain part
-    (e.g. ``asa-myanmar.com``).  Returns ``None`` if no JSON files are found.
+    ldapdomaindump writes ``domain_users.json``, ``domain_computers.json``, etc.
+    These files contain ``distinguishedName`` fields like
+    ``CN=Administrator,CN=Users,DC=asa-myanmar,DC=com``.  We parse the first
+    entry from any JSON file and reconstruct the DNS domain from the DC=
+    components.  Returns ``None`` if no DNS domain can be extracted.
     """
     import re
+    import json as json_mod
 
-    pattern = re.compile(r"^domain_(.+)_(?:users|groups|computers|trusts)\.json$", re.I)
+    dc_pat = re.compile(r"DC=([^,]+)", re.I)
     for fname in sorted(os.listdir(tmpdir)):
-        m = pattern.match(fname)
-        if m:
-            log.info("_get_dns_domain_from_json: discovered DNS domain '%s' from %s", m.group(1), fname)
-            return m.group(1)
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(tmpdir, fname)
+        try:
+            with open(fpath, "r") as fh:
+                data = json_mod.load(fh)
+        except (json_mod.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, list) or not data:
+            continue
+        # Try distinguishedName first, then canonicalName / dnshostname fallbacks
+        for field in ("distinguishedName", "canonicalName", "dnshostname", "dnshostname"):
+            raw = str(data[0].get(field) or "")
+            parts = dc_pat.findall(raw)
+            if len(parts) >= 2:
+                dns = ".".join(parts).lower()
+                log.info("_get_dns_domain_from_json: discovered DNS domain '%s' from %s", dns, fname)
+                return dns
     return None
 
 
