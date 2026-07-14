@@ -31,7 +31,7 @@ def sem():
 
 class TestFallbackChain:
     @pytest.mark.asyncio
-    async def test_nmap_finds_ports_no_fallback(self, mock_config, mock_tree, sem):
+    async def test_nmap_finds_ports_no_fallback(self, mock_config, mock_tree):
         nmap_host = Host(ip="10.0.0.1", ports=[Port(number=80, state="open")])
         with (
             patch("wireghost.pipeline.portscan._run_nmap", new_callable=AsyncMock, return_value=nmap_host) as m_nmap,
@@ -39,14 +39,14 @@ class TestFallbackChain:
             patch("wireghost.pipeline.portscan._run_masscan", new_callable=AsyncMock) as m_masscan,
             patch("wireghost.pipeline.portscan._analyze_services", new_callable=AsyncMock, side_effect=lambda h, *a, **kw: h),
         ):
-            result = await scan_host("10.0.0.1", mock_config, mock_tree, sem)
+            result = await scan_host("10.0.0.1", mock_config, mock_tree)
             assert len(result.open_ports) == 1
             m_nmap.assert_awaited_once()
             m_naabu.assert_not_awaited()
             m_masscan.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_nmap_empty_falls_to_naabu(self, mock_config, mock_tree, sem):
+    async def test_nmap_empty_falls_to_naabu(self, mock_config, mock_tree):
         empty = Host(ip="10.0.0.1")
         naabu_host = Host(ip="10.0.0.1", ports=[Port(number=22, state="open")])
         with (
@@ -56,14 +56,14 @@ class TestFallbackChain:
             patch("wireghost.pipeline.portscan._is_tool_available", return_value=True),
             patch("wireghost.pipeline.portscan._analyze_services", new_callable=AsyncMock, side_effect=lambda h, *a, **kw: h),
         ):
-            result = await scan_host("10.0.0.1", mock_config, mock_tree, sem)
+            result = await scan_host("10.0.0.1", mock_config, mock_tree)
             assert len(result.open_ports) == 1
             assert result.open_ports[0].number == 22
             m_naabu.assert_awaited_once()
             m_masscan.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_nmap_naabu_empty_falls_to_masscan(self, mock_config, mock_tree, sem):
+    async def test_nmap_naabu_empty_falls_to_masscan(self, mock_config, mock_tree):
         empty = Host(ip="10.0.0.1")
         masscan_host = Host(ip="10.0.0.1", ports=[Port(number=443, state="open")])
         with (
@@ -73,12 +73,12 @@ class TestFallbackChain:
             patch("wireghost.pipeline.portscan._is_tool_available", return_value=True),
             patch("wireghost.pipeline.portscan._analyze_services", new_callable=AsyncMock, side_effect=lambda h, *a, **kw: h),
         ):
-            result = await scan_host("10.0.0.1", mock_config, mock_tree, sem)
+            result = await scan_host("10.0.0.1", mock_config, mock_tree)
             assert len(result.open_ports) == 1
             assert result.open_ports[0].number == 443
 
     @pytest.mark.asyncio
-    async def test_all_scanners_empty(self, mock_config, mock_tree, sem):
+    async def test_all_scanners_empty(self, mock_config, mock_tree):
         empty = Host(ip="10.0.0.1")
         with (
             patch("wireghost.pipeline.portscan._run_nmap", new_callable=AsyncMock, return_value=empty),
@@ -86,11 +86,11 @@ class TestFallbackChain:
             patch("wireghost.pipeline.portscan._run_masscan", new_callable=AsyncMock, return_value=empty),
             patch("wireghost.pipeline.portscan._is_tool_available", return_value=True),
         ):
-            result = await scan_host("10.0.0.1", mock_config, mock_tree, sem)
+            result = await scan_host("10.0.0.1", mock_config, mock_tree)
             assert len(result.open_ports) == 0
 
     @pytest.mark.asyncio
-    async def test_skip_unavailable_tools(self, mock_config, mock_tree, sem):
+    async def test_skip_unavailable_tools(self, mock_config, mock_tree):
         empty = Host(ip="10.0.0.1")
         with (
             patch("wireghost.pipeline.portscan._run_nmap", new_callable=AsyncMock, return_value=empty),
@@ -98,6 +98,6 @@ class TestFallbackChain:
             patch("wireghost.pipeline.portscan._run_masscan", new_callable=AsyncMock) as m_masscan,
             patch("wireghost.pipeline.portscan._is_tool_available", return_value=False),
         ):
-            result = await scan_host("10.0.0.1", mock_config, mock_tree, sem)
+            result = await scan_host("10.0.0.1", mock_config, mock_tree)
             m_naabu.assert_not_awaited()
             m_masscan.assert_not_awaited()

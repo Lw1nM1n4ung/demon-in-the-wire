@@ -454,7 +454,7 @@ class TestScanMsf:
         cfg = ScanConfig(skip_msf_scan=True)
         import asyncio
         sem = asyncio.Semaphore(1)
-        result = await scan_msf(host, cfg, None, sem)
+        result = await scan_msf(host, cfg, None)
         assert result == []
 
     async def test_no_open_ports_returns_empty(self):
@@ -463,7 +463,7 @@ class TestScanMsf:
         import asyncio
         sem = asyncio.Semaphore(1)
         with patch("wireghost.pipeline.msf_scan.shutil.which", return_value="/usr/bin/msfconsole"):
-            result = await scan_msf(host, cfg, None, sem)
+            result = await scan_msf(host, cfg, None)
         assert result == []
 
     async def test_msfconsole_not_found_returns_empty(self):
@@ -472,7 +472,7 @@ class TestScanMsf:
         import asyncio
         sem = asyncio.Semaphore(1)
         with patch("wireghost.pipeline.msf_scan.shutil.which", return_value=None):
-            result = await scan_msf(host, cfg, None, sem)
+            result = await scan_msf(host, cfg, None)
         assert result == []
 
 

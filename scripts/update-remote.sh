@@ -30,8 +30,8 @@ TRANSFER_TIMEOUT="${TRANSFER_TIMEOUT:-600}"   # seconds per file (0 = none)
 TRANSFER_RETRIES="${TRANSFER_RETRIES:-3}"      # attempts per file
 
 # ── Parse args ──────────────────────────────────────────────────────────
-VPS=""; WITH_BACKUP=false; PROJECT_DIR=""; REMOTE_DIR=""; DEBUG=false
-_next_project_dir=false; _next_remote_dir=false
+VPS=""; WITH_BACKUP=false; PROJECT_DIR=""; REMOTE_DIR=""; DEBUG=false; SSH_PORT=""
+_next_project_dir=false; _next_remote_dir=false; _next_port=false
 for arg in "$@"; do
     if [ "$_next_project_dir" = true ]; then
         PROJECT_DIR="$arg"
@@ -43,22 +43,30 @@ for arg in "$@"; do
         _next_remote_dir=false
         continue
     fi
+    if [ "$_next_port" = true ]; then
+        SSH_PORT="$arg"
+        _next_port=false
+        continue
+    fi
     case "$arg" in
         --full) WITH_BACKUP=true ;;
         --debug|--verbose) DEBUG=true ;;
         --project-dir) _next_project_dir=true ;;
         --remote-dir) _next_remote_dir=true ;;
+        --port|-p) _next_port=true ;;
+        --port=*)   SSH_PORT="${arg#*=}" ;;
         --remote-dir=*) REMOTE_DIR="${arg#*=}" ;;
         --project-dir=*) PROJECT_DIR="${arg#*=}" ;;
         --help|-h)
-            echo "Usage: bash update-remote.sh <vps> [--full] [--debug|--verbose] [--project-dir=<path>] [--remote-dir=<path>]"
+            echo "Usage: bash update-remote.sh <vps> [--full] [--debug|--verbose] [--port=<N>] [--project-dir=<path>] [--remote-dir=<path>]"
             echo "  vps          SSH destination (required)"
             echo "  --full       DB backup + restore"
             echo "  --debug, --verbose  Show every command + full output (troubleshooting)"
+            echo "  --port, -p   SSH port (e.g., --port 7543 or -p 7543)"
             echo "  --project-dir Path to demon-in-the-wire project (auto-detected if omitted)"
             echo "  --remote-dir  Path to project on VPS (auto-detected via SSH if omitted)"
             echo ""
-            echo "  Env vars: TRANSFER_TIMEOUT=N (default 600), TRANSFER_RETRIES=N (default 3)"
+            echo "  Env vars: TRANSFER_TIMEOUT=N (default 600), TRANSFER_RETRIES=N (default 3), SSH_PORT=N"
             exit 0 ;;
         --*)
 	            echo "ERROR: Unknown flag: $arg" >&2
@@ -76,6 +84,22 @@ if [ "$DEBUG" = true ]; then
 fi
 
 [ -z "$VPS" ] && die "VPS hostname required. Usage: bash update-remote.sh <vps> [--full]"
+
+# ── SSH port support ────────────────────────────────────────────────────
+# Also check env var SSH_PORT if --port was not given
+[ -z "$SSH_PORT" ] && SSH_PORT="${SSH_PORT_ENV:-}"
+if [ -n "$SSH_PORT" ]; then
+    # Validate port is numeric
+    [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || die "SSH port must be a number (got: $SSH_PORT)"
+    SSH_OPTS="-p $SSH_PORT"
+    SCP_OPTS="-P $SSH_PORT"
+    RSYNC_OPTS="-e 'ssh -p $SSH_PORT'"
+    info "Using SSH port: ${SSH_PORT}"
+else
+    SSH_OPTS=""
+    SCP_OPTS=""
+    RSYNC_OPTS=""
+fi
 
 # ── Find project root ───────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -103,7 +127,7 @@ fi
 # ── Resolve remote project directory ─────────────────────────────────────
 if [ -z "$REMOTE_DIR" ]; then
     # Auto-detect via SSH — check common paths
-    REMOTE_DIR=$(ssh "$VPS" 'for d in /opt/wireghost /home/demon/Tools/demon-in-the-wire /opt/demon-in-the-wire; do [ -f "$d/docker-compose.yml" ] && echo "$d" && break; done' 2>/dev/null || echo "")
+    REMOTE_DIR=$(ssh $SSH_OPTS "$VPS" 'for d in /opt/wireghost /home/demon/Tools/demon-in-the-wire /opt/demon-in-the-wire; do [ -f "$d/docker-compose.yml" ] && echo "$d" && break; done' 2>/dev/null || echo "")
     [ -z "$REMOTE_DIR" ] && REMOTE_DIR="/opt/wireghost"  # fallback
 fi
 
@@ -137,7 +161,7 @@ if [ "$WITH_BACKUP" = true ]; then
     # was started with.  Without this, a Docker-mode VPS (no host.yml) would
     # fail silently because the hardcoded host.yml path doesn't exist.
     REMOTE_COMPOSE_FILES=""
-    if ssh "$VPS" "cd ${REMOTE_DIR} && grep -q '^INSTALL_MODE=host' .env 2>/dev/null" 2>/dev/null; then
+    if ssh $SSH_OPTS "$VPS" "cd ${REMOTE_DIR} && grep -q '^INSTALL_MODE=host' .env 2>/dev/null" 2>/dev/null; then
         REMOTE_COMPOSE_FILES="-f docker-compose.yml -f docker-compose.host.yml"
         info "  VPS mode: host"
     else
@@ -146,7 +170,7 @@ if [ "$WITH_BACKUP" = true ]; then
 
     BACKUP_FILE="${TMPDIR}/wireghost_backup_$(date +%Y%m%d_%H%M%S).sql.gz"
 
-    ssh "$VPS" "cd ${REMOTE_DIR} && docker compose ${REMOTE_COMPOSE_FILES} exec -T db sh -c 'mysqldump -u root -p\"\$MYSQL_ROOT_PASSWORD\" --single-transaction --routines --triggers --events wireghost' | gzip" > "$BACKUP_FILE" 2>/dev/null || {
+    ssh $SSH_OPTS "$VPS" "cd ${REMOTE_DIR} && docker compose ${REMOTE_COMPOSE_FILES} exec -T db sh -c 'mysqldump -u root -p\"\$MYSQL_ROOT_PASSWORD\" --single-transaction --routines --triggers --events wireghost' | gzip" > "$BACKUP_FILE" 2>/dev/null || {
         warn "DB backup failed — continuing without backup"
         warn "  Check: docker compose ps   (is the stack running?)"
         warn "  Check: grep INSTALL_MODE .env   (host or docker?)"
@@ -275,15 +299,15 @@ _transfer_file() {
     # Check if remote file already exists with matching size
     local local_bytes remote_bytes
     local_bytes=$(stat -c%s "$local_file" 2>/dev/null || echo "0")
-    remote_bytes=$(ssh -o ConnectTimeout=5 "$VPS" "stat -c%s '$remote_file' 2>/dev/null || echo 0" 2>/dev/null || echo "0")
+    remote_bytes=$(ssh $SSH_OPTS -o ConnectTimeout=5 "$VPS" "stat -c%s '$remote_file' 2>/dev/null || echo 0" 2>/dev/null || echo "0")
     if [ "$local_bytes" -eq "$remote_bytes" ] && [ "$local_bytes" -gt 0 ]; then
         ok "${label} (${size} — already on remote, skipping)"
         return 0
     fi
 
     # Build transfer commands (try scp, fall back to rsync)
-    local scp_cmd="scp -o ConnectTimeout=10 '$local_file' '${VPS}:${remote_file}'"
-    local rsync_cmd="rsync -avP --partial '$local_file' '${VPS}:${remote_file}'"
+    local scp_cmd="scp $SCP_OPTS -o ConnectTimeout=10 '$local_file' '${VPS}:${remote_file}'"
+    local rsync_cmd="rsync $RSYNC_OPTS -avP --partial '$local_file' '${VPS}:${remote_file}'"
 
     local backoff=5 attempt=1
     while [ "$attempt" -le "$TRANSFER_RETRIES" ]; do
@@ -342,7 +366,7 @@ fi
 # ── Transfer images (best-effort, track what succeeded) ───────────────────
 # Always force-transfer portal (25MB) — size-based dedup is unreliable for
 # small images where a config change may produce the same compressed byte count.
-ssh -o ConnectTimeout=5 "$VPS" "rm -f '${REMOTE_DIR}/.remote-portal.tar.gz'" 2>/dev/null || true
+ssh $SSH_OPTS -o ConnectTimeout=5 "$VPS" "rm -f '${REMOTE_DIR}/.remote-portal.tar.gz'" 2>/dev/null || true
 
 REMOTE_IMAGES=""
 for img in portal web worker; do
@@ -377,7 +401,7 @@ info "Step 6: Deploying on VPS..."
 
 # Use _none_ sentinel for empty args — SSH collapses empty quoted args ("") into
 # nothing, which shifts all subsequent positional parameters left by one.
-ssh "$VPS" bash -s <<'DEPLOY' -- "$REMOTE_DIR" "$WITH_BACKUP" "${REMOTE_BACKUP:-_none_}" "$REMOTE_IMAGES"
+ssh $SSH_OPTS "$VPS" bash -s <<'DEPLOY' -- "$REMOTE_DIR" "$WITH_BACKUP" "${REMOTE_BACKUP:-_none_}" "$REMOTE_IMAGES"
 set -euo pipefail
 REMOTE_DIR="$1"; WITH_BACKUP="$2"; BACKUP_FILE="$3"; REMOTE_IMAGES="$4"
 [ "$BACKUP_FILE" = "_none_" ] && BACKUP_FILE=""

@@ -172,6 +172,7 @@ services:
       context: .
       dockerfile: web_portal/Dockerfile
     restart: unless-stopped
+    mem_limit: 6g
     user: "0:0"
     networks: [public, internal]
     environment: *api-env

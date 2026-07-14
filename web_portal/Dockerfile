@@ -60,7 +60,8 @@ RUN gem install wpscan --no-document \
 # Python deps (before Go binaries — pip httpx overwrites /usr/local/bin/httpx)
 COPY web_portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec@v1.5.1
+RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec.git 2>/dev/null || \
+    echo "NetExec install skipped (optional — pipeline will skip nxc if unavailable)"
 RUN pip install --no-cache-dir getsploit
 
 # ProjectDiscovery Go binaries + gowitness (AFTER pip to avoid overwrite)

@@ -29,6 +29,18 @@ _SEVERITY_RGB: dict[Severity, RGBColor] = {
 }
 
 
+# Global counter for unique drawing object IDs within a single document.
+# Reset per render call via DocxRenderer.reset_doc_pr_id().
+_doc_pr_id_counter: int = 0
+
+
+def _next_doc_pr_id() -> int:
+    """Return a unique ID for wp:docPr and pic:cNvPr elements."""
+    global _doc_pr_id_counter
+    _doc_pr_id_counter += 1
+    return _doc_pr_id_counter
+
+
 def _make_anchor_image(
     part, image_path: str, width: int, height: int,
     pos_h_from: str, pos_h_offset: int,
@@ -41,18 +53,16 @@ def _make_anchor_image(
         RT.IMAGE,
     )
 
-    nsmap = {
-        'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
-        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
-        'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
-        'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture',
-    }
+    doc_pr_id = _next_doc_pr_id()
 
     anchor_xml = (
         '<wp:anchor distT="0" distB="0" distL="114300" distR="114300" '
         'simplePos="0" relativeHeight="0" behindDoc="0" locked="0" '
         'layoutInCell="1" allowOverlap="1" '
-        'xmlns:wp="{wp}" xmlns:r="{r}" xmlns:a="{a}" xmlns:pic="{pic}">'
+        'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+        ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+        ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
         '  <wp:simplePos x="0" y="0"/>'
         '  <wp:positionH relativeFrom="{pos_h_from}">'
         '    <wp:posOffset>{pos_h_offset}</wp:posOffset>'
@@ -62,7 +72,7 @@ def _make_anchor_image(
         '  </wp:positionV>'
         '  <wp:extent cx="{cx}" cy="{cy}"/>'
         '  <wp:wrapNone/>'
-        '  <wp:docPr id="1" name="Picture"/>'
+        '  <wp:docPr id="{doc_pr_id}" name="Picture"/>'
         '  <a:graphic>'
         '    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
         '      <pic:pic>'
@@ -90,7 +100,7 @@ def _make_anchor_image(
         pos_h_from=pos_h_from, pos_h_offset=pos_h_offset,
         pos_v_from=pos_v_from, pos_v_offset=pos_v_offset,
         rel_id=rel_id,
-        **nsmap,
+        doc_pr_id=doc_pr_id,
     )
 
     return etree.fromstring(anchor_xml)
@@ -174,12 +184,19 @@ def _group_findings_by_host(findings: list[Finding]) -> dict[str, list[Finding]]
 class DocxRenderer:
     """Render a ScanReport as a professional VA report (DOCX)."""
 
+    @staticmethod
+    def _reset_doc_pr_counter() -> None:
+        """Reset the global drawing-object ID counter for a new document."""
+        global _doc_pr_id_counter
+        _doc_pr_id_counter = 0
+
     def render(
         self,
         report: ScanReport,
         config: ScanConfig,
         reports_dir: Path,
     ) -> Path:
+        self._reset_doc_pr_counter()
         doc = Document()
         _apply_styles(doc)
 
@@ -205,10 +222,18 @@ class DocxRenderer:
         end_para = doc.add_paragraph("END OF DOCUMENT")
         end_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+        # Set document metadata before saving
+        self._set_metadata(doc, config, report)
+
         self._add_header_logos(doc, logo, header_logo)
 
         out = reports_dir / "security_report.docx"
         doc.save(str(out))
+
+        # Clean up problematic auto-generated parts that can prevent
+        # opening in strict OOXML validators (Word, Google Docs).
+        self._clean_zip(out)
+
         return out
 
     def _next_section(self) -> int:
@@ -269,6 +294,75 @@ class DocxRenderer:
             run._element.append(anchor)
 
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _set_metadata(doc: Document, config: ScanConfig, report: ScanReport) -> None:
+        """Set proper document metadata (creator, title, dates)."""
+        now = datetime.now()
+        core = doc.core_properties
+        core.creator = getattr(config, "prepared_by", "WireGhost") or "WireGhost"
+        core.title = f"VA Report — {report.target}"
+        core.description = (
+            f"Vulnerability Assessment Report for {report.target}. "
+            f"{len(report.hosts)} hosts, {len(report.findings)} findings."
+        )
+        core.created = now
+        core.modified = now
+        core.last_modified_by = getattr(config, "prepared_by", "WireGhost") or "WireGhost"
+
+    @staticmethod
+    def _clean_zip(path: Path) -> None:
+        """Remove problematic auto-generated parts that can prevent opening."""
+        import io
+        import re
+        import zipfile
+
+        removals = {
+            "customXml/item1.xml",
+            "customXml/_rels/item1.xml.rels",
+            "customXml/itemProps1.xml",
+            "docProps/thumbnail.jpeg",
+        }
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(str(path), "r") as zin:
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+                for item in zin.infolist():
+                    if item.filename in removals:
+                        continue
+                    data = zin.read(item.filename)
+
+                    if item.filename == "[Content_Types].xml":
+                        content = data.decode("utf-8")
+                        for rm in removals:
+                            content = re.sub(
+                                r'<Override\s+PartName="/' + re.escape(rm) + r'"[^>]*/?>',
+                                "",
+                                content,
+                            )
+                        data = content.encode("utf-8")
+
+                    elif item.filename == "_rels/.rels":
+                        content = data.decode("utf-8")
+                        content = re.sub(
+                            r'<Relationship[^>]*Type="[^"]*thumbnail[^"]*"[^>]*/>',
+                            "",
+                            content,
+                        )
+                        data = content.encode("utf-8")
+
+                    elif item.filename == "word/_rels/document.xml.rels":
+                        content = data.decode("utf-8")
+                        content = re.sub(
+                            r'<Relationship[^>]*Type="[^"]*customXml[^"]*"[^>]*/>',
+                            "",
+                            content,
+                        )
+                        data = content.encode("utf-8")
+
+                    zout.writestr(item, data)
+
+        path.write_bytes(buf.getvalue())
 
     def _cover_page(
         self, doc: Document, config: ScanConfig, report: ScanReport,
