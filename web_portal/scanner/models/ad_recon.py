@@ -246,3 +246,121 @@ class ADSprayResult(models.Model):
 
     class Meta:
         ordering = ["-sprayed_at", "status", "username"]
+
+
+# ── ViperOne-inspired pipeline additions ──
+
+
+class CredentialFinding(models.Model):
+    """Harvested credential — cleartext or hash found during passive hunting.
+
+    Sources: GPP cpassword XML, LAPS, user description/info fields,
+    UnixUserPassword, userPassword LDAP attributes.
+    """
+    SOURCE_CHOICES = [
+        ("gpp_password", "GPP Password (cpassword)"),
+        ("gpp_autologin", "GPP Auto-login"),
+        ("laps", "LAPS Password"),
+        ("user_desc", "User Description"),
+        ("user_info", "User Info Field"),
+        ("unix_password", "UnixUserPassword Attribute"),
+        ("user_password", "UserPassword Attribute"),
+        ("spider_plus", "SMB Share Spider"),
+    ]
+    TYPE_CHOICES = [
+        ("cleartext", "Cleartext Password"),
+        ("ntlm_hash", "NTLM Hash"),
+        ("laps", "LAPS Password"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    session = models.ForeignKey(
+        ADReconSession, on_delete=models.CASCADE, related_name="credential_findings"
+    )
+    source = models.CharField(max_length=32, choices=SOURCE_CHOICES)
+    credential_type = models.CharField(max_length=16, choices=TYPE_CHOICES, default="cleartext")
+    target = models.CharField(max_length=512, blank=True)  # host, FQDN, or file path
+    username = models.CharField(max_length=256)
+    password = models.TextField()  # Fernet AES-256-GCM encrypted at rest
+    details = models.JSONField(default=dict)  # XML path, LDAP attr, file path context
+    found_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["source", "username"]
+
+    def __str__(self):
+        return f"{self.source}: {self.username} @ {self.target}"
+
+    def save(self, *args, **kwargs):
+        f = _fernet()
+        if self.password and not self.password.startswith("gAAAAA"):
+            self.password = f.encrypt(self.password.encode()).decode()
+        super().save(*args, **kwargs)
+
+    def decrypt_password(self):
+        if not self.password:
+            return ""
+        f = _fernet()
+        return f.decrypt(self.password.encode()).decode()
+
+
+class ACLFinding(models.Model):
+    """Dangerous ACL discovered on a key AD object.
+
+    Stored from nxc ldap -M daclread output. Risk levels follow BloodHound
+    semantics: GenericAll / WriteDacl / WriteOwner on high-value objects are
+    'critical'; similar on lower-value objects are 'high'.
+    """
+    RISK_CHOICES = [
+        ("critical", "Critical"),
+        ("high", "High"),
+        ("medium", "Medium"),
+        ("low", "Low"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    session = models.ForeignKey(
+        ADReconSession, on_delete=models.CASCADE, related_name="acl_findings"
+    )
+    object_dn = models.CharField(max_length=1024)
+    principal = models.CharField(max_length=512)  # who has the right
+    right_name = models.CharField(max_length=256)
+    right_type = models.CharField(max_length=32)  # Allow / Deny
+    is_inherited = models.BooleanField(default=False)
+    risk_level = models.CharField(max_length=16, choices=RISK_CHOICES, default="medium")
+    attack_path = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-risk_level", "object_dn", "principal"]
+
+    def __str__(self):
+        return f"{self.risk_level}: {self.principal} → {self.right_name} on {self.object_dn}"
+
+
+class VulnCheck(models.Model):
+    """Vulnerability check result from privilege-escalation path detection.
+
+    Checks: zerologon, nopac, petitpotam, printerbug, shadowcoerce, dfscoerce.
+    """
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    session = models.ForeignKey(
+        ADReconSession, on_delete=models.CASCADE, related_name="vuln_checks"
+    )
+    check_name = models.CharField(max_length=128)
+    host = models.CharField(max_length=256)
+    vulnerable = models.BooleanField(default=False)
+    details = models.JSONField(default=dict)  # raw module output / CVE info
+    checked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-vulnerable", "check_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "check_name", "host"],
+                name="uq_vuln_check_session_host",
+            )
+        ]
+
+    def __str__(self):
+        status = "VULN" if self.vulnerable else "SAFE"
+        return f"{self.check_name} @ {self.host}: {status}"

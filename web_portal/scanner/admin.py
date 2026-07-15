@@ -78,6 +78,9 @@ from scanner.models.ad_recon import (
     ADGroup,
     ADComputer,
     ADSprayResult,
+    CredentialFinding,
+    ACLFinding,
+    VulnCheck,
 )
 
 
@@ -121,3 +124,26 @@ class ADSprayResultAdmin(admin.ModelAdmin):
     list_filter = ["status"]
     search_fields = ["username", "password"]
     readonly_fields = ["sprayed_at"]
+
+
+@admin.register(CredentialFinding)
+class CredentialFindingAdmin(admin.ModelAdmin):
+    list_display = ["source", "credential_type", "username", "target", "found_at"]
+    list_filter = ["source", "credential_type"]
+    search_fields = ["username", "target"]
+    readonly_fields = ["found_at"]
+
+
+@admin.register(ACLFinding)
+class ACLFindingAdmin(admin.ModelAdmin):
+    list_display = ["risk_level", "principal", "right_name", "object_dn"]
+    list_filter = ["risk_level", "right_type", "is_inherited"]
+    search_fields = ["principal", "object_dn", "right_name"]
+
+
+@admin.register(VulnCheck)
+class VulnCheckAdmin(admin.ModelAdmin):
+    list_display = ["check_name", "host", "vulnerable", "checked_at"]
+    list_filter = ["vulnerable", "check_name"]
+    search_fields = ["host", "check_name"]
+    readonly_fields = ["checked_at"]

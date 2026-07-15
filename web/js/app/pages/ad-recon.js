@@ -375,6 +375,9 @@ WG.AD.renderSessionDetail = function(id) {
         '<button class="tab" data-tab="users" onclick="WG.AD._switchTab(\'' + s.id + '\',\'users\')">Users</button>' +
         '<button class="tab" data-tab="computers" onclick="WG.AD._switchTab(\'' + s.id + '\',\'computers\')">Computers</button>' +
         '<button class="tab" data-tab="groups" onclick="WG.AD._switchTab(\'' + s.id + '\',\'groups\')">Groups</button>' +
+        '<button class="tab" data-tab="credentials" onclick="WG.AD._switchTab(\'' + s.id + '\',\'credentials\')">Credentials</button>' +
+        '<button class="tab" data-tab="acl-risks" onclick="WG.AD._switchTab(\'' + s.id + '\',\'acl-risks\')">ACL Risks</button>' +
+        '<button class="tab" data-tab="vulnerabilities" onclick="WG.AD._switchTab(\'' + s.id + '\',\'vulnerabilities\')">Vulns</button>' +
         '<button class="tab" data-tab="spray" onclick="WG.AD._switchTab(\'' + s.id + '\',\'spray\')">Spray</button>' +
       '</div>' +
 
@@ -419,6 +422,15 @@ WG.AD.renderSessionDetail = function(id) {
 
         /* Groups tab */
         '<div id="adTab-groups" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adGroupsContainer"><div class="panel-empty">Loading groups...</div></div></div></div>' +
+
+        /* Credentials tab */
+        '<div id="adTab-credentials" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adCredentialsContainer"><div class="panel-empty">Loading credential findings...</div></div></div></div>' +
+
+        /* ACL Risks tab */
+        '<div id="adTab-acl-risks" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adAclRisksContainer"><div class="panel-empty">Loading ACL risks...</div></div></div></div>' +
+
+        /* Vulnerabilities tab */
+        '<div id="adTab-vulnerabilities" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adVulnsContainer"><div class="panel-empty">Loading vulnerability checks...</div></div></div></div>' +
 
         /* Password Spray tab */
         '<div id="adTab-spray" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adSprayContainer"><div class="panel-empty">Loading spray history...</div></div></div></div>' +
@@ -469,6 +481,15 @@ WG.AD._switchTab = function(sessionId, tabName) {
       break;
     case 'groups':
       WG.AD._loadDataTable(sessionId, 'groups', 'adGroupsContainer', ['name', 'sam_account_name', 'member_count', 'dn'], ['Name', 'SAM', 'Members', 'DN']);
+      break;
+    case 'credentials':
+      WG.AD._loadDataTable(sessionId, 'credentials', 'adCredentialsContainer', ['source', 'credential_type', 'username', 'target'], ['Source', 'Type', 'Username', 'Target']);
+      break;
+    case 'acl-risks':
+      WG.AD._loadDataTable(sessionId, 'acl_risks', 'adAclRisksContainer', ['risk_level', 'principal', 'right_name', 'object_dn'], ['Risk', 'Principal', 'Right', 'Object DN']);
+      break;
+    case 'vulnerabilities':
+      WG.AD._loadDataTable(sessionId, 'vulnerabilities', 'adVulnsContainer', ['check_name', 'host', 'vulnerable'], ['Check', 'Host', 'Vulnerable']);
       break;
     case 'spray':
       WG.AD._loadSprayTab(sessionId);

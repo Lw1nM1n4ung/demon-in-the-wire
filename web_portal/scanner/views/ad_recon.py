@@ -9,6 +9,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from django.db import models as db_models
 
 from scanner.models.ad_recon import (
     CredentialProfile,
@@ -23,6 +24,9 @@ from scanner.models.ad_recon import (
     ADShare,
     ADCertService,
     ADSprayResult,
+    CredentialFinding,
+    ACLFinding,
+    VulnCheck,
 )
 from scanner.serializers.ad_recon import (
     CredentialProfileSerializer,
@@ -39,6 +43,9 @@ from scanner.serializers.ad_recon import (
     ADCertServiceSerializer,
     ADSprayResultSerializer,
     SprayRequestSerializer,
+    CredentialFindingSerializer,
+    ACLFindingSerializer,
+    VulnCheckSerializer,
 )
 from scanner.views import HasPerm
 
@@ -413,3 +420,33 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
             "users_targeted": len(usernames),
             "message": "Spray queued. Check /spray/ for results.",
         })
+
+    # ── ViperOne pipeline findings ──
+
+    @action(detail=True, methods=["get"])
+    def credentials(self, request, pk=None):
+        """Harvested credentials (GPP, LAPS, user descriptions, etc.)."""
+        session = self.get_object()
+        qs = CredentialFinding.objects.filter(session=session)
+        return self._paginated_response(request, qs, CredentialFindingSerializer)
+
+    @action(detail=True, methods=["get"])
+    def acl_risks(self, request, pk=None):
+        """Dangerous ACL findings sorted by risk level."""
+        session = self.get_object()
+        qs = ACLFinding.objects.filter(session=session).order_by(
+            db_models.Case(
+                db_models.When(risk_level="critical", then=db_models.Value(0)),
+                db_models.When(risk_level="high", then=db_models.Value(1)),
+                db_models.When(risk_level="medium", then=db_models.Value(2)),
+                default=db_models.Value(3),
+            )
+        )
+        return self._paginated_response(request, qs, ACLFindingSerializer)
+
+    @action(detail=True, methods=["get"])
+    def vulnerabilities(self, request, pk=None):
+        """Privilege escalation vulnerability checks (Zerologon, NoPac, etc.)."""
+        session = self.get_object()
+        qs = VulnCheck.objects.filter(session=session)
+        return self._paginated_response(request, qs, VulnCheckSerializer)

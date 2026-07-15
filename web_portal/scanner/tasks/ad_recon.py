@@ -1,10 +1,11 @@
-"""Celery task for AD Recon sessions -- 7-phase sequential tool execution."""
+"""Celery task for AD Recon sessions -- 10-phase sequential tool execution."""
 
 from __future__ import annotations
 
 import json as json_mod
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -219,19 +220,75 @@ TIMEOUTS = {
     "ldapdomaindump": 120,
     "nxc_shares": 60,
     "nxc_delegation": 60,
+    "nxc_dump_computers": 60,
+    "nxc_obsolete": 60,
+    "nxc_enum_trusts": 60,
     "bloodhound": 300,
+    "nxc_getdesc_users": 60,
+    "nxc_getinfo_users": 60,
+    "nxc_unix_password": 60,
+    "nxc_user_password": 60,
+    "nxc_user_desc": 60,
+    "nxc_laps": 60,
+    "nxc_gpp_password": 60,
+    "nxc_gpp_autologin": 60,
+    "nxc_daclread": 120,
+    "nxc_badsuccessor": 60,
+    "nxc_maq": 30,
+    "nxc_pre2k": 60,
+    "nxc_whoami": 30,
+    "nxc_sccm": 60,
+    "nxc_dns_nonsecure": 60,
+    "nxc_pso": 60,
     "impacket_getnpusers": 120,
     "kerbrute": 60,
     "impacket_getspns": 120,
     "impacket_secretsdump": 300,
     "impacket_samrdump": 60,
+    "nxc_spider_plus": 180,
+    "nxc_nopac": 60,
+    "nxc_zerologon": 60,
+    "nxc_petitpotam": 60,
+    "nxc_certipy_find": 120,
+    "nxc_enum_ca": 60,
+    "nxc_spooler": 30,
+    "nxc_webdav": 30,
     "rpcclient": 60,
     "nxc_passpol": 60,
     "nxc_ioxid": 60,
     "nxc_wmi": 60,
+    "nxc_mssql": 60,
     "nxc_adcs": 60,
     "responder": 60,
 }
+
+
+def _persist_credential(session, source, credential_type, target, username, password, details=None):
+    """Persist a discovered credential into the CredentialFinding model."""
+    from scanner.models.ad_recon import CredentialFinding
+    CredentialFinding.objects.create(
+        session=session, source=source, credential_type=credential_type,
+        target=target, username=username, password=password, details=details or {}
+    )
+
+
+def _persist_acl(session, object_dn, principal, right_name, right_type, is_inherited, risk_level, attack_path=""):
+    """Persist an interesting ACL finding into the ACLFinding model."""
+    from scanner.models.ad_recon import ACLFinding
+    ACLFinding.objects.create(
+        session=session, object_dn=object_dn, principal=principal,
+        right_name=right_name, right_type=right_type, is_inherited=is_inherited,
+        risk_level=risk_level, attack_path=attack_path
+    )
+
+
+def _persist_vuln(session, check_name, host, vulnerable, details=None):
+    """Persist a vulnerability check result into the VulnCheck model."""
+    from scanner.models.ad_recon import VulnCheck
+    VulnCheck.objects.get_or_create(
+        session=session, check_name=check_name, host=host,
+        defaults={"vulnerable": vulnerable, "details": details or {}}
+    )
 
 
 def _run_tool(tool_name, cmd_args, timeout=60, env=None):
@@ -274,7 +331,7 @@ def _record_tool(tool_status, name, rc, err):
 
 @shared_task(bind=True, max_retries=0, time_limit=7200, soft_time_limit=7000)
 def ad_recon_task(self, session_id):
-    """Execute AD recon session through 7 sequential phases.
+    """Execute AD recon session through 10 sequential phases.
 
     Phase 0 is the only hard gate -- if the connectivity check fails, the
     entire session is aborted with status='failed'. All other phases degrade
@@ -383,11 +440,259 @@ def ad_recon_task(self, session_id):
             )
             _record_tool(ts, "nxc_delegation", rc, err)
 
+        if is_auth:
+            rc, out, err = _run_tool(
+                "nxc_dump_computers",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "dump-computers"],
+                timeout=TIMEOUTS["nxc_dump_computers"],
+            )
+            _record_tool(ts, "nxc_dump_computers", rc, err)
+
+        if is_auth:
+            rc, out, err = _run_tool(
+                "nxc_obsolete",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "obsolete"],
+                timeout=TIMEOUTS["nxc_obsolete"],
+            )
+            _record_tool(ts, "nxc_obsolete", rc, err)
+
+        if is_auth:
+            rc, out, err = _run_tool(
+                "nxc_enum_trusts",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "enum_trusts"],
+                timeout=TIMEOUTS["nxc_enum_trusts"],
+            )
+            _record_tool(ts, "nxc_enum_trusts", rc, err)
+
         session.tool_status = ts
         session.save(update_fields=["tool_status"])
 
-        # ── Phase 2: BloodHound ──
-        log.info("AD recon %s: Phase 2 -- BloodHound", session_id)
+        # ── Phase 2: Passive Credential Hunting ──
+        log.info("AD recon %s: Phase 2 -- passive credential hunting", session_id)
+
+        if is_auth:
+            # 1) get-desc-users
+            rc, out, err = _run_tool(
+                "nxc_getdesc_users",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "get-desc-users"],
+                timeout=TIMEOUTS["nxc_getdesc_users"],
+            )
+            _record_tool(ts, "nxc_getdesc_users", rc, err)
+            if out:
+                for line in out.splitlines():
+                    if "password:" in line.lower() or "pwd:" in line.lower():
+                        _persist_credential(session, "get-desc-users", "user_description",
+                                            dc_ip, "", line.strip(), {"raw": line.strip()})
+
+            # 2) get-info-users
+            rc, out, err = _run_tool(
+                "nxc_getinfo_users",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "get-info-users"],
+                timeout=TIMEOUTS["nxc_getinfo_users"],
+            )
+            _record_tool(ts, "nxc_getinfo_users", rc, err)
+            if out:
+                for line in out.splitlines():
+                    if "password:" in line.lower() or "pwd:" in line.lower():
+                        _persist_credential(session, "get-info-users", "info_field",
+                                            dc_ip, "", line.strip(), {"raw": line.strip()})
+
+            # 3) get-unixUserPassword
+            rc, out, err = _run_tool(
+                "nxc_unix_password",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "get-unixUserPassword"],
+                timeout=TIMEOUTS["nxc_unix_password"],
+            )
+            _record_tool(ts, "nxc_unix_password", rc, err)
+            if out:
+                for line in out.splitlines():
+                    if "password:" in line.lower() or "pwd:" in line.lower() or "found:" in line.lower():
+                        _persist_credential(session, "get-unixUserPassword", "unix_password",
+                                            dc_ip, "", line.strip(), {"raw": line.strip()})
+
+            # 4) get-userPassword
+            rc, out, err = _run_tool(
+                "nxc_user_password",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "get-userPassword"],
+                timeout=TIMEOUTS["nxc_user_password"],
+            )
+            _record_tool(ts, "nxc_user_password", rc, err)
+            if out:
+                for line in out.splitlines():
+                    if "password:" in line.lower() or "pwd:" in line.lower() or "found:" in line.lower():
+                        _persist_credential(session, "get-userPassword", "user_password",
+                                            dc_ip, "", line.strip(), {"raw": line.strip()})
+
+            # 5) user-desc (bulk user descriptions)
+            rc, out, err = _run_tool(
+                "nxc_user_desc",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "user-desc"],
+                timeout=TIMEOUTS["nxc_user_desc"],
+            )
+            _record_tool(ts, "nxc_user_desc", rc, err)
+            if out:
+                for line in out.splitlines():
+                    if "password:" in line.lower() or "pwd:" in line.lower():
+                        _persist_credential(session, "user-desc", "user_desc",
+                                            dc_ip, "", line.strip(), {"raw": line.strip()})
+
+            # 6) laps
+            rc, out, err = _run_tool(
+                "nxc_laps",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "laps"],
+                timeout=TIMEOUTS["nxc_laps"],
+            )
+            _record_tool(ts, "nxc_laps", rc, err)
+            if out:
+                import re
+                for line in out.splitlines():
+                    m = re.search(r"(?:LAPS\s+Password|ms-Mcs-AdmPwd):\s*(.+)", line, re.I)
+                    if m:
+                        _persist_credential(session, "laps", "laps_password",
+                                            dc_ip, "", m.group(1).strip(), {"raw": line.strip()})
+                    elif "password:" in line.lower():
+                        _persist_credential(session, "laps", "laps_password",
+                                            dc_ip, "", line.strip(), {"raw": line.strip()})
+
+            # 7) gpp_password (SYSVOL cpassword)
+            rc, out, err = _run_tool(
+                "nxc_gpp_password",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "gpp_password"],
+                timeout=TIMEOUTS["nxc_gpp_password"],
+            )
+            _record_tool(ts, "nxc_gpp_password", rc, err)
+            if out:
+                import re
+                for line in out.splitlines():
+                    m = re.search(r"(?:Found|found):\s*(\S+?):(\S+)", line)
+                    if m:
+                        _persist_credential(session, "gpp_password", "gpp_cpassword",
+                                            dc_ip, m.group(1), m.group(2), {"raw": line.strip()})
+                    elif "cpassword" in line.lower() and "password:" in line.lower():
+                        pw_m = re.search(r"password:\s*(.+)", line, re.I)
+                        if pw_m:
+                            _persist_credential(session, "gpp_password", "gpp_cpassword",
+                                                dc_ip, "", pw_m.group(1).strip(), {"raw": line.strip()})
+
+            # 8) gpp_autologin (SYSVOL autologin)
+            rc, out, err = _run_tool(
+                "nxc_gpp_autologin",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "gpp_autologin"],
+                timeout=TIMEOUTS["nxc_gpp_autologin"],
+            )
+            _record_tool(ts, "nxc_gpp_autologin", rc, err)
+            if out:
+                import re
+                for line in out.splitlines():
+                    m = re.search(r"(?:Found|found):\s*(\S+?):(\S+)", line)
+                    if m:
+                        _persist_credential(session, "gpp_autologin", "gpp_autologin",
+                                            dc_ip, m.group(1), m.group(2), {"raw": line.strip()})
+
+            session.tool_status = ts
+            session.save(update_fields=["tool_status"])
+
+        # ── Phase 3: Attack Surface Analysis ──
+        log.info("AD recon %s: Phase 3 -- attack surface analysis", session_id)
+
+        if is_auth:
+            # 1) daclread
+            rc, out, err = _run_tool(
+                "nxc_daclread",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "daclread"],
+                timeout=TIMEOUTS["nxc_daclread"],
+            )
+            _record_tool(ts, "nxc_daclread", rc, err)
+            if out:
+                import re
+                high_value_targets = [
+                    "Domain Admins", "Enterprise Admins", "Administrators",
+                    "krbtgt", "Domain Controllers", "Schema Admins",
+                    "Account Operators", "Backup Operators", "Server Operators",
+                ]
+                for line in out.splitlines():
+                    right_match = re.search(
+                        r"(GenericAll|WriteDacl|WriteOwner|GenericWrite|ExtendedRight)", line, re.I
+                    )
+                    if not right_match:
+                        continue
+                    right_name = right_match.group(1)
+                    dn_match = re.search(r"(?:DN|Object):\s*(CN=[^,\s]+.+?)(?:\s{2,}|$)", line, re.I)
+                    principal_match = re.search(r"(?:Principal|Trustee):\s*(.+?)(?:\s{2,}|$)", line, re.I)
+                    obj_dn = dn_match.group(1).strip() if dn_match else ""
+                    principal = principal_match.group(1).strip() if principal_match else ""
+                    is_inherited = "inherited" in line.lower()
+                    target_high = any(t.lower() in (obj_dn or "").lower() for t in high_value_targets)
+                    if right_name in ("GenericAll", "WriteDacl", "WriteOwner") and target_high:
+                        risk = "critical"
+                    elif right_name in ("GenericAll", "WriteDacl", "WriteOwner"):
+                        risk = "high"
+                    else:
+                        risk = "medium"
+                    _persist_acl(session, obj_dn, principal, right_name, "AccessRight",
+                                 is_inherited, risk)
+
+            # 2) badsuccessor
+            rc, out, err = _run_tool(
+                "nxc_badsuccessor",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "badsuccessor"],
+                timeout=TIMEOUTS["nxc_badsuccessor"],
+            )
+            _record_tool(ts, "nxc_badsuccessor", rc, err)
+
+            # 3) maq
+            rc, out, err = _run_tool(
+                "nxc_maq",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "maq"],
+                timeout=TIMEOUTS["nxc_maq"],
+            )
+            _record_tool(ts, "nxc_maq", rc, err)
+
+            # 4) pre2k
+            rc, out, err = _run_tool(
+                "nxc_pre2k",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "pre2k"],
+                timeout=TIMEOUTS["nxc_pre2k"],
+            )
+            _record_tool(ts, "nxc_pre2k", rc, err)
+
+            # 5) whoami
+            rc, out, err = _run_tool(
+                "nxc_whoami",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "whoami"],
+                timeout=TIMEOUTS["nxc_whoami"],
+            )
+            _record_tool(ts, "nxc_whoami", rc, err)
+
+            # 6) sccm
+            rc, out, err = _run_tool(
+                "nxc_sccm",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "sccm"],
+                timeout=TIMEOUTS["nxc_sccm"],
+            )
+            _record_tool(ts, "nxc_sccm", rc, err)
+
+            # 7) dns-nonsecure
+            rc, out, err = _run_tool(
+                "nxc_dns_nonsecure",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "dns-nonsecure"],
+                timeout=TIMEOUTS["nxc_dns_nonsecure"],
+            )
+            _record_tool(ts, "nxc_dns_nonsecure", rc, err)
+
+            # 8) pso (FGPP)
+            rc, out, err = _run_tool(
+                "nxc_pso",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "pso"],
+                timeout=TIMEOUTS["nxc_pso"],
+            )
+            _record_tool(ts, "nxc_pso", rc, err)
+
+            session.tool_status = ts
+            session.save(update_fields=["tool_status"])
+
+        # ── Phase 4: BloodHound ──
+        log.info("AD recon %s: Phase 4 -- BloodHound", session_id)
 
         # bloodhound-python uses dnspython (NOT /etc/hosts) for DNS resolution.
         # -d needs the DNS domain (e.g. asa-myanmar.com, NOT the NETBIOS name).
@@ -417,8 +722,8 @@ def ad_recon_task(self, session_id):
         session.tool_status = ts
         session.save(update_fields=["tool_status"])
 
-        # ── Phase 3: AS-REP Roasting / User Enumeration ──
-        log.info("AD recon %s: Phase 3 -- AS-REP roasting / user enum", session_id)
+        # ── Phase 5: Active Credential Harvesting ──
+        log.info("AD recon %s: Phase 5 -- active credential harvesting", session_id)
 
         if is_auth:
             getnp_args = [
@@ -451,12 +756,6 @@ def ad_recon_task(self, session_id):
                 timeout=TIMEOUTS["kerbrute"],
             )
             _record_tool(ts, "kerbrute", rc, err)
-
-        session.tool_status = ts
-        session.save(update_fields=["tool_status"])
-
-        # ── Phase 4: Kerberoasting / Secrets Dump ──
-        log.info("AD recon %s: Phase 4 -- Kerberoasting / secrets dump", session_id)
 
         if is_auth:
             getspn_args = [
@@ -499,11 +798,137 @@ def ad_recon_task(self, session_id):
             )
             _record_tool(ts, "impacket_samrdump", rc, err)
 
-        session.tool_status = ts
-        session.save(update_fields=["tool_status"])
+            # spider_plus: recursive SMB share spider
+            spider_dir = os.path.join(tmpdir, "spider")
+            os.makedirs(spider_dir, exist_ok=True)
+            rc, out, err = _run_tool(
+                "nxc_spider_plus",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password,
+                 "-M", "spider_plus", "-o", "OUTPUT_FOLDER=%s" % spider_dir],
+                timeout=TIMEOUTS["nxc_spider_plus"],
+            )
+            _record_tool(ts, "nxc_spider_plus", rc, err)
+            if os.path.isdir(spider_dir):
+                import json as json_mod
+                interesting_exts = {".kdbx", ".ovpn", ".zip", ".backup", ".bak",
+                                    ".sql", ".config", ".ini", ".ps1", ".vbs", ".bat"}
+                for fname in os.listdir(spider_dir):
+                    if not fname.endswith(".json"):
+                        continue
+                    fpath = os.path.join(spider_dir, fname)
+                    try:
+                        with open(fpath, "r") as fh:
+                            data = json_mod.load(fh)
+                    except (json_mod.JSONDecodeError, OSError):
+                        continue
+                    if isinstance(data, list):
+                        for entry in data:
+                            fname_field = entry.get("file") or entry.get("filename") or ""
+                            ext = os.path.splitext(fname_field)[1].lower()
+                            if ext in interesting_exts or (
+                                ext == ".txt" and "password" in fname_field.lower()
+                            ):
+                                share = entry.get("share", "unknown")
+                                _persist_credential(session, "spider_plus", "interesting_file",
+                                                    dc_ip, "", fname_field,
+                                                    {"share": share, "path": fname_field})
 
-        # ── Phase 5: RPC / Protocol Enumeration ──
-        log.info("AD recon %s: Phase 5 -- RPC / protocol enum", session_id)
+            session.tool_status = ts
+            session.save(update_fields=["tool_status"])
+
+        # ── Phase 6: Privilege Escalation Path Detection ──
+        log.info("AD recon %s: Phase 6 -- privilege escalation detection", session_id)
+
+        if is_auth:
+            # 1) NoPac (CVE-2021-42287/42278)
+            rc, out, err = _run_tool(
+                "nxc_nopac",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "nopac"],
+                timeout=TIMEOUTS["nxc_nopac"],
+            )
+            _record_tool(ts, "nxc_nopac", rc, err)
+            out_upper = (out or "").upper()
+            vulnerable = "VULNERABLE" in out_upper and "NOT VULNERABLE" not in out_upper
+            _persist_vuln(session, "nopac", dc_ip, vulnerable,
+                          {"output": (out or "")[:2000], "error": (err or "")[:500]})
+
+            # 2) Zerologon (CVE-2020-1472)
+            rc, out, err = _run_tool(
+                "nxc_zerologon",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "zerologon"],
+                timeout=TIMEOUTS["nxc_zerologon"],
+            )
+            _record_tool(ts, "nxc_zerologon", rc, err)
+            out_upper = (out or "").upper()
+            vulnerable = "VULNERABLE" in out_upper and "NOT VULNERABLE" not in out_upper
+            _persist_vuln(session, "zerologon", dc_ip, vulnerable,
+                          {"output": (out or "")[:2000], "error": (err or "")[:500]})
+
+            # 3) PetitPotam (coercion)
+            rc, out, err = _run_tool(
+                "nxc_petitpotam",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "petitpotam"],
+                timeout=TIMEOUTS["nxc_petitpotam"],
+            )
+            _record_tool(ts, "nxc_petitpotam", rc, err)
+            out_upper = (out or "").upper()
+            vulnerable = "VULNERABLE" in out_upper and "NOT VULNERABLE" not in out_upper
+            _persist_vuln(session, "petitpotam", dc_ip, vulnerable,
+                          {"output": (out or "")[:2000], "error": (err or "")[:500]})
+
+            session.tool_status = ts
+            session.save(update_fields=["tool_status"])
+
+        # ── Phase 7: ADCS Deep Enumeration ──
+        log.info("AD recon %s: Phase 7 -- ADCS deep enumeration", session_id)
+
+        if is_auth:
+            # 1) adcs (existing)
+            adcs_cmd = [
+                "nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "adcs",
+            ]
+            rc, out, err = _run_tool(
+                "nxc_adcs", adcs_cmd, timeout=TIMEOUTS["nxc_adcs"],
+            )
+            _record_tool(ts, "nxc_adcs", rc, err)
+
+            # 2) certipy-find
+            rc, out, err = _run_tool(
+                "nxc_certipy_find",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "certipy-find"],
+                timeout=TIMEOUTS["nxc_certipy_find"],
+            )
+            _record_tool(ts, "nxc_certipy_find", rc, err)
+
+            # 3) enum_ca (RPC-based CA enumeration)
+            rc, out, err = _run_tool(
+                "nxc_enum_ca",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "enum_ca"],
+                timeout=TIMEOUTS["nxc_enum_ca"],
+            )
+            _record_tool(ts, "nxc_enum_ca", rc, err)
+
+            # 4) spooler (Print Spooler)
+            rc, out, err = _run_tool(
+                "nxc_spooler",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "spooler"],
+                timeout=TIMEOUTS["nxc_spooler"],
+            )
+            _record_tool(ts, "nxc_spooler", rc, err)
+
+            # 5) webdav (WebClient)
+            rc, out, err = _run_tool(
+                "nxc_webdav",
+                ["nxc", "smb", dc_ip, "-u", username, "-p", password, "-M", "webdav"],
+                timeout=TIMEOUTS["nxc_webdav"],
+            )
+            _record_tool(ts, "nxc_webdav", rc, err)
+
+            session.tool_status = ts
+            session.save(update_fields=["tool_status"])
+
+        # ── Phase 8: Service & Protocol Enumeration ──
+        log.info("AD recon %s: Phase 8 -- service & protocol enumeration", session_id)
 
         if is_auth:
             rpc_commands = (
@@ -555,36 +980,31 @@ def ad_recon_task(self, session_id):
             )
             _record_tool(ts, "nxc_wmi", rc, err)
 
-        session.tool_status = ts
-        session.save(update_fields=["tool_status"])
-
-        # ── Phase 6: ADCS Enumeration (authenticated only) ──
-        log.info("AD recon %s: Phase 6 -- ADCS enumeration", session_id)
-
+        # MSSQL discovery via SPN analysis from Phase 1 LDAP data
         if is_auth:
-            adcs_cmd = [
-                "nxc",
-                "ldap",
-                dc_ip,
-                "-u",
-                username,
-                "-p",
-                password,
-                "-M",
-                "adcs",
-            ]
-            rc, out, err = _run_tool(
-                "nxc_adcs",
-                adcs_cmd,
-                timeout=TIMEOUTS["nxc_adcs"],
-            )
-            _record_tool(ts, "nxc_adcs", rc, err)
+            from scanner.models.ad_recon import ADUser
+            mssql_users = ADUser.objects.filter(session=session, spn_count__gt=0)
+            mssql_hosts = set()
+            for u in mssql_users:
+                for spn in (u.member_of or []):
+                    if "MSSQL" in spn.upper():
+                        parts = spn.split("/")
+                        if len(parts) >= 2:
+                            host_part = parts[1].split(":")[0]
+                            mssql_hosts.add(host_part)
+            for mssql_host in sorted(mssql_hosts):
+                rc, out, err = _run_tool(
+                    "nxc_mssql",
+                    ["nxc", "mssql", mssql_host, "-u", username, "-p", password],
+                    timeout=TIMEOUTS["nxc_mssql"],
+                )
+                _record_tool(ts, "nxc_mssql", rc, err)
 
         session.tool_status = ts
         session.save(update_fields=["tool_status"])
 
-        # ── Phase 7: Responder (always runs, passive, 60s capture) ──
-        log.info("AD recon %s: Phase 7 -- Responder passive capture", session_id)
+        # ── Phase 9: Responder (always runs, passive, 60s capture) ──
+        log.info("AD recon %s: Phase 9 -- Responder passive capture", session_id)
 
         try:
             iface = (

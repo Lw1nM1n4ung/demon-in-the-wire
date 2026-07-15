@@ -14,6 +14,9 @@ from scanner.models.ad_recon import (
     ADShare,
     ADCertService,
     ADSprayResult,
+    CredentialFinding,
+    ACLFinding,
+    VulnCheck,
 )
 
 
@@ -198,3 +201,37 @@ class SprayRequestSerializer(serializers.Serializer):
         required=False,
         max_length=500,
     )
+
+
+# ── ViperOne-inspired pipeline serializers ──
+
+
+class CredentialFindingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CredentialFinding
+        fields = [
+            "id", "session", "source", "credential_type",
+            "target", "username", "details", "found_at",
+        ]
+        read_only_fields = ["id", "found_at"]
+
+
+class ACLFindingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ACLFinding
+        fields = [
+            "id", "session", "object_dn", "principal",
+            "right_name", "right_type", "is_inherited",
+            "risk_level", "attack_path",
+        ]
+        read_only_fields = ["id"]
+
+
+class VulnCheckSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VulnCheck
+        fields = [
+            "id", "session", "check_name", "host",
+            "vulnerable", "details", "checked_at",
+        ]
+        read_only_fields = ["id", "checked_at"]
