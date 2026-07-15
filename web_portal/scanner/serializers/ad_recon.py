@@ -13,6 +13,7 @@ from scanner.models.ad_recon import (
     ADACL,
     ADShare,
     ADCertService,
+    ADSprayResult,
 )
 
 
@@ -176,3 +177,24 @@ class ADCertServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = ADCertService
         fields = ["id", "ca_name", "host", "templates", "vulnerable_template"]
+
+
+class ADSprayResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ADSprayResult
+        fields = ["id", "session", "password", "username", "status", "output", "sprayed_at"]
+        read_only_fields = ["id", "sprayed_at"]
+
+
+class SprayRequestSerializer(serializers.Serializer):
+    passwords = serializers.ListField(
+        child=serializers.CharField(max_length=256),
+        allow_empty=False,
+        max_length=100,
+    )
+    users = serializers.ListField(
+        child=serializers.CharField(max_length=256),
+        allow_empty=True,
+        required=False,
+        max_length=500,
+    )

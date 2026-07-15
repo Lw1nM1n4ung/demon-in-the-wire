@@ -1,5 +1,10 @@
 """AD Recon views -- ViewSets for credential profiles and recon sessions."""
 
+import csv
+import io
+
+from django.http import HttpResponse
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -17,6 +22,7 @@ from scanner.models.ad_recon import (
     ADACL,
     ADShare,
     ADCertService,
+    ADSprayResult,
 )
 from scanner.serializers.ad_recon import (
     CredentialProfileSerializer,
@@ -31,6 +37,8 @@ from scanner.serializers.ad_recon import (
     ADACLSerializer,
     ADShareSerializer,
     ADCertServiceSerializer,
+    ADSprayResultSerializer,
+    SprayRequestSerializer,
 )
 from scanner.views import HasPerm
 
@@ -106,6 +114,44 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
         qs = ADUser.objects.filter(session=session)
         return self._paginated_response(request, qs, ADUserSerializer)
 
+    @action(detail=True, methods=["get"], url_path="export/users")
+    def export_users(self, request, pk=None):
+        """Export all users for this session as a CSV file."""
+        session = self.get_object()
+        qs = ADUser.objects.filter(session=session)
+
+        buf = io.StringIO()
+        buf.write("\ufeff")  # UTF-8 BOM for Excel
+        writer = csv.writer(buf)
+
+        writer.writerow([
+            "SAM Account Name", "UPN", "Display Name", "DN", "Description",
+            "Enabled", "Admin Count", "Last Logon", "Password Last Set",
+            "SPN Count", "Member Of",
+        ])
+
+        for user in qs.iterator(chunk_size=500):
+            writer.writerow([
+                user.sam_account_name or "",
+                user.upn or "",
+                user.display_name or "",
+                user.dn or "",
+                user.description or "",
+                "Yes" if user.enabled else "No",
+                str(user.admin_count),
+                user.last_logon.isoformat() if user.last_logon else "",
+                user.pwd_last_set.isoformat() if user.pwd_last_set else "",
+                str(user.spn_count),
+                "; ".join(user.member_of) if isinstance(user.member_of, list) else "",
+            ])
+
+        clean_domain = session.domain.replace(".", "_").replace("/", "_")
+        filename = f"{clean_domain}_users.csv"
+
+        resp = HttpResponse(buf.getvalue(), content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
     @action(detail=True, methods=["get"])
     def groups(self, request, pk=None):
         session = self.get_object()
@@ -148,9 +194,9 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
     def tree(self, request, pk=None):
         """Build an AD tree topology from the DNs of users, computers, and groups.
 
-        Returns a nested hierarchy: domain root -> OUs/containers -> leaf objects.
+        Returns a nested hierarchy: domain root -> OUs -> leaf objects.
         Each node has {id, label, type, dn, children, counts}.
-        type: 'domain', 'ou', 'container', or 'leaf'
+        type: 'domain', 'ou', 'user', 'computer', or 'group'
         """
         session = self.get_object()
 
@@ -158,18 +204,20 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
         nodes = []  # (dn, label, obj_type)
         for u in ADUser.objects.filter(session=session).values_list("dn", "display_name"):
             if u[0]:
-                nodes.append((u[0], u[1] or u[0].split(",")[0].replace("CN=", ""), "user"))
+                nodes.append((u[0], u[1] or "", "user"))
         for c in ADComputer.objects.filter(session=session).values_list("dn", "name"):
             if c[0]:
-                nodes.append((c[0], c[1] or c[0].split(",")[0].replace("CN=", ""), "computer"))
+                nodes.append((c[0], c[1] or "", "computer"))
         for g in ADGroup.objects.filter(session=session).values_list("dn", "name"):
             if g[0]:
-                nodes.append((g[0], g[1] or g[0].split(",")[0].replace("CN=", ""), "group"))
+                nodes.append((g[0], g[1] or "", "group"))
 
         if not nodes:
-            return Response({"id": "empty", "label": "No data", "type": "domain", "dn": "", "children": [], "counts": {"users": 0, "computers": 0, "groups": 0}})
+            return Response({
+                "id": "empty", "label": "No data", "type": "domain", "dn": "",
+                "children": [], "counts": {"users": 0, "computers": 0, "groups": 0},
+            })
 
-        # Reverse DNs to build tree bottom-up
         def parse_dn(dn):
             """Split DN into RDN components, return list (most specific first)."""
             parts = []
@@ -186,21 +234,21 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
                     current += ch
             if current.strip():
                 parts.append(current.strip())
-            return parts  # [CN=..., OU=..., OU=..., DC=..., DC=...]
+            return parts
 
-        # Find the domain root
-        all_parts = [parse_dn(dn) for dn, _, _ in nodes]
-        # Extract DC= components from the last DN to build domain root
-        dc_parts = []
-        for part in reversed(all_parts[0]):
-            if part.upper().startswith("DC="):
-                dc_parts.insert(0, part)
-            else:
-                break
+        # Determine canonical DC order from the longest DN
+        def get_dc_parts(parts):
+            return [p for p in parts if p.upper().startswith("DC=")]
+
+        best_dc = []
+        for dn, _, _ in nodes:
+            dc = get_dc_parts(parse_dn(dn))
+            if len(dc) > len(best_dc):
+                best_dc = dc
+        dc_parts = best_dc  # most specific first: [DC=asa-myanmar, DC=com]
         domain_dn = ",".join(dc_parts)
         domain_label = ".".join(p.replace("DC=", "") for p in dc_parts)
 
-        # Build tree: map dn_path -> node
         tree_root = {
             "id": "root",
             "label": domain_label,
@@ -209,64 +257,66 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
             "children": [],
             "counts": {"users": 0, "computers": 0, "groups": 0},
         }
-
-        # Map of dn -> node reference for inserting children
         dn_map = {domain_dn.lower(): tree_root}
 
         for dn, label, obj_type in nodes:
             parts = parse_dn(dn)
-            # Walk from domain root down, creating OU nodes as needed
-            # parts go from most-specific (CN=user) to least (DC=com)
-            # We need to insert from domain root downward
-            reversed_parts = list(reversed(parts))  # [DC=com, DC=asa-myanmar, OU=..., CN=...]
+            # parts = [CN=user, OU=SubOU, OU=ParentOU, DC=asa-myanmar, DC=com]
+            # Separate: CN (leaf name), OUs (hierarchy path), DCs (domain)
+            cn_value = None
+            ou_path = []  # from most specific to least specific OU
+            for p in parts:
+                up = p.upper()
+                if up.startswith("CN="):
+                    cn_value = p.split("=", 1)[1]
+                elif up.startswith("OU="):
+                    ou_path.append(p)
+                # DC= ignored here — we already have the root
 
-            # Find the insertion point: skip DC components, start from OUs
-            start_idx = 0
-            while start_idx < len(reversed_parts) and reversed_parts[start_idx].upper().startswith("DC="):
-                start_idx += 1
+            if not cn_value:
+                continue
 
+            leaf_label = label or cn_value
+
+            # Walk OUs in reverse (least specific first) from the domain root
             parent = tree_root
-            parent_dn_parts = list(dc_parts)  # ["DC=asa-myanmar", "DC=com"]
+            for ou in reversed(ou_path):
+                # Build the accumulated DN for this OU node
+                sibling_dns = [c["dn"] for c in parent["children"] if c["type"] == "ou"]
+                # Construct the correct DN: OU=...,<parent_dn>
+                ou_dn_parts = [ou]
+                if parent["dn"]:
+                    ou_dn_parts.append(parent["dn"])
+                ou_dn = ",".join(ou_dn_parts)
+                ou_key = ou_dn.lower()
 
-            for i in range(start_idx, len(reversed_parts)):
-                part = reversed_parts[i]
-                current_dn_parts = parent_dn_parts + [part]
-                current_dn = ",".join(reversed(current_dn_parts))
-                current_key = current_dn.lower()
-
-                if current_key not in dn_map:
-                    # Create OU/container node
-                    is_ou = part.upper().startswith("OU=")
+                if ou_key not in dn_map:
                     ou_node = {
                         "id": "ou-" + str(len(dn_map)),
-                        "label": part.split("=", 1)[1] if "=" in part else part,
-                        "type": "ou" if is_ou else "container",
-                        "dn": current_dn,
+                        "label": ou.split("=", 1)[1],
+                        "type": "ou",
+                        "dn": ou_dn,
                         "children": [],
                         "counts": {"users": 0, "computers": 0, "groups": 0},
                     }
-                    dn_map[current_key] = ou_node
+                    dn_map[ou_key] = ou_node
                     parent["children"].append(ou_node)
 
-                parent = dn_map[current_key]
-                parent_dn_parts = current_dn_parts
-
-                # Update counts
+                parent = dn_map[ou_key]
                 parent["counts"][obj_type + "s"] = parent["counts"].get(obj_type + "s", 0) + 1
 
-            # Add the leaf node under its parent OU
+            # Create leaf node directly under parent OU
             leaf = {
                 "id": "leaf-" + str(len(dn_map)),
-                "label": label,
+                "label": leaf_label,
                 "type": obj_type,
                 "dn": dn,
-                "children": [],
-                "counts": {},
             }
             dn_map[dn.lower()] = leaf
             parent["children"].append(leaf)
+            parent["counts"][obj_type + "s"] = parent["counts"].get(obj_type + "s", 0) + 1
 
-        # Update root counts
+        # Root counts from totals
         tree_root["counts"]["users"] = sum(1 for _, _, t in nodes if t == "user")
         tree_root["counts"]["computers"] = sum(1 for _, _, t in nodes if t == "computer")
         tree_root["counts"]["groups"] = sum(1 for _, _, t in nodes if t == "group")
@@ -275,11 +325,91 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
         def sort_tree(node):
             if node.get("children"):
                 node["children"].sort(key=lambda c: (
-                    0 if c["type"] in ("ou", "container") else 1,
-                    c["label"].lower()
+                    0 if c["type"] == "ou" else 1,
+                    c["label"].lower(),
                 ))
                 for child in node["children"]:
                     sort_tree(child)
 
         sort_tree(tree_root)
         return Response(tree_root)
+
+    # --- Password Spray ---
+
+    @action(detail=True, methods=["get"])
+    def spray(self, request, pk=None):
+        """Return all spray results for this session."""
+        session = self.get_object()
+        qs = ADSprayResult.objects.filter(session=session)
+        return self._paginated_response(request, qs, ADSprayResultSerializer)
+
+    @spray.mapping.post
+    def run_spray(self, request, pk=None):
+        """Queue a password spray against session users using nxc smb.
+
+        Creates pending ``ADSprayResult`` rows and dispatches a Celery task.
+        Returns immediately with a summary of queued passwords.
+        """
+        session = self.get_object()
+        serializer = SprayRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        passwords = serializer.validated_data["passwords"]
+        selected_users = serializer.validated_data.get("users") or None
+
+        dc_ip = session.dc_ip
+        if not dc_ip:
+            return Response(
+                {"error": "No DC IP configured for this session"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Resolve target usernames
+        if selected_users:
+            valid_users = list(
+                ADUser.objects.filter(
+                    session=session, sam_account_name__in=selected_users
+                ).values_list("sam_account_name", flat=True)
+            )
+            if not valid_users:
+                return Response(
+                    {"error": "None of the specified users exist in this session"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            usernames = sorted(set(valid_users))
+        else:
+            usernames = sorted({
+                u for u in ADUser.objects.filter(session=session)
+                .values_list("sam_account_name", flat=True) if u
+            })
+
+        if not usernames:
+            return Response(
+                {"error": "No users found for this session"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create pending spray result rows — one per user per password
+        for password in passwords:
+            for username in usernames:
+                ADSprayResult.objects.get_or_create(
+                    session=session,
+                    password=password,
+                    username=username,
+                    defaults={"status": "pending", "output": ""},
+                )
+
+        # Dispatch the Celery task with selected usernames
+        from scanner.tasks.ad_recon import run_spray_task
+        task = run_spray_task.apply_async(
+            args=[str(session.id)],
+            kwargs={"usernames": usernames},
+        )
+
+        return Response({
+            "task_id": task.id,
+            "passwords_tried": len(passwords),
+            "users_targeted": len(usernames),
+            "message": "Spray queued. Check /spray/ for results.",
+        })

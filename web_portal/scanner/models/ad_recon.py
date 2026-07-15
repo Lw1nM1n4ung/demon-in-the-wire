@@ -221,3 +221,28 @@ class ADCertService(models.Model):
 
     class Meta:
         ordering = ["ca_name"]
+
+
+class ADSprayResult(models.Model):
+    """Password spray attempt result — one row per successful credential pair."""
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    session = models.ForeignKey(
+        ADReconSession, on_delete=models.CASCADE, related_name="spray_results"
+    )
+    password = models.CharField(max_length=256)
+    username = models.CharField(max_length=256)
+    status = models.CharField(
+        max_length=32,
+        choices=[
+            ("success", "Success"),
+            ("failed", "Failed"),
+            ("locked", "Account Locked"),
+            ("error", "Error"),
+        ],
+        default="failed",
+    )
+    output = models.TextField(blank=True)
+    sprayed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-sprayed_at", "status", "username"]

@@ -77,6 +77,7 @@ from scanner.models.ad_recon import (
     ADUser,
     ADGroup,
     ADComputer,
+    ADSprayResult,
 )
 
 
@@ -112,3 +113,11 @@ class ADComputerAdmin(admin.ModelAdmin):
     list_display = ["name", "dns_hostname", "os", "enabled"]
     list_filter = ["enabled", "os"]
     search_fields = ["name", "dns_hostname"]
+
+
+@admin.register(ADSprayResult)
+class ADSprayResultAdmin(admin.ModelAdmin):
+    list_display = ["session", "password", "username", "status", "sprayed_at"]
+    list_filter = ["status"]
+    search_fields = ["username", "password"]
+    readonly_fields = ["sprayed_at"]

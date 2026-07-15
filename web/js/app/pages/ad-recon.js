@@ -326,9 +326,17 @@ WG.AD.rerunSession = function(id) {
 /* ── Session Detail Page (full-page with tabs) ── */
 
 WG.AD.renderSessionDetail = function(id) {
+  /* Fetch session data and render asynchronously.
+   * Router expects sync HTML return, so we inject a loading placeholder first
+   * and populate via the API callback. */
+  var loadingHtml = '<div class="panel"><div class="panel-body"><div class="panel-empty">Loading session ' + WG.escHtml(id.slice(0, 8)) + '...</div></div></div>';
+
   WG.api('/ad-recon/sessions/' + id + '/').then(function(s) {
+    var main = document.getElementById('mainContent');
+    if (!main) return;
+
     if (!s) {
-      document.getElementById('mainContent').innerHTML = '<div class="panel-empty">Session not found. <a href="javascript:void(0)" onclick="WG.navigate(\'ad-recon\')">Back to AD Recon</a></div>';
+      main.innerHTML = '<div class="panel-empty">Session not found. <a href="javascript:void(0)" onclick="WG.navigate(\'ad-recon\')">Back to AD Recon</a></div>';
       return;
     }
 
@@ -340,9 +348,12 @@ WG.AD.renderSessionDetail = function(id) {
     var statuses = s.tool_status || {};
     Object.keys(statuses).forEach(function(name) {
       var ts = statuses[name];
-      var ok = ts.status === 'ok';
+      var rc = ts.rc;
+      var ok = rc === 0;
+      var statusLabel = ok ? 'ok' : (rc === null ? 'timeout' : 'error (rc=' + rc + ')');
+      var errInfo = ts.error ? ' title="' + esc(ts.error) + '"' : '';
       toolRows += '<tr><td class="mono" style="font-size:0.75rem;">' + esc(name) + '</td>' +
-        '<td><span class="status-badge ' + (ok ? 'completed' : 'cancelled') + '"><span class="dot"></span> ' + esc(ts.status) + '</span></td>' +
+        '<td><span class="status-badge ' + (ok ? 'completed' : 'cancelled') + '"' + errInfo + '><span class="dot"></span> ' + esc(statusLabel) + '</span></td>' +
         '</tr>';
     });
 
@@ -364,6 +375,7 @@ WG.AD.renderSessionDetail = function(id) {
         '<button class="tab" data-tab="users" onclick="WG.AD._switchTab(\'' + s.id + '\',\'users\')">Users</button>' +
         '<button class="tab" data-tab="computers" onclick="WG.AD._switchTab(\'' + s.id + '\',\'computers\')">Computers</button>' +
         '<button class="tab" data-tab="groups" onclick="WG.AD._switchTab(\'' + s.id + '\',\'groups\')">Groups</button>' +
+        '<button class="tab" data-tab="spray" onclick="WG.AD._switchTab(\'' + s.id + '\',\'spray\')">Spray</button>' +
       '</div>' +
 
       '<div id="adDetailPage" data-session-id="' + s.id + '" data-session-status="' + s.status + '">' +
@@ -407,10 +419,24 @@ WG.AD.renderSessionDetail = function(id) {
 
         /* Groups tab */
         '<div id="adTab-groups" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adGroupsContainer"><div class="panel-empty">Loading groups...</div></div></div></div>' +
+
+        /* Password Spray tab */
+        '<div id="adTab-spray" class="ad-tab-content" style="display:none;"><div class="panel"><div class="panel-body" id="adSprayContainer"><div class="panel-empty">Loading spray history...</div></div></div></div>' +
       '</div>';
 
-    return html;
+    main.textContent = '';
+    main.insertAdjacentHTML('beforeend', html);
+
+    /* Load overview findings immediately */
+    WG.AD._loadOverviewFindings(s.id);
+
+    /* Start polling if running */
+    if (s.status === 'running' || s.status === 'pending') {
+      WG.AD._startPolling(s.id);
+    }
   });
+
+  return loadingHtml;
 };
 
 
@@ -436,7 +462,7 @@ WG.AD._switchTab = function(sessionId, tabName) {
       WG.AD._loadTree(sessionId);
       break;
     case 'users':
-      WG.AD._loadDataTable(sessionId, 'users', 'adUsersContainer', ['sam_account_name', 'upn', 'display_name', 'dn'], ['SAM', 'UPN', 'Display Name', 'DN']);
+      WG.AD._loadDataTable(sessionId, 'users', 'adUsersContainer', ['sam_account_name', 'upn', 'display_name', 'dn'], ['SAM', 'UPN', 'Display Name', 'DN'], 'export/users/');
       break;
     case 'computers':
       WG.AD._loadDataTable(sessionId, 'computers', 'adComputersContainer', ['name', 'dns_hostname', 'os', 'os_version', 'dn'], ['Name', 'DNS Hostname', 'OS', 'Version', 'DN']);
@@ -444,7 +470,371 @@ WG.AD._switchTab = function(sessionId, tabName) {
     case 'groups':
       WG.AD._loadDataTable(sessionId, 'groups', 'adGroupsContainer', ['name', 'sam_account_name', 'member_count', 'dn'], ['Name', 'SAM', 'Members', 'DN']);
       break;
+    case 'spray':
+      WG.AD._loadSprayTab(sessionId);
+      break;
   }
+};
+
+
+/* ── Password Spray Tab ── */
+
+WG.AD.COMMON_PASSWORDS = [
+  'Password1', 'Password123', 'Welcome1', 'Welcome123',
+  'Spring2025', 'Summer2025', 'Autumn2025', 'Winter2025',
+  'Spring2024', 'Summer2024', 'Autumn2024', 'Winter2024',
+  'January2025', 'February2025', 'March2025',
+  'changeme', 'P@ssw0rd', 'Password@123',
+  'Company@123', 'Admin@123', 'Welcome@123',
+  'Qwerty123', 'Qwerty@123',
+];
+
+WG.AD._loadSprayTab = function(sessionId) {
+  var el = document.getElementById('adSprayContainer');
+  if (!el || el.dataset.loaded === '1') return;
+  el.dataset.loaded = '1';
+
+  var esc = WG.escHtml;
+
+  /* Build the spray UI */
+  var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+
+    /* Left: passwords */
+    '<div>' +
+      '<div class="panel" style="margin-bottom:12px;">' +
+        '<div class="panel-header"><h3 style="margin:0;font-size:0.85rem;">Passwords</h3></div>' +
+        '<div class="panel-body">' +
+          '<textarea id="adSprayPasswords" class="form-input" rows="8" ' +
+            'placeholder="One password per line..." ' +
+            'style="width:100%;font-family:monospace;font-size:0.8rem;resize:vertical;">' +
+          '</textarea>' +
+          '<label style="margin-top:6px;font-size:0.78rem;cursor:pointer;display:flex;align-items:center;gap:4px;">' +
+            '<input type="checkbox" id="adSprayCommon" onchange="WG.AD._toggleCommonPasswords()">' +
+            'Use common passwords' +
+          '</label>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+
+    /* Right: user selector */
+    '<div>' +
+      '<div class="panel" style="margin-bottom:12px;">' +
+        '<div class="panel-header">' +
+          '<h3 style="margin:0;font-size:0.85rem;">All Users <span id="adSprayUserCount" style="color:var(--text-dim);">(loading...)</span></h3>' +
+        '</div>' +
+        '<div class="panel-body" style="padding:8px;">' +
+          '<input class="form-input" id="adSprayUserSearch" placeholder="Filter users..." ' +
+            'oninput="WG.AD._filterSprayUsers()" style="margin-bottom:6px;width:100%;">' +
+          '<div style="margin-bottom:4px;display:flex;gap:6px;">' +
+            '<button class="btn btn-sm" onclick="WG.AD._selectAllSprayUsers(true)" style="font-size:0.7rem;">Select All</button>' +
+            '<button class="btn btn-sm" onclick="WG.AD._selectAllSprayUsers(false)" style="font-size:0.7rem;">None</button>' +
+          '</div>' +
+          '<div id="adSprayUserList" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:4px;">' +
+            '<div class="panel-empty">Loading users...</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+
+    '</div>' +
+
+    /* Spray button row */
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+      '<button class="btn btn-primary btn-sm" id="adSprayBtn" ' +
+        'onclick="WG.AD._runSpray(\'' + sessionId + '\')">' +
+        '&#9889; Spray' +
+      '</button>' +
+      '<div id="adSprayStatus" style="font-size:0.8rem;color:var(--text-dim);"></div>' +
+    '</div>' +
+
+    /* Results + History below */
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+      '<div class="panel">' +
+        '<div class="panel-header"><h3 style="margin:0;font-size:0.85rem;">Results</h3></div>' +
+        '<div class="panel-body" id="adSprayResults"><div class="panel-empty">No sprays yet.</div></div>' +
+      '</div>' +
+      '<div class="panel">' +
+        '<div class="panel-header"><h3 style="margin:0;font-size:0.85rem;">History</h3></div>' +
+        '<div class="panel-body" id="adSprayHistory"><div class="panel-empty">Loading history...</div></div>' +
+      '</div>' +
+    '</div>';
+
+  el.innerHTML = html;
+
+  /* Load user checklist from API */
+  WG.AD._loadSprayUsers(sessionId);
+
+  /* Load existing spray history */
+  WG.AD._loadSprayHistory(sessionId);
+};
+
+
+WG.AD._loadSprayUsers = function(sessionId) {
+  var allUsers = [];
+  var list = document.getElementById('adSprayUserList');
+  var countEl = document.getElementById('adSprayUserCount');
+
+  /* Fetch all pages of users so every discovered user is included.
+     WG.API_BASE includes the correct host:port; pagination 'next' URLs may have
+     wrong/missing port so we strip the origin and rebuild from WG.API_BASE. */
+  function fetchPage(path) {
+    return fetch(WG.API_BASE + path, { credentials: 'include' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data && data.results) {
+          allUsers = allUsers.concat(data.results);
+        }
+        if (data && data.next) {
+          /* Extract path from next URL (e.g. /api/ad-recon/.../?page=2) */
+          var nextPath = '/' + data.next.split('/api/').slice(1).join('/api/');
+          return fetchPage(nextPath);
+        }
+      });
+  }
+
+  fetchPage('/ad-recon/sessions/' + sessionId + '/users/?page_size=500').then(function() {
+    if (!list) return;
+
+    if (!allUsers.length) {
+      list.innerHTML = '<div class="panel-empty">No users found.</div>';
+      if (countEl) countEl.textContent = '(0 / 0)';
+      return;
+    }
+
+    var esc = WG.escHtml;
+    var html = '';
+    allUsers.forEach(function(u) {
+      var sam = u.sam_account_name || '';
+      if (!sam) return;
+      html += '<label style="display:flex;align-items:center;gap:6px;padding:2px 4px;' +
+        'cursor:pointer;font-size:0.75rem;white-space:nowrap;" class="spray-user-row">' +
+        '<input type="checkbox" value="' + esc(sam) + '" checked onchange="WG.AD._updateSprayCount()">' +
+        esc(sam) +
+        '</label>';
+    });
+    list.innerHTML = html || '<div class="panel-empty">No users.</div>';
+
+    /* Show checked/total count (all checked by default) */
+    WG.AD._updateSprayCount();
+  });
+};
+
+
+WG.AD._filterSprayUsers = function() {
+  var q = (document.getElementById('adSprayUserSearch') || {}).value || '';
+  q = q.toLowerCase();
+  var rows = document.querySelectorAll('#adSprayUserList .spray-user-row');
+  rows.forEach(function(row) {
+    var text = (row.textContent || '').toLowerCase();
+    row.style.display = (q === '' || text.indexOf(q) !== -1) ? 'flex' : 'none';
+  });
+};
+
+
+WG.AD._selectAllSprayUsers = function(checked) {
+  var checks = document.querySelectorAll('#adSprayUserList input[type="checkbox"]');
+  checks.forEach(function(cb) { cb.checked = checked; });
+  WG.AD._updateSprayCount();
+};
+
+
+WG.AD._updateSprayCount = function() {
+  var countEl = document.getElementById('adSprayUserCount');
+  if (!countEl) return;
+  var total = document.querySelectorAll('#adSprayUserList .spray-user-row').length;
+  var checked = document.querySelectorAll('#adSprayUserList input[type="checkbox"]:checked').length;
+  countEl.textContent = '(' + checked + ' / ' + total + ')';
+};
+
+
+WG.AD._toggleCommonPasswords = function() {
+  var cb = document.getElementById('adSprayCommon');
+  var ta = document.getElementById('adSprayPasswords');
+  if (cb && ta) {
+    if (cb.checked) {
+      ta.value = WG.AD.COMMON_PASSWORDS.join('\n');
+    } else {
+      ta.value = '';
+    }
+  }
+};
+
+
+WG.AD._runSpray = function(sessionId) {
+  var ta = document.getElementById('adSprayPasswords');
+  var btn = document.getElementById('adSprayBtn');
+  var statusEl = document.getElementById('adSprayStatus');
+  var resultsEl = document.getElementById('adSprayResults');
+
+  if (!ta || !ta.value.trim()) {
+    alert('Enter at least one password.');
+    return;
+  }
+
+  var passwords = ta.value.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+  if (!passwords.length) {
+    alert('Enter at least one password.');
+    return;
+  }
+
+  /* Collect selected users */
+  var selectedUsers = [];
+  var checks = document.querySelectorAll('#adSprayUserList input[type="checkbox"]:checked');
+  checks.forEach(function(cb) { selectedUsers.push(cb.value); });
+  if (!selectedUsers.length) {
+    alert('Select at least one user to target.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Spraying...';
+  statusEl.textContent = 'Running spray against ' + selectedUsers.length + ' user(s) with ' + passwords.length + ' password(s)...';
+
+  WG.api('/ad-recon/sessions/' + sessionId + '/spray/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ passwords: passwords, users: selectedUsers }),
+  }).then(function(data) {
+    btn.disabled = false;
+    btn.textContent = '\u26A1 Spray';
+
+    if (!data || data.error) {
+      statusEl.innerHTML = '<span style="color:var(--critical);">' + WG.escHtml(data && data.error || 'Unknown error') + '</span>';
+      return;
+    }
+
+    var sum = data;
+    statusEl.innerHTML = '<span style="color:var(--success);">' +
+      'Spray queued — ' +
+      sum.passwords_tried + ' password(s) against ' + sum.users_targeted + ' users. ' +
+      '</span>' +
+      '<div style="margin-top:4px;font-size:0.75rem;color:var(--text-dim);">' +
+      'Task ID: ' + WG.escHtml(sum.task_id || '') + '. Polling for results...' +
+      '</div>';
+
+    /* Show placeholder in results */
+    resultsEl.innerHTML = '<div class="panel-empty">Spray running... results will appear here.</div>';
+
+    /* Poll for results every 3 seconds */
+    var pollCount = 0;
+    var maxPolls = 40;  // ~2 minutes
+    var poll = setInterval(function() {
+      pollCount++;
+      WG.api('/ad-recon/sessions/' + sessionId + '/spray/?page_size=200').then(function(data) {
+        if (!data || !data.results) return;
+
+        var items = data.results;
+        var nonPending = items.filter(function(r) { return r.status !== 'pending'; });
+
+        /* Update results panel */
+        WG.AD._renderSprayResults(items, 'adSprayResults');
+
+        /* Update history panel */
+        var esc = WG.escHtml;
+        var html = '<div style="overflow-x:auto;"><table class="data-table" style="font-size:0.75rem;width:100%;">' +
+          '<thead><tr><th>Time</th><th>Password</th><th>Username</th><th>Status</th></tr></thead><tbody>';
+        items.forEach(function(r) {
+          var badge = r.status === 'success'
+            ? '<span style="color:var(--success);">\u2713 Success</span>'
+            : r.status === 'locked'
+              ? '<span style="color:var(--warning);">\u26A0 Locked</span>'
+              : r.status === 'pending'
+                ? '<span style="color:var(--text-dim);">\u23F3 Pending</span>'
+                : '<span style="color:var(--text-dim);">' + esc(r.status) + '</span>';
+          html += '<tr><td>' + esc(r.sprayed_at || '') + '</td>' +
+            '<td style="font-family:monospace;">' + esc(r.password) + '</td>' +
+            '<td style="font-family:monospace;">' + esc(r.username) + '</td>' +
+            '<td>' + badge + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+        var histEl = document.getElementById('adSprayHistory');
+        if (histEl) histEl.innerHTML = html;
+
+        /* Stop polling when all items resolved */
+        if (nonPending.length > 0 || pollCount >= maxPolls) {
+          clearInterval(poll);
+          if (nonPending.length > 0) {
+            statusEl.innerHTML = '<span style="color:var(--success);">' +
+              'Done — see results below.</span>';
+          } else if (pollCount >= maxPolls) {
+            statusEl.innerHTML += '<br><span style="color:var(--warning);">Polling timed out. Refresh to see results.</span>';
+          }
+        }
+      });
+    }, 3000);
+  }).catch(function(err) {
+    btn.disabled = false;
+    btn.textContent = '\u26A1 Spray';
+    statusEl.innerHTML = '<span style="color:var(--critical);">' + WG.escHtml(err.message || 'Request failed') + '</span>';
+  });
+};
+
+
+WG.AD._renderSprayResults = function(items, containerId) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  var nonPending = items.filter(function(r) { return r.status !== 'pending'; });
+  if (!nonPending.length) {
+    el.innerHTML = '<div class="panel-empty">Waiting for results...</div>';
+    return;
+  }
+  var esc = WG.escHtml;
+  var rows = '<table class="data-table" style="font-size:0.75rem;width:100%;">' +
+    '<thead><tr><th>Password</th><th>Username</th><th>Status</th></tr></thead><tbody>';
+  nonPending.forEach(function(r) {
+    var badge = r.status === 'success'
+      ? '<span style="color:var(--success);">\u2713 Success</span>'
+      : r.status === 'locked'
+        ? '<span style="color:var(--warning);">\u26A0 Locked</span>'
+        : '<span style="color:var(--text-dim);">' + esc(r.status) + '</span>';
+    rows += '<tr><td style="font-family:monospace;">' + esc(r.password) + '</td>' +
+      '<td style="font-family:monospace;">' + esc(r.username) + '</td>' +
+      '<td>' + badge + '</td></tr>';
+  });
+  rows += '</tbody></table>';
+  el.innerHTML = rows;
+};
+
+
+WG.AD._loadSprayHistory = function(sessionId, callback) {
+  var el = document.getElementById('adSprayHistory');
+  if (!el) return;
+
+  WG.api('/ad-recon/sessions/' + sessionId + '/spray/?page_size=200').then(function(data) {
+    if (!data || !data.results || !data.results.length) {
+      el.innerHTML = '<div class="panel-empty">No spray history.</div>';
+      if (callback) callback(false);
+      return;
+    }
+
+    var esc = WG.escHtml;
+    var items = data.results;
+    var html = '<div style="overflow-x:auto;"><table class="data-table" style="font-size:0.75rem;width:100%;">' +
+      '<thead><tr><th>Time</th><th>Password</th><th>Username</th><th>Status</th></tr></thead><tbody>';
+
+    var hasSuccess = false;
+    items.forEach(function(r) {
+      var badge = r.status === 'success'
+        ? '<span style="color:var(--success);">\u2713 Success</span>'
+        : r.status === 'locked'
+          ? '<span style="color:var(--warning);">\u26A0 Locked</span>'
+          : r.status === 'pending'
+            ? '<span style="color:var(--text-dim);">\u23F3 Pending</span>'
+            : '<span style="color:var(--text-dim);">' + esc(r.status) + '</span>';
+      if (r.status === 'success' || r.status === 'locked') hasSuccess = true;
+      html += '<tr>' +
+        '<td>' + esc(r.sprayed_at || '') + '</td>' +
+        '<td style="font-family:monospace;">' + esc(r.password) + '</td>' +
+        '<td style="font-family:monospace;">' + esc(r.username) + '</td>' +
+        '<td>' + badge + '</td>' +
+        '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+
+    if (callback) callback(hasSuccess);
+  });
 };
 
 
@@ -606,7 +996,7 @@ WG.AD._toggleTreeNode = function(toggleEl) {
 
 /* ── Data Tables ── */
 
-WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, headers) {
+WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, headers, exportPath) {
   var el = document.getElementById(containerId);
   if (!el || el.dataset.loaded) return;
   el.dataset.loaded = '1';
@@ -622,10 +1012,18 @@ WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, header
     var items = data.results;
     var total = data.count || items.length;
 
-    /* Search box */
-    var html = '<div style="margin-bottom:8px;">' +
+    /* Export button + search box */
+    var exportBtn = '';
+    if (exportPath) {
+      exportBtn = '<a class="btn btn-sm btn-primary" style="margin-right:8px;" ' +
+        'href="/api/ad-recon/sessions/' + sessionId + '/' + exportPath + '" download>' +
+        '\u2B07 Export CSV</a>';
+    }
+
+    var html = '<div style="margin-bottom:8px;display:flex;align-items:center;">' +
+      exportBtn +
       '<input class="form-input" id="adSearch-' + endpoint + '" placeholder="Search ' + total + ' ' + endpoint + '..." ' +
-      'oninput="WG.AD._filterTable(\'adTable-' + endpoint + '\', this.value)" style="max-width:300px;">' +
+      'oninput="WG.AD._filterTable(\'adTable-' + endpoint + '\', this.value)" style="max-width:300px;margin-left:auto;">' +
       '</div>';
 
     html += '<div style="overflow-x:auto;"><table class="data-table" id="adTable-' + endpoint + '" style="font-size:0.75rem;">';

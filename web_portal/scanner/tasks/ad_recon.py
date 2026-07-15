@@ -641,3 +641,134 @@ def ad_recon_task(self, session_id):
             del nt_hash
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@shared_task(bind=True, max_retries=0, time_limit=600, soft_time_limit=550)
+def run_spray_task(self, session_id, usernames=None):
+    """Run a password spray via nxc smb and persist results.
+
+    Args:
+        session_id: ADReconSession UUID string.
+        usernames: Optional list of sam_account_names to target.
+                   If omitted, all session users are sprayed.
+    """
+    import re
+    import subprocess
+
+    from scanner.models.ad_recon import ADReconSession, ADUser, ADSprayResult
+
+    try:
+        session = ADReconSession.objects.get(id=session_id)
+    except ADReconSession.DoesNotExist:
+        return {"error": "Session not found"}
+
+    # Collect pending spray results
+    pending = list(ADSprayResult.objects.filter(session=session, status="pending"))
+    if not pending:
+        return {"error": "No pending spray operations"}
+
+    passwords = list({r.password for r in pending})
+    dc_ip = session.dc_ip
+
+    if not dc_ip:
+        for r in pending:
+            r.status = "error"
+            r.output = "No DC IP configured"
+            r.save(update_fields=["status", "output"])
+        return {"error": "No DC IP"}
+
+    # Collect usernames — use provided list or query all
+    if usernames:
+        usernames = sorted(set(usernames))
+    else:
+        users = ADUser.objects.filter(session=session).values_list("sam_account_name", flat=True)
+        usernames = sorted({u for u in users if u})
+    if not usernames:
+        for r in pending:
+            r.status = "error"
+            r.output = "No users found"
+            r.save(update_fields=["status", "output"])
+        return {"error": "No users"}
+
+    userlist = "\n".join(usernames)
+    tmpdir = tempfile.mkdtemp(prefix="wg_spray_")
+    user_file = os.path.join(tmpdir, "users.txt")
+
+    try:
+        with open(user_file, "w") as f:
+            f.write(userlist)
+
+        for password in passwords:
+            cmd = [
+                "nxc", "smb", dc_ip,
+                "-u", user_file,
+                "-p", password,
+                "--continue-on-success",
+                "--no-bruteforce",
+            ]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                output = proc.stdout + proc.stderr
+            except subprocess.TimeoutExpired:
+                output = "Timeout after 120s"
+            except FileNotFoundError:
+                output = "nxc not found on worker"
+            except OSError as e:
+                output = "OS error: %s" % str(e)
+
+            success_users = {}
+            locked_users = set()
+
+            for line in output.splitlines():
+                if "[+]" in line and "\\" in line:
+                    m = re.search(r"\[\+\]\s*(\S+?):(\S+)", line)
+                    if m:
+                        # nxc format: DOMAIN\username:password
+                        raw_user = m.group(1)
+                        user_part = raw_user.split("\\", 1)[-1] if "\\" in raw_user else raw_user
+                        success_users[user_part] = m.group(2)
+                if "[*]" in line and "LOCKED" in line.upper():
+                    m = re.search(r"\[*\]\s*\S+?\\\\(\S+)", line)
+                    if m:
+                        locked_users.add(m.group(1))
+
+            # Create/update per-user rows for ALL sprayed users
+            for username in usernames:
+                if username in success_users:
+                    status_val = "success"
+                elif username in locked_users:
+                    status_val = "locked"
+                else:
+                    status_val = "failed"
+
+                existing = ADSprayResult.objects.filter(
+                    session=session, username=username, password=password
+                ).first()
+                if existing:
+                    existing.status = status_val
+                    existing.output = output
+                    existing.save(update_fields=["status", "output"])
+                else:
+                    ADSprayResult.objects.create(
+                        session=session,
+                        password=password,
+                        username=username,
+                        status=status_val,
+                        output=output,
+                    )
+
+            # Delete placeholder "*" rows for this password
+            ADSprayResult.objects.filter(
+                session=session, username="*", password=password
+            ).delete()
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return {"session_id": str(session_id), "status": "complete"}
+
