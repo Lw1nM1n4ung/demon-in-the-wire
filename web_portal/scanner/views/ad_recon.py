@@ -155,7 +155,7 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def groups(self, request, pk=None):
         session = self.get_object()
-        qs = ADGroup.objects.filter(session=session)
+        qs = ADGroup.objects.filter(session=session).order_by('-member_count', 'name')
         return self._paginated_response(request, qs, ADGroupSerializer)
 
     @action(detail=True, methods=["get"])

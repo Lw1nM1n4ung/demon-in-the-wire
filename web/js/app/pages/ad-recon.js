@@ -1012,6 +1012,11 @@ WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, header
     var items = data.results;
     var total = data.count || items.length;
 
+    /* Sort groups by member_count descending — belt and suspenders with backend ordering */
+    if (items.length > 0 && items[0].hasOwnProperty('member_count')) {
+      items.sort(function(a, b) { return (b.member_count || 0) - (a.member_count || 0); });
+    }
+
     /* Export button + search box */
     var exportBtn = '';
     if (exportPath) {
