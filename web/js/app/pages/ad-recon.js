@@ -1017,6 +1017,10 @@ WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, header
       items.sort(function(a, b) { return (b.member_count || 0) - (a.member_count || 0); });
     }
 
+    /* Store items for row-click detail views (groups) */
+    el._items = items;
+    el._sessionId = sessionId;
+
     /* Export button + search box */
     var exportBtn = '';
     if (exportPath) {
@@ -1025,7 +1029,11 @@ WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, header
         '\u2B07 Export CSV</a>';
     }
 
-    var html = '<div style="margin-bottom:8px;display:flex;align-items:center;">' +
+    var isGroups = (endpoint === 'groups');
+
+    /* Build list-view wrapper */
+    var html = '<div id="adListWrap-' + endpoint + '">';
+    html += '<div style="margin-bottom:8px;display:flex;align-items:center;">' +
       exportBtn +
       '<input class="form-input" id="adSearch-' + endpoint + '" placeholder="Search ' + total + ' ' + endpoint + '..." ' +
       'oninput="WG.AD._filterTable(\'adTable-' + endpoint + '\', this.value)" style="max-width:300px;margin-left:auto;">' +
@@ -1036,8 +1044,14 @@ WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, header
     headers.forEach(function(h) { html += '<th>' + esc(h) + '</th>'; });
     html += '</tr></thead><tbody>';
 
-    items.forEach(function(item) {
-      html += '<tr>';
+    items.forEach(function(item, idx) {
+      var rowAttrs = '';
+      if (isGroups) {
+        rowAttrs = ' class="clickable-row" data-idx="' + idx + '" ' +
+          'onclick="WG.AD._showGroupDetail(document.getElementById(\'' + containerId + '\'),' + idx + ')" ' +
+          'style="cursor:pointer;"';
+      }
+      html += '<tr' + rowAttrs + '>';
       fields.forEach(function(fld) {
         var val = item[fld];
         if (fld === 'dn' && val) {
@@ -1057,6 +1071,11 @@ WG.AD._loadDataTable = function(sessionId, endpoint, containerId, fields, header
       html += '<div style="text-align:center;padding:8px;color:var(--text-dim);font-size:0.75rem;">Showing ' + items.length + ' of ' + total + ' ' + endpoint + '</div>';
     }
 
+    html += '</div>';  /* close adListWrap */
+
+    /* Detail view placeholder (used by groups click) */
+    html += '<div id="adDetailWrap-' + endpoint + '" style="display:none;"></div>';
+
     el.innerHTML = html;
   });
 };
@@ -1071,4 +1090,87 @@ WG.AD._filterTable = function(tableId, query) {
     var text = row.textContent.toLowerCase();
     row.style.display = q === '' || text.indexOf(q) !== -1 ? '' : 'none';
   });
+};
+
+
+/* ── Group Detail (clickable rows) ── */
+
+WG.AD._showGroupDetail = function(container, idx) {
+  if (!container || !container._items) return;
+  var group = container._items[idx];
+  if (!group) return;
+  var sessionId = container._sessionId;
+  var esc = WG.escHtml;
+
+  /* Hide list, show detail */
+  var listWrap = document.getElementById('adListWrap-groups');
+  var detailWrap = document.getElementById('adDetailWrap-groups');
+  if (listWrap) listWrap.style.display = 'none';
+  if (detailWrap) detailWrap.style.display = '';
+
+  /* Build member list sorted alphabetically */
+  var members = group.members || [];
+  var sortedMembers = members.slice().sort(function(a, b) {
+    return (a || '').localeCompare(b || '');
+  });
+
+  var memberRows = '';
+  if (sortedMembers.length === 0) {
+    memberRows = '<tr><td style="color:var(--text-dim);text-align:center;">No members</td></tr>';
+  } else {
+    sortedMembers.forEach(function(m) {
+      var display = m.length > 100 ? m.substring(0, 97) + '...' : m;
+      memberRows += '<tr><td title="' + esc(m) + '" style="font-size:0.7rem;">' + esc(display) + '</td></tr>';
+    });
+  }
+
+  var html = '<div class="panel" style="margin:0;">' +
+
+    /* Header with back button */
+    '<div class="panel-header" style="display:flex;align-items:center;gap:8px;">' +
+      '<button class="btn btn-sm btn-ghost" onclick="WG.AD._backToGroupList(document.getElementById(\'adGroupsContainer\'))" ' +
+        'style="font-size:0.75rem;">&larr; Back to Groups</button>' +
+      '<h3 style="margin:0;font-size:0.85rem;color:var(--accent);">' + esc(group.name || group.sam_account_name || 'Group') + '</h3>' +
+    '</div>' +
+
+    '<div class="panel-body">' +
+
+      /* Metadata */
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:0.8rem;">' +
+        '<div><strong>SAM:</strong> ' + esc(group.sam_account_name || '—') + '</div>' +
+        '<div><strong>Members:</strong> ' + (group.member_count || 0) + '</div>' +
+        '<div><strong>Admin Count:</strong> ' + (group.admin_count || 0) + '</div>' +
+        '<div><strong>DN:</strong><br><span style="font-size:0.65rem;color:var(--text-dim);word-break:break-all;">' + esc(group.dn || '—') + '</span></div>' +
+      '</div>' +
+
+      (group.description ? '<div style="margin-bottom:12px;font-size:0.8rem;"><strong>Description:</strong> ' + esc(group.description) + '</div>' : '') +
+
+      /* Member list header + search */
+      '<div style="display:flex;align-items:center;margin-bottom:8px;">' +
+        '<strong style="font-size:0.8rem;">Members (' + sortedMembers.length + ')</strong>' +
+        '<input class="form-input" id="adGroupMemberSearch" placeholder="Filter members..." ' +
+          'oninput="WG.AD._filterTable(\'adGroupMemberTable\', this.value)" ' +
+          'style="max-width:250px;margin-left:auto;font-size:0.75rem;">' +
+      '</div>' +
+
+      /* Member table */
+      '<div style="overflow-x:auto;max-height:400px;overflow-y:auto;">' +
+        '<table class="data-table" id="adGroupMemberTable" style="font-size:0.7rem;">' +
+          '<thead><tr><th>Member DN</th></tr></thead>' +
+          '<tbody>' + memberRows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+
+    '</div>' +
+  '</div>';
+
+  if (detailWrap) detailWrap.innerHTML = html;
+};
+
+
+WG.AD._backToGroupList = function(container) {
+  var listWrap = document.getElementById('adListWrap-groups');
+  var detailWrap = document.getElementById('adDetailWrap-groups');
+  if (listWrap) listWrap.style.display = '';
+  if (detailWrap) detailWrap.style.display = 'none';
 };
