@@ -945,7 +945,19 @@ def ad_recon_task(self, session_id):
                 "nxc_adcs", adcs_cmd, timeout=TIMEOUTS["nxc_adcs"],
             )
             _record_tool(ts, "nxc_adcs", rc, err)
-
+            # Parse ADCS module output for CA names and template issues
+            if out:
+                for ca_match in re.finditer(r"CA\s+Name\s*:\s*(.+)", out, re.I):
+                    cn = ca_match.group(1).strip()
+                    _persist_vuln(session, "adcs_ca_%s" % cn.replace(" ", "_")[:60],
+                                  dc_ip, False,
+                                  {"title": "ADCS CA Found", "ca_name": cn,
+                                   "summary": "Certificate Authority: %s" % cn})
+                for i, line in enumerate(out.splitlines()):
+                    if any(kw in line.upper() for kw in ("ESC", "VULNERAB", "MISCONFIG")):
+                        _persist_vuln(session, "adcs_issue_%d" % i, dc_ip, True,
+                                      {"title": "ADCS Issue", "raw": line.strip(),
+                                       "tool": "nxc_adcs"})
             # 2) certipy-find
             rc, out, err = _run_tool(
                 "nxc_certipy_find",
@@ -953,6 +965,27 @@ def ad_recon_task(self, session_id):
                 timeout=TIMEOUTS["nxc_certipy_find"],
             )
             _record_tool(ts, "nxc_certipy_find", rc, err)
+            if out:
+                VULN_KW = ("vulnerable", "esc1", "esc2", "esc3", "esc4",
+                           "esc5", "esc6", "esc7", "esc8", "esc9", "esc10",
+                           "esc11", "enrollee supplies subject",
+                           "no security extension", "client authentication")
+                certipy_idx = 0
+                for esc_match in re.finditer(
+                    r"(ESC\d+(?:\s*-\s*[^:]+)?)\s*:\s*(.+)", out, re.I,
+                ):
+                    esc_id = esc_match.group(1).strip()
+                    detail = esc_match.group(2).strip()
+                    _persist_vuln(session, "certipy_esc_%s" % esc_id.lower().replace(" ", "_")[:80],
+                                  dc_ip, True,
+                                  {"title": "ADCS %s" % esc_id,
+                                   "esc_id": esc_id, "detail": detail,
+                                   "summary": "%s: %s" % (esc_id, detail)})
+                for i, line in enumerate(out.splitlines()):
+                    if any(kw in line.lower() for kw in VULN_KW):
+                        _persist_vuln(session, "certipy_%d" % i, dc_ip, True,
+                                      {"title": "ADCS Issue", "raw": line.strip(),
+                                       "tool": "certipy-find"})
 
             # 3) enum_ca (RPC-based CA enumeration)
             rc, out, err = _run_tool(
@@ -961,6 +994,11 @@ def ad_recon_task(self, session_id):
                 timeout=TIMEOUTS["nxc_enum_ca"],
             )
             _record_tool(ts, "nxc_enum_ca", rc, err)
+            if out and ("CA:" in out or "Enabled" in out):
+                _persist_vuln(session, "enum_ca", dc_ip, False,
+                              {"title": "CA Enumeration Results",
+                               "summary": out.strip()[:500],
+                               "tool": "enum_ca"})
 
             # 4) spooler (Print Spooler)
             rc, out, err = _run_tool(
@@ -969,6 +1007,12 @@ def ad_recon_task(self, session_id):
                 timeout=TIMEOUTS["nxc_spooler"],
             )
             _record_tool(ts, "nxc_spooler", rc, err)
+            if out and ("enabled" in out.lower()
+                        or "spooler service" in out.lower()):
+                _persist_vuln(session, "spooler", dc_ip, True,
+                              {"title": "Print Spooler Enabled",
+                               "summary": out.strip(),
+                               "tool": "spooler"})
 
             # 5) webdav (WebClient)
             rc, out, err = _run_tool(
@@ -977,6 +1021,12 @@ def ad_recon_task(self, session_id):
                 timeout=TIMEOUTS["nxc_webdav"],
             )
             _record_tool(ts, "nxc_webdav", rc, err)
+            if out and ("enabled" in out.lower()
+                        or "webclient" in out.lower()):
+                _persist_vuln(session, "webdav", dc_ip, True,
+                              {"title": "WebClient Enabled",
+                               "summary": out.strip(),
+                               "tool": "webdav"})
 
             session.tool_status = ts
             session.save(update_fields=["tool_status"])
