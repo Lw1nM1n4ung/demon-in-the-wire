@@ -161,22 +161,35 @@ def _parse_ldapdomaindump(tmpdir, session):
             log.info("_parse_ldapdomaindump: bulk-created %d ADUser records", len(users))
 
         elif "_groups" in fl:
-            groups = [
-                ADGroup(
-                    session=session,
-                    name=str(_first(entry, "name") or ""),
-                    sam_account_name=str(_first(entry, "sAMAccountName") or ""),
-                    dn=str(entry.get("dn") or ""),
-                    description=str(_first(entry, "description") or ""),
-                    members=list(_attr(entry, "member") or []),
-                    member_count=len(_attr(entry, "member") or []),
-                    admin_count=int(_first(entry, "adminCount") or 0),
+            filtered = []
+            skipped_empty = 0
+            for entry in data:
+                name = str(_first(entry, "name") or "").strip()
+                if not name:
+                    skipped_empty += 1
+                    continue
+                # Try both top-level and nested DN — ldapdomaindump varies its output schema
+                dn = str(entry.get("dn") or _first(entry, "distinguishedName") or "")
+                filtered.append(
+                    ADGroup(
+                        session=session,
+                        name=name,
+                        sam_account_name=str(_first(entry, "sAMAccountName") or ""),
+                        dn=dn,
+                        description=str(_first(entry, "description") or ""),
+                        members=list(_attr(entry, "member") or []),
+                        member_count=len(_attr(entry, "member") or []),
+                        admin_count=int(_first(entry, "adminCount") or 0),
+                    )
                 )
-                for entry in data
-            ]
-            ADGroup.objects.bulk_create(groups, ignore_conflicts=True)
-            stats["groups"] = len(groups)
-            log.info("_parse_ldapdomaindump: bulk-created %d ADGroup records", len(groups))
+            if skipped_empty:
+                log.warning(
+                    "_parse_ldapdomaindump: skipped %d group entries with empty name", skipped_empty
+                )
+            if filtered:
+                ADGroup.objects.bulk_create(filtered, ignore_conflicts=True)
+                stats["groups"] = len(filtered)
+                log.info("_parse_ldapdomaindump: bulk-created %d ADGroup records", len(filtered))
 
         elif "_computers" in fl:
             computers = [
@@ -259,6 +272,9 @@ TIMEOUTS = {
     "nxc_wmi": 60,
     "nxc_mssql": 60,
     "nxc_adcs": 60,
+    "nxc_ldap_checker": 60,
+    "nxc_gmsa": 60,
+    "nxc_smb_signing": 60,
     "responder": 60,
 }
 
@@ -688,6 +704,44 @@ def ad_recon_task(self, session_id):
             )
             _record_tool(ts, "nxc_pso", rc, err)
 
+            # 9) ldap-checker (LDAP signing + channel binding) — ViperOne relay attack surface
+            rc, out, err = _run_tool(
+                "nxc_ldap_checker",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "ldap-checker"],
+                timeout=TIMEOUTS.get("nxc_ldap_checker", 60),
+            )
+            _record_tool(ts, "nxc_ldap_checker", rc, err)
+            # Parse LDAP signing / channel binding results
+            if out:
+                imports = __import__("re", fromlist=["re"])
+                ldap_signing = "unknown"
+                ldap_channel = "unknown"
+                for line in out.splitlines():
+                    if "LDAP Signing" in line and "not" in line.lower():
+                        ldap_signing = "disabled"
+                    elif "LDAP Signing" in line:
+                        ldap_signing = "enabled"
+                    if "Channel Binding" in line and "not" in line.lower():
+                        ldap_channel = "disabled"
+                    elif "Channel Binding" in line:
+                        ldap_channel = "enabled"
+                vuln = ldap_signing == "disabled" or ldap_channel == "disabled"
+                _persist_vuln(session, "ldap_signing", dc_ip, vuln,
+                              {"ldap_signing": ldap_signing, "ldap_channel_binding": ldap_channel,
+                               "output": (out or "")[:2000]})
+
+            # 10) GMSA password reader check — ViperOne GMSA enumeration
+            rc, out, err = _run_tool(
+                "nxc_gmsa",
+                ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "gmsa"],
+                timeout=TIMEOUTS.get("nxc_gmsa", 60),
+            )
+            _record_tool(ts, "nxc_gmsa", rc, err)
+            if out and "PrincipalsAllowedToRetrieveManagedPassword" in (out or ""):
+                _persist_vuln(session, "gmsa_readers", dc_ip, True,
+                              {"output": (out or "")[:2000],
+                               "note": "Non-admin principals can retrieve GMSA passwords"})
+
             session.tool_status = ts
             session.save(update_fields=["tool_status"])
 
@@ -960,6 +1014,19 @@ def ad_recon_task(self, session_id):
             timeout=TIMEOUTS["nxc_passpol"],
         )
         _record_tool(ts, "nxc_passpol", rc, err)
+
+        # ViperOne: SMB signing check — foundational relay attack surface detection
+        rc, out, err = _run_tool(
+            "nxc_smb_signing",
+            ["nxc", "smb", dc_ip, "--shares"],
+            timeout=TIMEOUTS.get("nxc_smb_signing", 60),
+        )
+        _record_tool(ts, "nxc_smb_signing", rc, err)
+        if out:
+            signing_required = "signing:True" in (out or "").lower()
+            _persist_vuln(session, "smb_signing", dc_ip, not signing_required,
+                          {"output": (out or "")[:2000],
+                           "note": "SMB signing disabled — relay attacks possible" if not signing_required else "SMB signing required"})
 
         ioxid_cmd = ["nxc", "smb", dc_ip, "-M", "ioxidresolver"]
         if is_auth:
