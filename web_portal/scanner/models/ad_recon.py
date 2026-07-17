@@ -364,3 +364,54 @@ class VulnCheck(models.Model):
     def __str__(self):
         status = "VULN" if self.vulnerable else "SAFE"
         return f"{self.check_name} @ {self.host}: {status}"
+
+
+class ADCSExploitSession(models.Model):
+    """Interactive step-by-step ADCS exploitation session.
+
+    Each session targets one ESC vulnerability detected by a VulnCheck.
+    Steps are pre-defined per ESC type. The Celery task runs one step at a
+    time, saves output, and sets ``status=awaiting_confirm``. The user
+    approves/rejects via the API, which re-dispatches the task for the
+    next step.
+    """
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    ad_session = models.ForeignKey(
+        ADReconSession, on_delete=models.CASCADE, related_name="exploit_sessions",
+    )
+    vuln_check = models.ForeignKey(
+        VulnCheck, on_delete=models.CASCADE, related_name="exploit_sessions",
+    )
+    esc_type = models.CharField(
+        max_length=32, help_text="ESC1-ESC8 or ESC15"
+    )
+    current_step = models.PositiveSmallIntegerField(default=0)
+    total_steps = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(
+        max_length=32,
+        default="running",
+        choices=(
+            ("running", "Running"),
+            ("awaiting_confirm", "Awaiting Confirmation"),
+            ("completed", "Completed"),
+            ("failed", "Failed"),
+            ("cancelled", "Cancelled"),
+        ),
+    )
+    steps = models.JSONField(
+        default=list,
+        help_text="List of step objects: {num, name, description, command, output, status}",
+    )
+    output_dir = models.CharField(
+        max_length=512, blank=True,
+        help_text="Temporary directory for PFX files and command output",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"ADCS {self.esc_type} exploit — {self.status}"

@@ -489,7 +489,7 @@ WG.AD._switchTab = function(sessionId, tabName) {
       WG.AD._loadDataTable(sessionId, 'acl_risks', 'adAclRisksContainer', ['risk_level', 'principal', 'right_name', 'object_dn'], ['Risk', 'Principal', 'Right', 'Object DN']);
       break;
     case 'vulnerabilities':
-      WG.AD._loadDataTable(sessionId, 'vulnerabilities', 'adVulnsContainer', ['check_name', 'host', 'vulnerable'], ['Check', 'Host', 'Vulnerable']);
+      WG.AD._loadVulnerabilities(sessionId);
       break;
     case 'spray':
       WG.AD._loadSprayTab(sessionId);
@@ -1194,4 +1194,347 @@ WG.AD._backToGroupList = function(container) {
   var detailWrap = document.getElementById('adDetailWrap-groups');
   if (listWrap) listWrap.style.display = '';
   if (detailWrap) detailWrap.style.display = 'none';
+};
+
+
+/* ── Vulnerabilities Tab (with ADCS Exploit buttons) ── */
+
+WG.AD._loadVulnerabilities = function(sessionId) {
+  var el = document.getElementById('adVulnsContainer');
+  if (!el || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+
+  var esc = WG.escHtml;
+
+  WG.api('/ad-recon/sessions/' + sessionId + '/vulnerabilities/?page_size=500').then(function(data) {
+    if (!data || !data.results || !data.results.length) {
+      el.innerHTML = '<div class="panel-empty">No vulnerability checks found.</div>';
+      return;
+    }
+
+    var items = data.results;
+    var total = data.count || items.length;
+
+    // Sort: vulnerable first
+    items.sort(function(a, b) { return (b.vulnerable ? 1 : 0) - (a.vulnerable ? 1 : 0); });
+
+    // Check if any ESC-type vuln exists for modal template
+    var hasESC = items.some(function(v) {
+      return v.vulnerable && (v.check_name || '').toLowerCase().indexOf('certipy_esc_') !== -1;
+    });
+
+    var html = '<div id="adListWrap-vulnerabilities">' +
+      '<div style="margin-bottom:8px;display:flex;align-items:center;">' +
+        '<input class="form-input" id="adSearch-vulnerabilities" placeholder="Search ' + total + ' checks..." ' +
+        'oninput="WG.AD._filterTable(\'adTable-vulnerabilities\', this.value)" style="max-width:300px;margin-left:auto;">' +
+      '</div>' +
+      '<div style="overflow-x:auto;"><table class="data-table" id="adTable-vulnerabilities" style="font-size:0.75rem;">' +
+      '<thead><tr><th>Check</th><th>Host</th><th>Status</th><th style="width:80px;"></th></tr></thead><tbody>';
+
+    items.forEach(function(v) {
+      var statusBadge = v.vulnerable
+        ? '<span style="color:var(--critical);font-weight:600;">VULN</span>'
+        : '<span style="color:var(--success);">SAFE</span>';
+
+      // Determine if this is an exploitable ESC finding
+      var cname = (v.check_name || '').toLowerCase();
+      var isESC = v.vulnerable && cname.indexOf('certipy_esc_') !== -1;
+      var escType = isESC ? (v.details && v.details.esc_id) || v.check_name.replace(/certipy_esc_/i, '').split('_')[0].toUpperCase() : '';
+
+      html += '<tr>';
+      // If ESC, show esc_id in title
+      if (isESC && v.details && v.details.esc_id) {
+        html += '<td><strong>' + esc(v.details.esc_id) + '</strong><br><span style="font-size:0.68rem;color:var(--text-dim);">' + esc(v.check_name) + '</span></td>';
+      } else {
+        html += '<td>' + esc(v.check_name) + '</td>';
+      }
+      html += '<td>' + esc(v.host) + '</td>';
+      html += '<td>' + statusBadge + '</td>';
+
+      // Action cell
+      html += '<td style="text-align:center;">';
+      if (isESC) {
+        html += '<button class="btn btn-xs" style="background:var(--critical);color:#fff;font-weight:600;" ' +
+          'onclick="WG.AD._startExploit(\'' + v.id + '\',\'' + escType + '\',\'' + sessionId + '\')">' +
+          'Exploit</button>';
+      }
+      html += '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+
+    if (total > items.length) {
+      html += '<div style="text-align:center;padding:8px;color:var(--text-dim);font-size:0.75rem;">Showing ' + items.length + ' of ' + total + ' checks</div>';
+    }
+
+    html += '</div>';
+    html += '<div id="adDetailWrap-vulnerabilities" style="display:none;"></div>';
+
+    // Exploit wizard modal — only render if needed (lazy, added on first use)
+    html += '<div class="modal-overlay" id="exploitModal">' +
+      '<div class="modal" style="width:720px;max-height:85vh;overflow-y:auto;">' +
+        '<div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<h2>ADCS Exploit Wizard</h2>' +
+          '<span id="exploitEscBadge" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;background:var(--critical);color:#fff;font-weight:600;"></span>' +
+        '</div>' +
+        '<div class="modal-body" id="exploitWizardBody">' +
+          '<div id="exploitProgressBar" style="height:4px;background:var(--border-dim);border-radius:2px;margin-bottom:16px;overflow:hidden;">' +
+            '<div id="exploitProgressFill" style="height:100%;width:0%;background:var(--accent);transition:width 0.3s;"></div>' +
+          '</div>' +
+          '<div id="exploitStepInfo" style="margin-bottom:16px;"></div>' +
+          '<div id="exploitCommandBox" style="margin-bottom:16px;"></div>' +
+          '<div id="exploitOutputBox" style="margin-bottom:16px;"></div>' +
+          '<div id="exploitStatusMsg" style="margin-bottom:16px;text-align:center;"></div>' +
+        '</div>' +
+        '<div class="modal-footer" id="exploitFooter">' +
+          '<button class="btn btn-secondary" id="exploitNoBtn" style="display:none;">No — Skip</button>' +
+          '<button class="btn btn-primary" id="exploitYesBtn" style="display:none;">Yes — Execute</button>' +
+          '<button class="btn btn-secondary" onclick="WG.AD._closeExploitModal()" id="exploitCloseBtn">Close</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+    el.innerHTML = html;
+  });
+};
+
+
+/* ── ADCS Exploit Wizard ── */
+
+WG.AD._exploitSessionId = null;
+WG.AD._exploitPollTimer = null;
+WG.AD._exploitADSessionId = null;
+
+WG.AD._startExploit = function(vulnCheckId, escType, adSessionId) {
+  WG.AD._exploitADSessionId = adSessionId;
+  WG.AD._exploitSessionId = null;
+  WG.AD._clearExploitPoll();
+
+  var modal = document.getElementById('exploitModal');
+  document.getElementById('exploitEscBadge').textContent = escType;
+
+  // Show loading state
+  document.getElementById('exploitProgressFill').style.width = '0%';
+  document.getElementById('exploitStepInfo').innerHTML = '<p style="text-align:center;color:var(--text-dim);">Starting exploit session...</p>';
+  document.getElementById('exploitCommandBox').innerHTML = '';
+  document.getElementById('exploitOutputBox').innerHTML = '';
+  document.getElementById('exploitStatusMsg').innerHTML = '';
+  document.getElementById('exploitYesBtn').style.display = 'none';
+  document.getElementById('exploitNoBtn').style.display = 'none';
+  document.getElementById('exploitCloseBtn').textContent = 'Cancel';
+
+  WG.openModal('exploitModal');
+
+  // POST to start exploit
+  WG.api('/ad-recon/sessions/' + adSessionId + '/exploit/', 'POST', JSON.stringify({
+    check_name: vulnCheckId
+  })).then(function(resp) {
+    if (!resp || resp.error) {
+      document.getElementById('exploitStepInfo').innerHTML =
+        '<div style="color:var(--critical);text-align:center;">Error: ' + (resp && resp.error || 'Failed to start exploit') + '</div>';
+      document.getElementById('exploitCloseBtn').textContent = 'Close';
+      return;
+    }
+
+    WG.AD._exploitSessionId = resp.id;
+    WG.AD._pollExploit();
+  }).catch(function(err) {
+    document.getElementById('exploitStepInfo').innerHTML =
+      '<div style="color:var(--critical);text-align:center;">Error: ' + (err && err.message || err) + '</div>';
+    document.getElementById('exploitCloseBtn').textContent = 'Close';
+  });
+};
+
+
+WG.AD._pollExploit = function() {
+  WG.AD._clearExploitPoll();
+
+  var poll = function() {
+    if (!WG.AD._exploitSessionId) return;
+
+    WG.api('/ad-recon/exploit/' + WG.AD._exploitSessionId + '/').then(function(exp) {
+      if (!exp) return;
+
+      WG.AD._renderExploitState(exp);
+
+      // Stop polling on terminal states
+      if (exp.status === 'completed' || exp.status === 'failed' || exp.status === 'cancelled') {
+        WG.AD._clearExploitPoll();
+        document.getElementById('exploitCloseBtn').textContent = 'Close';
+        document.getElementById('exploitYesBtn').style.display = 'none';
+        document.getElementById('exploitNoBtn').style.display = 'none';
+      }
+    }).catch(function() {
+      // Silently retry
+    });
+  };
+
+  poll(); // immediate first poll
+  WG.AD._exploitPollTimer = setInterval(poll, 2000);
+};
+
+
+WG.AD._renderExploitState = function(exp) {
+  var esc = WG.escHtml;
+  var steps = exp.steps || [];
+  var total = exp.total_steps || steps.length;
+  var current = exp.current_step || 0;
+
+  // Progress bar
+  var pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  document.getElementById('exploitProgressFill').style.width = Math.min(pct, 100) + '%';
+
+  // Get current/latest step
+  var latestStep = null;
+  if (current > 0 && steps[current - 1]) {
+    latestStep = steps[current - 1];
+  }
+
+  // Build step info
+  var stepInfo = '<div style="font-size:0.85rem;color:var(--text-bright);margin-bottom:4px;">' +
+    'Step ' + Math.min(current + 1, total) + ' of ' + total + '</div>';
+
+  if (latestStep && latestStep.status !== 'pending') {
+    stepInfo += '<div style="font-size:0.8rem;color:var(--text-dim);">' +
+      'Previous: <strong>' + esc(latestStep.name) + '</strong> — ' +
+      '<span style="color:' + (latestStep.status === 'completed' ? 'var(--success)' : 'var(--critical)') + ';">' +
+        esc(latestStep.status) +
+      '</span></div>';
+  }
+
+  document.getElementById('exploitStepInfo').innerHTML = stepInfo;
+
+  // Current step awaiting confirmation
+  if (exp.status === 'awaiting_confirm' && current < total && steps[current]) {
+    var nextStep = steps[current];
+
+    document.getElementById('exploitStatusMsg').innerHTML =
+      '<div style="padding:10px;background:rgba(255,193,7,0.1);border-left:3px solid var(--warning);text-align:left;border-radius:4px;">' +
+        '<strong style="color:var(--warning);">Next Step: ' + esc(nextStep.name) + '</strong><br>' +
+        '<span style="font-size:0.82rem;color:var(--text-dim);">' + esc(nextStep.description) + '</span>' +
+        (nextStep.is_destructive
+          ? '<br><span style="color:var(--critical);font-weight:600;font-size:0.78rem;">\u26A0 DESTRUCTIVE — modifies AD configuration</span>'
+          : '') +
+      '</div>';
+
+    // Show the command
+    document.getElementById('exploitCommandBox').innerHTML =
+      '<div style="background:var(--bg-dark);border:1px solid var(--border-dim);border-radius:var(--radius-sm);padding:12px;margin-top:8px;">' +
+        '<div style="font-size:0.7rem;color:var(--text-dim);margin-bottom:4px;">Command to execute:</div>' +
+        '<pre style="font-family:monospace;font-size:0.72rem;color:var(--text-bright);white-space:pre-wrap;word-break:break-all;margin:0;max-height:120px;overflow-y:auto;">' +
+          esc(nextStep.command || nextStep.command_template || '(command will be built at runtime)') +
+        '</pre>' +
+      '</div>';
+
+    document.getElementById('exploitYesBtn').style.display = '';
+    document.getElementById('exploitNoBtn').style.display = '';
+    document.getElementById('exploitYesBtn').textContent = 'Yes — Execute';
+    document.getElementById('exploitNoBtn').textContent = 'No — Skip';
+
+    document.getElementById('exploitYesBtn').onclick = function() {
+      WG.AD._respondExploit('approve');
+    };
+    document.getElementById('exploitNoBtn').onclick = function() {
+      WG.AD._respondExploit('reject');
+    };
+
+    document.getElementById('exploitCloseBtn').textContent = 'Cancel';
+  } else {
+    document.getElementById('exploitYesBtn').style.display = 'none';
+    document.getElementById('exploitNoBtn').style.display = 'none';
+    document.getElementById('exploitCloseBtn').textContent = 'Close';
+  }
+
+  // Show latest step output
+  if (latestStep && (latestStep.output || latestStep.stderr)) {
+    var exitBadge = '';
+    if (latestStep.exit_code !== undefined && latestStep.exit_code !== 0) {
+      exitBadge = ' <span style="color:var(--critical);font-size:0.7rem;">exit code: ' + latestStep.exit_code + '</span>';
+    }
+    var outputHtml =
+      '<div style="background:var(--bg-dark);border:1px solid var(--border-dim);border-radius:var(--radius-sm);overflow:hidden;">' +
+        '<div style="font-size:0.7rem;color:var(--text-dim);padding:8px 12px;border-bottom:1px solid var(--border-dim);">' +
+          'Output' + exitBadge +
+        '</div>' +
+        '<pre style="font-family:monospace;font-size:0.7rem;color:var(--text-bright);padding:12px;margin:0;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;background:var(--bg-deeper);">' +
+          esc((latestStep.output || '') + (latestStep.stderr ? '\n[stderr]\n' + latestStep.stderr : '')) +
+        '</pre>' +
+      '</div>';
+    document.getElementById('exploitOutputBox').innerHTML = outputHtml;
+  }
+
+  // Status messages
+  if (exp.status === 'completed') {
+    document.getElementById('exploitStatusMsg').innerHTML =
+      '<div style="padding:10px;background:rgba(0,200,83,0.1);border-left:3px solid var(--success);text-align:left;border-radius:4px;">' +
+        '<strong style="color:var(--success);">\u2713 Exploitation Complete</strong><br>' +
+        '<span style="font-size:0.82rem;color:var(--text-dim);">' +
+          'Check the output above. If a .pfx was obtained, you can use certipy auth to get TGT/NT hash.' +
+        '</span>' +
+      '</div>';
+  } else if (exp.status === 'failed') {
+    document.getElementById('exploitStatusMsg').innerHTML =
+      '<div style="padding:10px;background:rgba(244,67,54,0.1);border-left:3px solid var(--critical);text-align:left;border-radius:4px;">' +
+        '<strong style="color:var(--critical);">Exploitation Failed</strong><br>' +
+        '<span style="font-size:0.82rem;color:var(--text-dim);">A step failed. Review the output above.</span>' +
+      '</div>';
+  } else if (exp.status === 'cancelled') {
+    document.getElementById('exploitStatusMsg').innerHTML =
+      '<div style="padding:10px;background:rgba(158,158,158,0.1);border-left:3px solid var(--text-dim);text-align:left;border-radius:4px;">' +
+        '<strong style="color:var(--text-dim);">Cancelled</strong>' +
+      '</div>';
+  }
+};
+
+
+WG.AD._respondExploit = function(action) {
+  if (!WG.AD._exploitSessionId) return;
+
+  // Disable buttons during request
+  document.getElementById('exploitYesBtn').disabled = true;
+  document.getElementById('exploitNoBtn').disabled = true;
+  document.getElementById('exploitStatusMsg').innerHTML =
+    '<div style="text-align:center;color:var(--text-dim);">Running command... <span class="spinner"></span></div>';
+  document.getElementById('exploitYesBtn').style.display = 'none';
+  document.getElementById('exploitNoBtn').style.display = 'none';
+
+  WG.api('/ad-recon/exploit/' + WG.AD._exploitSessionId + '/respond/', 'POST', JSON.stringify({
+    action: action
+  })).then(function(resp) {
+    if (!resp || resp.error) {
+      document.getElementById('exploitStatusMsg').innerHTML =
+        '<div style="color:var(--critical);text-align:center;">Error: ' + (resp && resp.error || 'Failed') + '</div>';
+      return;
+    }
+    // Start polling for the next step
+    WG.AD._pollExploit();
+  }).catch(function(err) {
+    document.getElementById('exploitStatusMsg').innerHTML =
+      '<div style="color:var(--critical);text-align:center;">Error: ' + (err && err.message || err) + '</div>';
+  });
+};
+
+
+WG.AD._closeExploitModal = function() {
+  WG.AD._clearExploitPoll();
+  WG.AD._exploitSessionId = null;
+  WG.closeModal('exploitModal');
+
+  // Refresh the vulnerabilities tab if we were on an AD session
+  if (WG.AD._exploitADSessionId) {
+    var el = document.getElementById('adVulnsContainer');
+    if (el) {
+      delete el.dataset.loaded;
+      WG.AD._loadVulnerabilities(WG.AD._exploitADSessionId);
+    }
+  }
+};
+
+
+WG.AD._clearExploitPoll = function() {
+  if (WG.AD._exploitPollTimer) {
+    clearInterval(WG.AD._exploitPollTimer);
+    WG.AD._exploitPollTimer = null;
+  }
 };

@@ -18,7 +18,7 @@ from scanner.views import (
     screenshot_image,
     dashboard_screenshots,
 )
-from scanner.views.ad_recon import CredentialProfileViewSet, ADReconSessionViewSet
+from scanner.views.ad_recon import CredentialProfileViewSet, ADReconSessionViewSet, ADCSExploitSessionViewSet
 from scanner.auth_views import (
     auth_login,
     auth_logout,
@@ -74,6 +74,7 @@ router.register(r"schedules", ScheduledScanViewSet)
 router.register(r"exploits", ExploitMatchViewSet)
 router.register(r"ad-recon/profiles", CredentialProfileViewSet, basename="ad-recon-profile")
 router.register(r"ad-recon/sessions", ADReconSessionViewSet, basename="ad-recon-session")
+router.register(r"ad-recon/exploit", ADCSExploitSessionViewSet, basename="ad-recon-exploit")
 router.register(r"artifacts", ScanArtifactViewSet)
 
 urlpatterns = [

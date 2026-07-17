@@ -4,6 +4,7 @@ from rest_framework import serializers
 from scanner.models.ad_recon import (
     CredentialProfile,
     ADReconSession,
+    ADCSExploitSession,
     ADDomain,
     ADUser,
     ADGroup,
@@ -235,3 +236,25 @@ class VulnCheckSerializer(serializers.ModelSerializer):
             "vulnerable", "details", "checked_at",
         ]
         read_only_fields = ["id", "checked_at"]
+
+
+class ADCSExploitSessionSerializer(serializers.ModelSerializer):
+    """Serializer for ADCS exploit sessions."""
+    vuln_check = VulnCheckSerializer(read_only=True)
+
+    class Meta:
+        model = ADCSExploitSession
+        fields = [
+            "id", "ad_session", "vuln_check", "esc_type",
+            "current_step", "total_steps", "status",
+            "steps", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "current_step", "total_steps", "status",
+            "steps", "created_at", "updated_at",
+        ]
+
+
+class ADCSExploitRespondSerializer(serializers.Serializer):
+    """Serializer for approve/reject responses."""
+    action = serializers.ChoiceField(choices=["approve", "reject"])

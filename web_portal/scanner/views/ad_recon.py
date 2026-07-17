@@ -14,6 +14,7 @@ from django.db import models as db_models
 from scanner.models.ad_recon import (
     CredentialProfile,
     ADReconSession,
+    ADCSExploitSession,
     ADDomain,
     ADUser,
     ADGroup,
@@ -46,6 +47,8 @@ from scanner.serializers.ad_recon import (
     CredentialFindingSerializer,
     ACLFindingSerializer,
     VulnCheckSerializer,
+    ADCSExploitSessionSerializer,
+    ADCSExploitRespondSerializer,
 )
 from scanner.views import HasPerm
 
@@ -450,3 +453,121 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
         session = self.get_object()
         qs = VulnCheck.objects.filter(session=session)
         return self._paginated_response(request, qs, VulnCheckSerializer)
+
+    @action(detail=True, methods=["post"])
+    def exploit(self, request, pk=None):
+        """Start an interactive ADCS exploitation for a detected ESC vuln.
+
+        Body: {"check_name": "<VulnCheck ID or check_name>"}
+        """
+        session = self.get_object()
+
+        check_id_or_name = request.data.get("check_name", "")
+        if not check_id_or_name:
+            return Response({"error": "check_name is required"}, status=400)
+
+        # Accept either VulnCheck UUID or check_name string
+        try:
+            from uuid import UUID as PyUUID
+            PyUUID(check_id_or_name)
+            # It's a UUID — look up by ID
+            vuln = VulnCheck.objects.get(
+                session=session, id=check_id_or_name,
+            )
+        except (ValueError, TypeError):
+            # Not a UUID — look up by check_name
+            try:
+                vuln = VulnCheck.objects.get(
+                    session=session, check_name=check_id_or_name,
+                )
+            except VulnCheck.DoesNotExist:
+                return Response(
+                    {"error": "VulnCheck %s not found" % check_id_or_name}, status=404,
+                )
+
+        if not vuln.vulnerable:
+            return Response(
+                {"error": "VulnCheck %s is not vulnerable" % check_id_or_name},
+                status=400,
+            )
+
+        from scanner.tasks.adcs_exploit import (
+            _extract_esc_type, build_exploit_session_steps,
+        )
+
+        esc_type = _extract_esc_type(vuln.check_name)
+        if not esc_type:
+            return Response(
+                {"error": "Cannot determine ESC type from %s" % vuln.check_name},
+                status=400,
+            )
+
+        steps = build_exploit_session_steps(esc_type, vuln, session)
+
+        exploit_sess = ADCSExploitSession.objects.create(
+            ad_session=session,
+            vuln_check=vuln,
+            esc_type=esc_type,
+            status="running",
+            current_step=0,
+            total_steps=len(steps),
+            steps=steps,
+        )
+
+        # Dispatch first step
+        from scanner.tasks.adcs_exploit import adcs_exploit_step
+
+        adcs_exploit_step.delay(str(exploit_sess.id))
+
+        return Response(
+            ADCSExploitSessionSerializer(exploit_sess).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ADCSExploitSessionViewSet(viewsets.ModelViewSet):
+    """ViewSet for ADCS exploit sessions — poll and respond."""
+
+    permission_classes = [HasPerm("site:config")]
+    http_method_names = ["get", "post", "head", "options"]
+    queryset = ADCSExploitSession.objects.select_related(
+        "ad_session", "vuln_check",
+    ).all()
+
+    def get_serializer_class(self):
+        if self.action == "respond":
+            return ADCSExploitRespondSerializer
+        return ADCSExploitSessionSerializer
+
+    @action(detail=True, methods=["post"])
+    def respond(self, request, pk=None):
+        """Approve or reject the current pending step.
+
+        Body: {"action": "approve"} or {"action": "reject"}
+        """
+        exploit = self.get_object()
+
+        if exploit.status != "awaiting_confirm":
+            return Response(
+                {"error": "Session status is %s, not awaiting_confirm" % exploit.status},
+                status=400,
+            )
+
+        ser = ADCSExploitRespondSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action_val = ser.validated_data["action"]
+
+        if action_val == "reject":
+            exploit.status = "cancelled"
+            exploit.save(update_fields=["status", "updated_at"])
+            return Response(ADCSExploitSessionSerializer(exploit).data)
+
+        # Approve — mark as running and dispatch next step
+        exploit.status = "running"
+        exploit.save(update_fields=["status", "updated_at"])
+
+        from scanner.tasks.adcs_exploit import adcs_exploit_step
+
+        adcs_exploit_step.delay(str(exploit.id))
+
+        return Response(ADCSExploitSessionSerializer(exploit).data)
