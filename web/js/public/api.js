@@ -7,7 +7,12 @@ WG._getCSRF = function() {
   return m ? m[1] : '';
 };
 
-WG.api = async function(path, opts) {
+WG.api = async function(path, opts, bodyPayload) {
+  // Accept both 2-arg (path, {method, headers, body}) and
+  // 3-arg (path, 'POST', bodyObject) calling conventions.
+  if (typeof opts === 'string') {
+    opts = { method: opts, body: bodyPayload };
+  }
   opts = opts || {};
   try {
     var headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
@@ -18,10 +23,16 @@ WG.api = async function(path, opts) {
       headers['X-CSRFToken'] = WG._getCSRF();
     }
 
+    // Auto-stringify plain-object bodies (callers may pass raw objects)
+    var body = opts.body;
+    if (body !== undefined && body !== null && typeof body !== 'string') {
+      body = JSON.stringify(body);
+    }
+
     var res = await fetch(WG.API_BASE + path, {
       headers: headers,
       method: opts.method || 'GET',
-      body: opts.body || undefined,
+      body: body || undefined,
       credentials: 'include',
     });
 
