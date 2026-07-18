@@ -309,7 +309,7 @@ def _persist_vuln(session, check_name, host, vulnerable, details=None):
     )
 
 
-def _run_tool(tool_name, cmd_args, timeout=60, env=None):
+def _run_tool(tool_name, cmd_args, timeout=60, env=None, cwd=None):
     """Run a single external tool, returning (rc, stdout, stderr).
 
     Returns (None, None, error_message) if the binary is missing, the
@@ -328,6 +328,7 @@ def _run_tool(tool_name, cmd_args, timeout=60, env=None):
             errors="replace",
             timeout=timeout,
             env=env,
+            cwd=cwd,
         )
         return proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired:
@@ -968,58 +969,74 @@ def ad_recon_task(self, session_id):
             )
             _record_tool(ts, "nxc_certipy_find", rc, err)
 
-            # 3) certipy find directly — rich output with CA name + per-template
+            # 3) certipy find directly — rich JSON output with CA name + per-template
             #    ESC details.  This is what drives the exploit wizard.
+            #    Use file-based output (-json -output) because certipy's stdout
+            #    can be truncated in Celery worker subprocesses (only 94 chars).
+            certipy_output_prefix = "certipy_find"
             rc2, out2, err2 = _run_tool(
                 "certipy_find",
                 ["certipy", "find", "-u", f"{username}@{domain}",
                  "-p", password, "-dc-ip", dc_ip, "-ns", dc_ip,
-                 "-vulnerable", "-stdout"],
+                 "-vulnerable", "-json", "-output", certipy_output_prefix],
                 timeout=TIMEOUTS.get("certipy_find", 300),
+                cwd=tmpdir,
             )
             _record_tool(ts, "certipy_find", rc2, err2)
+            log.info("ADCS Phase 7: certipy find rc=%s", rc2)
 
             ca_name: Optional[str] = None
             templates_by_esc: Dict[str, List[Tuple[str, str]]] = {}
 
-            log.info("ADCS Phase 7: certipy find rc=%s out2_len=%s", rc2, len(out2 or "") or 0)
-            if out2:
-                # --- Parse CA name ---
-                ca_match = re.search(r"CA Name\s*:\s*(.+)", out2, re.I)
-                if ca_match:
-                    ca_name = ca_match.group(1).strip()
-                    log.info("ADCS Phase 7: parsed CA=%s", ca_name)
-                else:
-                    log.info("ADCS Phase 7: CA name NOT found in certipy output")
+            # Read certipy JSON output file: {cwd}/_{prefix}_Certipy.json
+            certipy_json_path = os.path.join(
+                tmpdir, f"_{certipy_output_prefix}_Certipy.json")
+            log.info("ADCS Phase 7: looking for certipy JSON at %s", certipy_json_path)
+            if os.path.exists(certipy_json_path):
+                try:
+                    with open(certipy_json_path, "r") as f:
+                        certipy_data = json_mod.load(f)
+                    log.info("ADCS Phase 7: certipy JSON loaded, keys=%s",
+                             list(certipy_data.keys())[:10] if isinstance(certipy_data, dict) else "not_dict")
 
-                # --- Parse per-template ESC vulnerabilities ---
-                # certipy find output format:
-                #   Certificate Templates
-                #     0
-                #       Template Name   : X
-                #       [!] Vulnerabilities
-                #         ESCN          : description
-                current_template: Optional[str] = None
-                in_remarks: bool = False
-                for line in out2.splitlines():
-                    tmpl_m = re.match(r"^\s*Template Name\s*:\s*(.+)", line, re.I)
-                    if tmpl_m:
-                        current_template = tmpl_m.group(1).strip()
-                        in_remarks = False
-                        continue
-                    # Track section markers
-                    if re.match(r"^\s*\[\*\]\s*Remarks", line):
-                        in_remarks = True
-                        continue
-                    if re.match(r"^\s*\[!\]\s*Vulnerabilities", line):
-                        in_remarks = False
-                        continue
-                    esc_m = re.match(r"^\s*ESC(\d+)\s*:\s*(.+)", line, re.I)
-                    if esc_m and current_template and not in_remarks:
-                        esc_id = f"ESC{esc_m.group(1)}"
-                        detail = esc_m.group(2).strip()
-                        templates_by_esc.setdefault(esc_id, []).append(
-                            (current_template, detail))
+                    # Parse CA name(s) from JSON
+                    cas = certipy_data.get("certificate_authorities", {})
+                    for ca_key, ca_info in cas.items():
+                        ca_name = ca_info.get("CA Name", ca_key) if isinstance(ca_info, dict) else ca_key
+                        log.info("ADCS Phase 7: parsed CA=%s", ca_name)
+                        break  # first CA only
+
+                    # Parse per-template ESC vulnerabilities from JSON
+                    templates = certipy_data.get("certificate_templates", {})
+                    for tmpl_name, tmpl_info in templates.items():
+                        if not isinstance(tmpl_info, dict):
+                            continue
+                        vulns = tmpl_info.get("[!] Vulnerabilities", {}) or {}
+                        if not vulns:
+                            continue
+                        for esc_key, esc_detail in vulns.items():
+                            esc_m = re.match(r"ESC(\d+)", str(esc_key), re.I)
+                            if not esc_m:
+                                continue
+                            esc_id = f"ESC{esc_m.group(1)}"
+                            detail = str(esc_detail) if esc_detail else ""
+                            templates_by_esc.setdefault(esc_id, []).append(
+                                (tmpl_name, detail))
+
+                    log.info("ADCS Phase 7: parsed %d ESC types from JSON",
+                             len(templates_by_esc))
+                except (json_mod.JSONDecodeError, OSError, KeyError) as e:
+                    log.warning("ADCS Phase 7: certipy JSON parse failed: %s", e)
+            else:
+                log.warning("ADCS Phase 7: certipy JSON file not found: %s",
+                            certipy_json_path)
+                # Fallback: try listing files in tmpdir for debugging
+                try:
+                    for f in os.listdir(tmpdir):
+                        if "certipy" in f.lower():
+                            log.info("ADCS Phase 7: found file in tmpdir: %s", f)
+                except Exception:
+                    pass
 
             log.info("ADCS Phase 7: parsed %d ESC types from templates_by_esc", len(templates_by_esc))
 
