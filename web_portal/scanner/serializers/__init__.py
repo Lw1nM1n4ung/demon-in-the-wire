@@ -14,6 +14,7 @@ from ..models import (
     ExploitMatch,
     ScanArtifact,
     PhaseRun,
+    MSFExploitSession,
 )
 from ..policy_tools import normalize_policy_tools
 
@@ -494,6 +495,35 @@ class ExploitMatchSerializer(serializers.ModelSerializer):
             "port_number",
             "created_at",
         ]
+
+
+class MSFExploitSessionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MSFExploitSession
+        fields = [
+            "id",
+            "scan",
+            "host",
+            "exploit_match",
+            "module_fullname",
+            "host_ip",
+            "port_number",
+            "rhosts",
+            "rport",
+            "options",
+            "overrides",
+            "current_step",
+            "total_steps",
+            "status",
+            "steps",
+            "output_dir",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class MSFExploitRespondSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=[("approve", "Approve"), ("reject", "Reject")])
 
 
 class ScanArtifactListSerializer(serializers.ModelSerializer):

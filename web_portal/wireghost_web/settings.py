@@ -261,7 +261,7 @@ MFA_HOURLY_EMAIL_CAP = 10
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 50,
+    "PAGE_SIZE": 100,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         # Header token wins when Authorization: Token is present — clients
         # using programmatic access never need a cookie.

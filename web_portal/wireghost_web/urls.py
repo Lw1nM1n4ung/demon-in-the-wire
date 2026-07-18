@@ -10,6 +10,7 @@ from scanner.views import (
     ScheduledScanViewSet,
     ExploitMatchViewSet,
     ScanArtifactViewSet,
+    MSFExploitSessionViewSet,
     dashboard_stats,
     download_report,
     report_config,
@@ -72,6 +73,7 @@ router.register(r"assets", AssetViewSet)
 router.register(r"policies", ScanPolicyViewSet)
 router.register(r"schedules", ScheduledScanViewSet)
 router.register(r"exploits", ExploitMatchViewSet)
+router.register(r"exploit-sessions", MSFExploitSessionViewSet, basename="msf-exploit-session")
 router.register(r"ad-recon/profiles", CredentialProfileViewSet, basename="ad-recon-profile")
 router.register(r"ad-recon/sessions", ADReconSessionViewSet, basename="ad-recon-session")
 router.register(r"ad-recon/exploit", ADCSExploitSessionViewSet, basename="ad-recon-exploit")

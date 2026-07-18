@@ -1,6 +1,8 @@
 /* Wire_Ghost — Scan detail page */
 
 WG.renderScanDetail = function(id) {
+  WG.state.currentScanId = id;
+  if (!WG._scanFindingsPage) WG._scanFindingsPage = 1;
   var scan = WG.getCached('scans', '/scans/').find(function(s) { return s.id === id; });
 
   // Fetch full scan detail + hosts + findings from API (once per cache cycle).
@@ -198,17 +200,62 @@ WG._scanHostsTab = function(hosts) {
 WG._scanFindingsTab = function(findings) {
   if (!findings.length) return '<div class="panel-empty"><div class="icon">&#9888;</div>No findings</div>';
   var esc = WG.escHtml;
-  return '<div class="panel"><table class="data-table"><thead><tr><th>Severity</th><th>Title</th><th>Host</th><th>Port</th><th>Source</th><th>CVE</th></tr></thead><tbody>' +
-    findings.sort(function(a, b) { return WG.sevOrder(a.severity) - WG.sevOrder(b.severity); }).map(function(f) {
-      return '<tr onclick="WG.navigate(\'finding\',{id:\'' + f.id + '\'})">' +
-        '<td><span class="sev-badge ' + esc(f.severity) + '">' + esc(f.severity) + '</span></td>' +
-        '<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
-        '<td><span class="host-tag">' + esc(f.host_ip) + '</span></td>' +
-        '<td class="mono">' + esc(f.port || '\u2014') + '</td>' +
-        '<td><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
-        '<td class="mono" style="color:var(--accent);">' + esc(f.cve || '\u2014') + '</td></tr>';
-    }).join('') +
-    '</tbody></table></div>';
+  var pageSize = 100;
+  var totalPages = Math.ceil(findings.length / pageSize);
+  var scanId = WG.state.currentScanId || '';
+  // Clamp page to valid range
+  if (!WG._scanFindingsPage || WG._scanFindingsPage < 1) WG._scanFindingsPage = 1;
+  if (WG._scanFindingsPage > totalPages) WG._scanFindingsPage = totalPages;
+  var page = WG._scanFindingsPage || 1;
+  var start = (page - 1) * pageSize;
+  var pageItems = findings.slice(start, start + pageSize);
+  var sorted = [].concat(pageItems).sort(function(a, b) { return WG.sevOrder(a.severity) - WG.sevOrder(b.severity); });
+
+  var rows = sorted.map(function(f) {
+    return '<tr onclick="WG.navigate(\'finding\',{id:\'' + f.id + '\'})">' +
+      '<td><span class="sev-badge ' + esc(f.severity) + '">' + esc(f.severity) + '</span></td>' +
+      '<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
+      '<td><span class="host-tag">' + esc(f.host_ip) + '</span></td>' +
+      '<td class="mono">' + esc(f.port || '\u2014') + '</td>' +
+      '<td><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
+      '<td class="mono" style="color:var(--accent);">' + esc(f.cve || '\u2014') + '</td></tr>';
+  }).join('');
+
+  var paginationHtml = WG._renderScanPagination('findings', page, totalPages, findings.length, scanId);
+
+  return '<div class="panel">' + paginationHtml + '<table class="data-table"><thead><tr><th>Severity</th><th>Title</th><th>Host</th><th>Port</th><th>Source</th><th>CVE</th></tr></thead><tbody>' +
+    rows + '</tbody></table>' + paginationHtml + '</div>';
+};
+
+WG._renderScanPagination = function(tab, page, totalPages, totalItems, scanId) {
+  if (totalPages <= 1) return '';
+  var esc = WG.escHtml;
+  var start = (page - 1) * 100 + 1;
+  var end = Math.min(page * 100, totalItems);
+  var html = '<div class="pagination-bar" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;">';
+  html += '<span class="pagination-info" style="font-size:0.78rem;color:var(--text-dim);">Showing <strong>' + start + '\u2013' + end + '</strong> of <strong>' + totalItems + '</strong></span>';
+  html += '<div class="pagination-btns" style="display:flex;gap:4px;align-items:center;">';
+  // Prev
+  html += '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();WG._goScanFindingsPage(' + (page - 1) + ',\'' + scanId + '\')" ' + (page <= 1 ? 'disabled style="opacity:0.4;"' : '') + '>\u2039 Prev</button>';
+  // Page numbers
+  var maxButtons = 5;
+  var firstPage = Math.max(1, page - Math.floor(maxButtons / 2));
+  var lastPage = Math.min(totalPages, firstPage + maxButtons - 1);
+  if (lastPage - firstPage < maxButtons - 1) firstPage = Math.max(1, lastPage - maxButtons + 1);
+  for (var p = firstPage; p <= lastPage; p++) {
+    html += '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();WG._goScanFindingsPage(' + p + ',\'' + scanId + '\')" style="' + (p === page ? 'background:var(--accent);color:#fff;' : '') + 'min-width:32px;">' + p + '</button>';
+  }
+  // Next
+  html += '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();WG._goScanFindingsPage(' + (page + 1) + ',\'' + scanId + '\')" ' + (page >= totalPages ? 'disabled style="opacity:0.4;"' : '') + '>Next \u203A</button>';
+  html += '</div></div>';
+  return html;
+};
+
+WG._goScanFindingsPage = function(page, scanId) {
+  WG._scanFindingsPage = page;
+  var findings = WG._cache['scan_findings_' + scanId] || [];
+  var el = document.getElementById('scanTabContent');
+  if (el) el.innerHTML = WG._scanFindingsTab(findings);
 };
 
 WG._scanReportsTab = function(reports) {
@@ -237,7 +284,7 @@ WG.switchScanTab = function(tab, scanId) {
   var findings = WG._cache['scan_findings_' + scanId] || [];
   var scan = WG._cache['scan_' + scanId];
   var reports = scan && scan.reports ? scan.reports : [];
-  if (tab === 'hosts') el.innerHTML = WG._scanHostsTab(hosts);
-  else if (tab === 'findings') el.innerHTML = WG._scanFindingsTab(findings);
+  if (tab === 'hosts') { el.innerHTML = WG._scanHostsTab(hosts); }
+  else if (tab === 'findings') { WG._scanFindingsPage = 1; el.innerHTML = WG._scanFindingsTab(findings); }
   else if (tab === 'reports') el.innerHTML = WG._scanReportsTab(reports);
 };

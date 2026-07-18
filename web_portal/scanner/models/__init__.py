@@ -557,6 +557,71 @@ class ExploitMatch(models.Model):
     def __str__(self):
         return f"{self.confidence.upper()} {self.module_fullname}"
 
+class MSFExploitSession(models.Model):
+    """Interactive step-by-step Metasploit exploitation session.
+
+    Each session targets one ExploitMatch. Steps flow:
+      1. Review — show module info + auto-populated RHOSTS/RPORT
+      2. Execute — run msfconsole, capture output
+
+    The Celery task runs one step at a time, saves output, and sets
+    ``status=awaiting_confirm``.  The user approves/rejects via the API,
+    which re-dispatches the task for the next step.
+    """
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
+    scan = models.ForeignKey(
+        Scan, on_delete=models.CASCADE, related_name="msf_exploit_sessions",
+    )
+    host = models.ForeignKey(
+        Host, on_delete=models.CASCADE, related_name="msf_exploit_sessions",
+    )
+    exploit_match = models.ForeignKey(
+        ExploitMatch, on_delete=models.CASCADE, related_name="exploit_sessions",
+    )
+    module_fullname = models.CharField(max_length=500)
+    host_ip = models.GenericIPAddressField()
+    port_number = models.IntegerField(null=True, blank=True)
+    rhosts = models.CharField(max_length=255, blank=True, help_text="Auto-populated target IP")
+    rport = models.CharField(max_length=10, blank=True, help_text="Auto-populated target port")
+    options = models.JSONField(
+        default=dict, blank=True,
+        help_text="Auto-populated MSF options: {RHOSTS, RPORT, ...}",
+    )
+    overrides = models.JSONField(
+        default=dict, blank=True,
+        help_text="User-modified option overrides before execution",
+    )
+    current_step = models.PositiveSmallIntegerField(default=0)
+    total_steps = models.PositiveSmallIntegerField(default=2)
+    status = models.CharField(
+        max_length=32,
+        default="running",
+        choices=(
+            ("running", "Running"),
+            ("awaiting_confirm", "Awaiting Confirmation"),
+            ("completed", "Completed"),
+            ("failed", "Failed"),
+            ("cancelled", "Cancelled"),
+        ),
+    )
+    steps = models.JSONField(
+        default=list,
+        help_text="List of step objects: {num, name, description, command, output, status}",
+    )
+    output_dir = models.CharField(
+        max_length=512, blank=True,
+        help_text="Temporary directory for command output",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"MSF {self.module_fullname} \u2014 {self.status}"
+
 
 class AuditLog(models.Model):
     """Audit trail for user actions."""

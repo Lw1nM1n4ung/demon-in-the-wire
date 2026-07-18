@@ -19,6 +19,7 @@ from ..models import (
     ExploitMatch,
     ScanArtifact,
     PhaseRun,
+    MSFExploitSession,
 )
 from ..policy_tools import normalize_policy_tools
 
@@ -100,6 +101,8 @@ from ..serializers import (
     ScanArtifactSerializer,
     ScanArtifactListSerializer,
     PhaseRunSerializer,
+    MSFExploitSessionSerializer,
+    MSFExploitRespondSerializer,
 )
 
 
@@ -1286,6 +1289,102 @@ class ExploitMatchViewSet(viewsets.ReadOnlyModelViewSet):
         if confidence:
             qs = qs.filter(confidence=confidence)
         return qs
+
+
+class MSFExploitSessionViewSet(viewsets.ModelViewSet):
+    """ViewSet for MSF exploit sessions — poll and respond."""
+
+    permission_classes = [HasPerm("scan:read")]
+    http_method_names = ["get", "post", "head", "options"]
+    queryset = MSFExploitSession.objects.select_related(
+        "scan", "host", "exploit_match",
+    ).all()
+
+    def get_serializer_class(self):
+        if self.action == "respond":
+            return MSFExploitRespondSerializer
+        return MSFExploitSessionSerializer
+
+    @action(detail=True, methods=["post"])
+    def respond(self, request, pk=None):
+        """Approve or reject the current pending step.
+
+        Body: {"action": "approve"} or {"action": "reject"}
+        """
+        from scanner.tasks.msf_exploit import msf_exploit_step
+
+        exploit = self.get_object()
+
+        if exploit.status != "awaiting_confirm":
+            return Response(
+                {"error": "Session status is %s, not awaiting_confirm" % exploit.status},
+                status=400,
+            )
+
+        ser = MSFExploitRespondSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action_val = ser.validated_data["action"]
+
+        if action_val == "reject":
+            exploit.status = "cancelled"
+            exploit.save(update_fields=["status", "updated_at"])
+            return Response(MSFExploitSessionSerializer(exploit).data)
+
+        # Approve — merge any overrides from the request, then dispatch next step
+        overrides = {}
+        for key in ("RHOSTS", "RHOST", "RPORT"):
+            if key in request.data:
+                overrides[key] = request.data[key]
+        if overrides:
+            exploit.overrides = {**(exploit.overrides or {}), **overrides}
+            exploit.save(update_fields=["overrides", "updated_at"])
+
+        exploit.status = "running"
+        exploit.save(update_fields=["status", "updated_at"])
+
+        msf_exploit_step.delay(str(exploit.id))
+
+        return Response(MSFExploitSessionSerializer(exploit).data)
+
+    def create(self, request, *args, **kwargs):
+        """Start a new exploit session from an ExploitMatch.
+
+        Body: {"exploit_match": "<uuid>"} or {"exploit_match": "<uuid>", "overrides": {...}}
+        """
+        from scanner.tasks.msf_exploit import msf_exploit_step
+
+        match_id = request.data.get("exploit_match")
+        if not match_id:
+            return Response({"error": "exploit_match is required"}, status=400)
+
+        try:
+            match = ExploitMatch.objects.select_related("scan", "host").get(id=match_id)
+        except ExploitMatch.DoesNotExist:
+            return Response({"error": "ExploitMatch not found"}, status=404)
+
+        overrides = request.data.get("overrides", {}) or {}
+
+        session = MSFExploitSession.objects.create(
+            scan=match.scan,
+            host=match.host,
+            exploit_match=match,
+            module_fullname=match.module_fullname,
+            host_ip=match.host_ip or "",
+            port_number=match.port_number,
+            rhosts=match.host_ip or "",
+            rport=str(match.port_number) if match.port_number else "",
+            status="running",
+            current_step=0,
+            total_steps=2,
+            overrides=overrides,
+        )
+
+        msf_exploit_step.delay(str(session.id))
+
+        return Response(
+            MSFExploitSessionSerializer(session).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ScanArtifactViewSet(viewsets.ReadOnlyModelViewSet):
