@@ -407,6 +407,10 @@ class ADCSExploitSession(models.Model):
         max_length=512, blank=True,
         help_text="Temporary directory for PFX files and command output",
     )
+    overrides = models.JSONField(
+        default=dict, blank=True,
+        help_text="User-provided parameter overrides: {template, ca, target_upn, relay_ip}",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

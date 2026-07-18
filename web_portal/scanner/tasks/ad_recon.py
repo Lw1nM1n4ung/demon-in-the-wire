@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone as dt_timezone
+from typing import Dict, List, Optional, Tuple
 
 from celery import shared_task
 from django.utils import timezone
@@ -263,6 +264,7 @@ TIMEOUTS = {
     "nxc_zerologon": 3600,
     "nxc_petitpotam": 3600,
     "nxc_certipy_find": 3600,
+    "certipy_find": 300,  # direct certipy find, ~30-60s on typical domains
     "nxc_enum_ca": 3600,
     "nxc_spooler": 3600,
     "nxc_webdav": 3600,
@@ -958,34 +960,111 @@ def ad_recon_task(self, session_id):
                         _persist_vuln(session, "adcs_issue_%d" % i, dc_ip, True,
                                       {"title": "ADCS Issue", "raw": line.strip(),
                                        "tool": "nxc_adcs"})
-            # 2) certipy-find
+            # 2) certipy-find via nxc (fast table-based detection)
             rc, out, err = _run_tool(
                 "nxc_certipy_find",
                 ["nxc", "ldap", dc_ip, "-u", username, "-p", password, "-M", "certipy-find"],
                 timeout=TIMEOUTS["nxc_certipy_find"],
             )
             _record_tool(ts, "nxc_certipy_find", rc, err)
+
+            # 3) certipy find directly — rich output with CA name + per-template
+            #    ESC details.  This is what drives the exploit wizard.
+            rc2, out2, err2 = _run_tool(
+                "certipy_find",
+                ["certipy", "find", "-u", f"{username}@{domain}",
+                 "-p", password, "-dc-ip", dc_ip, "-ns", dc_ip,
+                 "-vulnerable", "-stdout"],
+                timeout=TIMEOUTS.get("certipy_find", 300),
+            )
+            _record_tool(ts, "certipy_find", rc2, err2)
+
+            ca_name: Optional[str] = None
+            templates_by_esc: Dict[str, List[Tuple[str, str]]] = {}
+
+            if out2:
+                # --- Parse CA name ---
+                ca_match = re.search(r"CA Name\s*:\s*(.+)", out2, re.I)
+                if ca_match:
+                    ca_name = ca_match.group(1).strip()
+
+                # --- Parse per-template ESC vulnerabilities ---
+                # certipy find output format:
+                #   Certificate Templates
+                #     0
+                #       Template Name   : X
+                #       [!] Vulnerabilities
+                #         ESCN          : description
+                current_template: Optional[str] = None
+                for line in out2.splitlines():
+                    tmpl_m = re.match(r"^\s*Template Name\s*:\s*(.+)", line, re.I)
+                    if tmpl_m:
+                        current_template = tmpl_m.group(1).strip()
+                        continue
+                    esc_m = re.match(r"^\s*ESC(\d+)\s*:\s*(.+)", line, re.I)
+                    if esc_m and current_template:
+                        esc_id = f"ESC{esc_m.group(1)}"
+                        detail = esc_m.group(2).strip()
+                        templates_by_esc.setdefault(esc_id, []).append(
+                            (current_template, detail))
+
+            # --- Persist template-specific ESC findings ---
+            persisted_esc_ids: set = set()
+            for esc_id, entries in templates_by_esc.items():
+                for tmpl_name, detail in entries:
+                    details = {
+                        "title": f"ADCS {esc_id} — {tmpl_name}",
+                        "esc_id": esc_id,
+                        "template_name": tmpl_name,
+                        "detail": detail,
+                        "summary": f"{esc_id} on {tmpl_name}: {detail}",
+                    }
+                    if ca_name:
+                        details["ca_name"] = ca_name
+                    cname = f"certipy_esc_{esc_id}_{tmpl_name}".lower().replace(" ", "_")[:128]
+                    _persist_vuln(session, cname, dc_ip, True, details)
+                    persisted_esc_ids.add(esc_id)
+
+            # --- Persist CA-level findings (ESC8, ESC6) from nxc output ---
             if out:
-                VULN_KW = ("vulnerable", "esc1", "esc2", "esc3", "esc4",
-                           "esc5", "esc6", "esc7", "esc8", "esc9", "esc10",
-                           "esc11", "enrollee supplies subject",
-                           "no security extension", "client authentication")
-                certipy_idx = 0
                 for esc_match in re.finditer(
                     r"(ESC\d+(?:\s*-\s*[^:]+)?)\s*:\s*(.+)", out, re.I,
                 ):
                     esc_id = esc_match.group(1).strip()
                     detail = esc_match.group(2).strip()
-                    _persist_vuln(session, "certipy_esc_%s" % esc_id.lower().replace(" ", "_")[:80],
-                                  dc_ip, True,
-                                  {"title": "ADCS %s" % esc_id,
-                                   "esc_id": esc_id, "detail": detail,
-                                   "summary": "%s: %s" % (esc_id, detail)})
-                for i, line in enumerate(out.splitlines()):
-                    if any(kw in line.lower() for kw in VULN_KW):
-                        _persist_vuln(session, "certipy_%d" % i, dc_ip, True,
-                                      {"title": "ADCS Issue", "raw": line.strip(),
-                                       "tool": "certipy-find"})
+                    # Only persist CA-level ESCs (ESC8, ESC6) if not already
+                    # captured per-template above — avoids duplicates
+                    esc_num = re.search(r"ESC(\d+)", esc_id, re.I)
+                    esc_key = f"ESC{esc_num.group(1)}" if esc_num else esc_id.upper()
+                    if esc_key in persisted_esc_ids:
+                        continue
+                    details = {
+                        "title": f"ADCS {esc_id}",
+                        "esc_id": esc_id,
+                        "detail": detail,
+                        "summary": f"{esc_id}: {detail}",
+                    }
+                    if ca_name:
+                        details["ca_name"] = ca_name
+                    _persist_vuln(session, f"certipy_esc_{esc_key}".lower()[:128],
+                                  dc_ip, True, details)
+                    persisted_esc_ids.add(esc_key)
+
+            # --- Populate ADCertService ---
+            if ca_name and templates_by_esc:
+                from scanner.models.ad_recon import ADCertService
+                all_templates = list(set(
+                    t for entries in templates_by_esc.values() for t, _ in entries
+                ))
+                ADCertService.objects.update_or_create(
+                    session=session,
+                    ca_name=ca_name,
+                    defaults={
+                        "host": dc_ip,
+                        "templates": all_templates,
+                        "vulnerable_template": True,
+                    },
+                )
 
             # 3) enum_ca (RPC-based CA enumeration)
             rc, out, err = _run_tool(

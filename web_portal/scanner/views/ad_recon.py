@@ -458,7 +458,11 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
     def exploit(self, request, pk=None):
         """Start an interactive ADCS exploitation for a detected ESC vuln.
 
-        Body: {"check_name": "<VulnCheck ID or check_name>"}
+        Body: {"check_name": "<VulnCheck ID or check_name>",
+               "template": "<optional template name override>",
+               "ca": "<optional CA name override>",
+               "target_upn": "<optional target UPN>",
+               "relay_ip": "<optional relay IP for ESC8>"}
         """
         session = self.get_object()
 
@@ -502,7 +506,11 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
                 status=400,
             )
 
-        steps = build_exploit_session_steps(esc_type, vuln, session)
+        override_params = {
+            k: v for k, v in request.data.items()
+            if k in ("template", "ca", "target_upn", "relay_ip") and v
+        }
+        steps = build_exploit_session_steps(esc_type, vuln, session, overrides=override_params)
 
         exploit_sess = ADCSExploitSession.objects.create(
             ad_session=session,
@@ -512,6 +520,7 @@ class ADReconSessionViewSet(viewsets.ModelViewSet):
             current_step=0,
             total_steps=len(steps),
             steps=steps,
+            overrides=override_params,
         )
 
         # Dispatch first step

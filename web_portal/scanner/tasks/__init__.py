@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Register AD recon task with Celery autodiscover
 from .ad_recon import ad_recon_task  # noqa: F401
+from .adcs_exploit import adcs_exploit_step  # noqa: F401
 from .discovery import run_discovery_scan  # noqa: F401
 from .phase_scan import run_phase  # noqa: F401
 

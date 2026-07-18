@@ -247,11 +247,11 @@ class ADCSExploitSessionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "ad_session", "vuln_check", "esc_type",
             "current_step", "total_steps", "status",
-            "steps", "created_at", "updated_at",
+            "steps", "overrides", "created_at", "updated_at",
         ]
         read_only_fields = [
             "id", "current_step", "total_steps", "status",
-            "steps", "created_at", "updated_at",
+            "steps", "overrides", "created_at", "updated_at",
         ]
 
 
