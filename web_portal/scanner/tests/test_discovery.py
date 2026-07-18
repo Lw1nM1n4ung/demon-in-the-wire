@@ -271,6 +271,8 @@ class DiscoveryTaskTests(TestCase):
             {"10.0.0.1": ("aa:bb:cc:dd:ee:ff", "Intel"),
              "10.0.0.2": ("11:22:33:44:55:66", "Dell")},
             {"10.0.0.1": "dc01.lab"},
+            {},  # method_map
+            {},  # tool_provenance
         )
 
         result = run_discovery_scan(str(scan.id))
@@ -311,7 +313,7 @@ class DiscoveryTaskTests(TestCase):
             status="pending", created_by=self.owner, output_dir="/tmp/test-disc",
         )
 
-        mock_async_run.return_value = ([], {}, {})
+        mock_async_run.return_value = ([], {}, {}, {}, {})
 
         result = run_discovery_scan(str(scan.id))
 
@@ -333,6 +335,8 @@ class DiscoveryTaskTests(TestCase):
             ["10.0.0.1"],
             {"10.0.0.1": ("aa:bb:cc:dd:ee:ff", "Intel")},
             {},
+            {},  # method_map
+            {},  # tool_provenance
         )
 
         result = run_discovery_scan(str(scan.id))

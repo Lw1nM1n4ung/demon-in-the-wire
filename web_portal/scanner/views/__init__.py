@@ -302,7 +302,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             buf = io.StringIO()
             writer = csv.DictWriter(
                 buf,
-                fieldnames=["ip", "hostname", "mac_address", "vendor", "current_phase"],
+                fieldnames=["ip", "hostname", "mac_address", "vendor", "current_phase", "discovered_by"],
             )
             writer.writeheader()
             for h in hosts:

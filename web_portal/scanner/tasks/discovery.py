@@ -99,10 +99,14 @@ def run_discovery_scan(self, scan_id):
                                 [phase, subnets_done, total_subnets, _scan_id_hex],
                             )
                     elif action == "subnet_hosts":
-                        if len(item) >= 4:
+                        if len(item) >= 5:
+                            _, new_ips, mac_updates, method_updates, tool_provenance = item
+                        elif len(item) >= 4:
                             _, new_ips, mac_updates, tool_provenance = item
+                            method_updates = {}
                         else:
                             _, new_ips, mac_updates = item
+                            method_updates = {}
                             tool_provenance = {}
                         for ip in new_ips:
                             mac, vendor = mac_updates.get(ip, ("", ""))
@@ -127,10 +131,14 @@ def run_discovery_scan(self, scan_id):
                                 hosts_count=_F("hosts_count") + len(new_ips),
                             )
                     elif action == "discovery":
-                        if len(item) >= 5:
+                        if len(item) >= 6:
+                            _, live_ips, mac_vendor_map, dns_hostnames, method_map, tool_provenance = item
+                        elif len(item) >= 5:
                             _, live_ips, mac_vendor_map, dns_hostnames, tool_provenance = item
+                            method_map = {}
                         else:
                             _, live_ips, mac_vendor_map, dns_hostnames = item
+                            method_map = {}
                             tool_provenance = {}
                         for ip in live_ips:
                             mac, vendor = mac_vendor_map.get(ip, ("", ""))
@@ -189,16 +197,16 @@ def run_discovery_scan(self, scan_id):
             except Exception:
                 pass
 
-        def _on_subnet_complete(new_ips, mac_updates, tool_provenance=None):
+        def _on_subnet_complete(new_ips, mac_updates, method_updates=None, tool_provenance=None):
             try:
-                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates, tool_provenance or {}))
+                _progress_queue.put_nowait(("subnet_hosts", new_ips, mac_updates, method_updates or {}, tool_provenance or {}))
             except Exception:
                 pass
 
-        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames, tool_provenance=None):
+        def _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames, method_map=None, tool_provenance=None):
             try:
                 _progress_queue.put_nowait(
-                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {}, tool_provenance or {})
+                    ("discovery", live_ips, mac_vendor_map, dns_hostnames or {}, method_map or {}, tool_provenance or {})
                 )
             except Exception:
                 pass
@@ -215,16 +223,18 @@ def run_discovery_scan(self, scan_id):
                 raise _TaskCancelled("Task cancelled")
             _on_progress(phase, subnets_done, total_subnets)
 
-        def _wrap_subnet(new_ips, mac_updates, tool_provenance=None):
+        def _wrap_subnet(new_ips, mac_updates, method_updates=None, tool_provenance=None):
             if _is_aborted():
                 raise _TaskCancelled("Task cancelled")
-            _on_subnet_complete(new_ips, mac_updates, tool_provenance)
+            _on_subnet_complete(new_ips, mac_updates, method_updates, tool_provenance)
 
         live_ips: list = []
         mac_vendor_map: dict = {}
         dns_hostnames: dict = {}
+        method_map: dict = {}
+        tool_provenance: dict = {}
         try:
-            live_ips, mac_vendor_map, dns_hostnames, tool_provenance = asyncio.run(
+            live_ips, mac_vendor_map, dns_hostnames, method_map, tool_provenance = asyncio.run(
                 discover_hosts(
                     config,
                     tree,
@@ -249,7 +259,7 @@ def run_discovery_scan(self, scan_id):
             # Fire on_discovery_complete even if some subnets threw — hosts
             # that were already created incrementally are still valid.
             if not _is_aborted():
-                _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames, tool_provenance)
+                _on_discovery_complete(live_ips, mac_vendor_map, dns_hostnames, method_map, tool_provenance)
 
             _progress_queue.put(None)
             _thread.join(timeout=30)
