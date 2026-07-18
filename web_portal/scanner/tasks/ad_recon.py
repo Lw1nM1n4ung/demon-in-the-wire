@@ -982,11 +982,15 @@ def ad_recon_task(self, session_id):
             ca_name: Optional[str] = None
             templates_by_esc: Dict[str, List[Tuple[str, str]]] = {}
 
+            log.info("ADCS Phase 7: certipy find rc=%s out2_len=%s", rc2, len(out2 or "") or 0)
             if out2:
                 # --- Parse CA name ---
                 ca_match = re.search(r"CA Name\s*:\s*(.+)", out2, re.I)
                 if ca_match:
                     ca_name = ca_match.group(1).strip()
+                    log.info("ADCS Phase 7: parsed CA=%s", ca_name)
+                else:
+                    log.info("ADCS Phase 7: CA name NOT found in certipy output")
 
                 # --- Parse per-template ESC vulnerabilities ---
                 # certipy find output format:
@@ -996,17 +1000,28 @@ def ad_recon_task(self, session_id):
                 #       [!] Vulnerabilities
                 #         ESCN          : description
                 current_template: Optional[str] = None
+                in_remarks: bool = False
                 for line in out2.splitlines():
                     tmpl_m = re.match(r"^\s*Template Name\s*:\s*(.+)", line, re.I)
                     if tmpl_m:
                         current_template = tmpl_m.group(1).strip()
+                        in_remarks = False
+                        continue
+                    # Track section markers
+                    if re.match(r"^\s*\[\*\]\s*Remarks", line):
+                        in_remarks = True
+                        continue
+                    if re.match(r"^\s*\[!\]\s*Vulnerabilities", line):
+                        in_remarks = False
                         continue
                     esc_m = re.match(r"^\s*ESC(\d+)\s*:\s*(.+)", line, re.I)
-                    if esc_m and current_template:
+                    if esc_m and current_template and not in_remarks:
                         esc_id = f"ESC{esc_m.group(1)}"
                         detail = esc_m.group(2).strip()
                         templates_by_esc.setdefault(esc_id, []).append(
                             (current_template, detail))
+
+            log.info("ADCS Phase 7: parsed %d ESC types from templates_by_esc", len(templates_by_esc))
 
             # --- Persist template-specific ESC findings ---
             persisted_esc_ids: set = set()
@@ -1065,6 +1080,10 @@ def ad_recon_task(self, session_id):
                         "vulnerable_template": True,
                     },
                 )
+                log.info("ADCS Phase 7: populated ADCertService ca=%s templates=%s",
+                         ca_name, all_templates)
+            else:
+                log.info("ADCS Phase 7: no templates_by_esc (out2 empty or parse failed)")
 
             # 3) enum_ca (RPC-based CA enumeration)
             rc, out, err = _run_tool(
