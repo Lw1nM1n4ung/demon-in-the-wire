@@ -988,9 +988,9 @@ def ad_recon_task(self, session_id):
             ca_name: Optional[str] = None
             templates_by_esc: Dict[str, List[Tuple[str, str]]] = {}
 
-            # Read certipy JSON output file: {cwd}/_{prefix}_Certipy.json
+            # Read certipy JSON output file: {cwd}/{prefix}_Certipy.json
             certipy_json_path = os.path.join(
-                tmpdir, f"_{certipy_output_prefix}_Certipy.json")
+                tmpdir, f"{certipy_output_prefix}_Certipy.json")
             log.info("ADCS Phase 7: looking for certipy JSON at %s", certipy_json_path)
             if os.path.exists(certipy_json_path):
                 try:
@@ -1000,20 +1000,27 @@ def ad_recon_task(self, session_id):
                              list(certipy_data.keys())[:10] if isinstance(certipy_data, dict) else "not_dict")
 
                     # Parse CA name(s) from JSON
-                    cas = certipy_data.get("certificate_authorities", {})
+                    # certipy v5 uses "Certificate Authorities" (Title Case)
+                    cas = (certipy_data.get("Certificate Authorities")
+                           or certipy_data.get("certificate_authorities", {}))
                     for ca_key, ca_info in cas.items():
                         ca_name = ca_info.get("CA Name", ca_key) if isinstance(ca_info, dict) else ca_key
                         log.info("ADCS Phase 7: parsed CA=%s", ca_name)
                         break  # first CA only
 
                     # Parse per-template ESC vulnerabilities from JSON
-                    templates = certipy_data.get("certificate_templates", {})
-                    for tmpl_name, tmpl_info in templates.items():
+                    # certipy v5 uses "Certificate Templates" (Title Case)
+                    # Template keys are numeric strings ("0", "1", ...);
+                    # the actual name is in tmpl_info["Template Name"]
+                    templates = (certipy_data.get("Certificate Templates")
+                                 or certipy_data.get("certificate_templates", {}))
+                    for _tmpl_key, tmpl_info in templates.items():
                         if not isinstance(tmpl_info, dict):
                             continue
                         vulns = tmpl_info.get("[!] Vulnerabilities", {}) or {}
                         if not vulns:
                             continue
+                        tmpl_name = tmpl_info.get("Template Name", _tmpl_key)
                         for esc_key, esc_detail in vulns.items():
                             esc_m = re.match(r"ESC(\d+)", str(esc_key), re.I)
                             if not esc_m:
