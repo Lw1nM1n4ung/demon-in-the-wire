@@ -15,7 +15,6 @@ WG.renderSettings = function() {
       '<div class="tab" data-tab="export" onclick="WG.switchSettingsTab(\'export\')">Export/Import</div>' +
       '<div class="tab" data-tab="api" onclick="WG.switchSettingsTab(\'api\')">API</div>' +
       '<div class="tab" data-tab="tokens" onclick="WG.switchSettingsTab(\'tokens\')">API Tokens</div>' +
-      (isAdmin ? '<div class="tab" data-tab="admin" onclick="WG.switchSettingsTab(\'admin\')">Administration</div>' : '') +
       (isAdmin ? '<div class="tab" data-tab="support" onclick="WG.switchSettingsTab(\'support\')">Support</div>' : '') +
       '<div class="tab" data-tab="about" onclick="WG.switchSettingsTab(\'about\')">About</div>' +
     '</div>' +
@@ -23,8 +22,8 @@ WG.renderSettings = function() {
 };
 
 /* ── General ──
- * Scan defaults that drive new scans when the client doesn't override them.
- * Owner sees editable inputs; everyone else sees the current values read-only. */
+ * Scan defaults + schedule timezone that drive new scans when the client
+ * doesn't override them. Owner sees editable inputs; everyone else read-only. */
 WG._settingsGeneral = function() {
   var user = WG.currentUser && WG.currentUser();
   var isOwner = user && user.role === 'owner';
@@ -37,10 +36,16 @@ WG._settingsGeneral = function() {
       set('genParallelism', data.default_parallelism);
       set('genTimeout', data.default_timeout);
       set('genReportFormats', data.default_report_formats);
+      set('genTimezone', data.schedule_timezone);
     }
   });
   var esc = WG.escHtml;
   var ro = isOwner ? '' : 'disabled readonly';
+  var tz = cfg.schedule_timezone || WG._scheduleTz || 'UTC';
+  var browserTz = (Intl && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
+  var tzOpts = WG.TIMEZONES.map(function(t) {
+    return '<option value="' + esc(t) + '"' + (t === tz ? ' selected' : '') + '>' + esc(t) + '</option>';
+  }).join('');
   return '<div class="panel" style="max-width:720px;"><div class="panel-header"><div class="panel-title">Scan Defaults</div></div>' +
     '<div class="panel-body" style="display:flex;flex-direction:column;gap:18px;">' +
       '<div style="font-size:0.82rem;color:var(--text-dim);line-height:1.6;">' +
@@ -60,6 +65,15 @@ WG._settingsGeneral = function() {
         '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Comma-separated from: <span class="mono">dashboard</span>, <span class="mono">html</span>, <span class="mono">docx</span>, <span class="mono">xlsx</span>.</div>' +
       '</div>' +
       (isOwner
+        ? '<div style="border-top:1px solid var(--border-dim);padding-top:14px;margin-top:4px;">' +
+            '<div class="form-group">' +
+              '<label class="form-label">Schedule Time Zone</label>' +
+              '<select class="form-input" id="genTimezone">' + tzOpts + '</select>' +
+              '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;">Interprets the "Run At" time on every Scheduled Scan. A schedule set to 02:00 runs at 02:00 in this zone. Current browser zone: <span class="mono">' + esc(browserTz) + '</span></div>' +
+            '</div>' +
+          '</div>'
+        : '') +
+      (isOwner
         ? '<div><button class="btn btn-primary" onclick="WG._saveGeneralDefaults()">Save</button></div>'
         : '') +
     '</div></div>';
@@ -72,14 +86,16 @@ WG._saveGeneralDefaults = function() {
   if (!(p >= 1 && p <= 500)) { WG.toast('Parallelism must be 1–500.', 'error'); return; }
   if (!(t >= 60 && t <= 86400)) { WG.toast('Timeout must be 60–86400s.', 'error'); return; }
   if (!r) { WG.toast('Report formats required.', 'error'); return; }
+  var body = { default_parallelism: p, default_timeout: t, default_report_formats: r };
+  var tzEl = document.getElementById('genTimezone');
+  if (tzEl && tzEl.value) body.schedule_timezone = tzEl.value;
   WG.api('/site-config/update/', {
     method: 'PUT',
-    body: JSON.stringify({
-      default_parallelism: p, default_timeout: t, default_report_formats: r,
-    }),
+    body: JSON.stringify(body),
   }).then(function(res) {
     if (res && res.default_parallelism != null) {
       WG._cache['site_config'] = res;
+      if (res.schedule_timezone) WG._scheduleTz = res.schedule_timezone;
       WG.toast('Scan defaults saved', 'success');
     } else {
       WG.toast((res && res.error) || 'Save failed', 'error');
@@ -913,7 +929,7 @@ WG._saveScheduleTimezone = function() {
     if (res && res.schedule_timezone) {
       WG._scheduleTz = res.schedule_timezone;
       WG.toast('Schedule timezone set to ' + res.schedule_timezone, 'success');
-      WG.switchSettingsTab('admin');
+      WG.switchSettingsTab('general');
     } else {
       WG.toast((res && res.error) || 'Failed to update timezone', 'error');
     }
@@ -1140,7 +1156,7 @@ WG.switchSettingsTab = function(tab) {
     sessions: WG._settingsSessions, security: WG._settingsSecurity,
     audit: WG._settingsAudit, export: WG._settingsExport, api: WG._settingsApi,
     tokens: WG._settingsTokens,
-    admin: WG._settingsAdmin, support: WG._settingsSupport, about: WG._settingsAbout,
+    support: WG._settingsSupport, about: WG._settingsAbout,
   };
   el.innerHTML = (tabs[tab] || WG._settingsGeneral)();
 };
