@@ -1,8 +1,0 @@
-SMB         10.0.0.1        445    DC01             [*] Windows 10 Build 19041 (name:DC01) (domain:CORP.LOCAL) (signing:False) (SMBv1:True)
-SMB         10.0.0.1        445    DC01             [+] CORP.LOCAL\: (Guest)
-SMB         10.0.0.1        445    DC01             Share           Permissions     Remark
-SMB         10.0.0.1        445    DC01             -----           -----------     ------
-SMB         10.0.0.1        445    DC01             ADMIN$                          Remote Admin
-SMB         10.0.0.1        445    DC01             C$                              Default share
-SMB         10.0.0.1        445    DC01             IPC$            READ            Remote IPC
-SMB         10.0.0.1        445    DC01             Backups         READ,WRITE      Backup share
