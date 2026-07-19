@@ -176,6 +176,7 @@ WG.render = function() {
     scans:            WG.renderScans,
     scan:             function() { return WG.renderScanDetail(route.id); },
     topology:         function() { return WG.renderTopology(route.id); },
+    exploits:         WG.renderExploits,
     host:             function() { return WG.renderHostDetail(route.id); },
     finding:          function() { return WG.renderFindingDetail(route.id); },
     policies:         WG.renderPolicies,
