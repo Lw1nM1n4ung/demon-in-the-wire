@@ -143,9 +143,6 @@ WG.handleGlobalSearch = function(query) {
   var mf = _arr('findings').filter(function(f) {
     return (f.title || '').toLowerCase().includes(q) || (f.host_ip || '').includes(q) || (f.cve || '').toLowerCase().includes(q);
   }).slice(0, 5);
-  var mh = _arr('hosts').filter(function(h) {
-    return (h.ip || '').includes(q) || (h.hostname || '').toLowerCase().includes(q);
-  }).slice(0, 5);
   var ms = _arr('scans').filter(function(s) {
     return (s.name || '').toLowerCase().includes(q) || (s.target || '').includes(q);
   }).slice(0, 3);
@@ -158,14 +155,6 @@ WG.handleGlobalSearch = function(query) {
         '<div class="activity-icon scan"><svg viewBox="0 0 24 24"><use href="#i-scan"/></svg></div>' +
         '<div class="activity-text"><strong>' + esc(s.name) + '</strong><p>' + esc(s.target) + '</p></div>' +
         '<span class="status-badge ' + esc(s.status) + '" style="font-size:0.6rem;"><span class="dot"></span> ' + esc(s.status) + '</span></div>';
-    });
-  }
-  if (mh.length) {
-    html += '<div style="padding:8px 0 4px;font-family:var(--font-mono);font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);">Hosts</div>';
-    mh.forEach(function(h) {
-      html += '<div class="activity-item" style="cursor:pointer;padding:8px 4px;border-radius:var(--radius-sm);" onclick="WG.closeModal(\'searchModal\');WG.navigate(\'host\',{id:\'' + h.id + '\'})">' +
-        '<div class="activity-icon host"><svg viewBox="0 0 24 24"><use href="#i-server"/></svg></div>' +
-        '<div class="activity-text"><strong>' + esc(h.ip) + '</strong><p>' + esc(h.hostname || 'No hostname') + '</p></div></div>';
     });
   }
   if (mf.length) {

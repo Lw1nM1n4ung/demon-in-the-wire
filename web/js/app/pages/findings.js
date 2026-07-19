@@ -121,10 +121,14 @@ WG.renderFindings = function() {
       '<select class="filter-select" id="findingSourceFilter" onchange="WG.filterFindings()"><option value="">All Sources</option><option value="nuclei">Nuclei</option><option value="nuclei_external">Nuclei (External)</option><option value="nmap_vuln">Nmap Vuln</option><option value="service_enum">Service Enum</option><option value="searchsploit">Searchsploit</option><option value="getsploit">Getsploit</option><option value="nikto">Nikto</option><option value="netexec">NetExec</option><option value="wpscan">WPScan</option><option value="sslscan">SSLScan</option><option value="snmp_enum">SNMP Enum</option><option value="nfs_enum">NFS Enum</option><option value="ldap_enum">LDAP Enum</option><option value="katana">Katana</option><option value="msf_scan">MSF Scan</option><option value="enum4linux">Enum4Linux</option></select>' +
     '</div>' +
     WG._renderPagination() +
-    '<div class="panel"><table class="data-table" id="findingsTable"><thead><tr><th>Severity</th><th>Title</th><th>Host</th><th>Port</th><th>Source</th><th>CVE</th><th>CVSS</th></tr></thead><tbody>' +
+    '<div class="panel"><table class="data-table" id="findingsTable"><thead><tr><th>Severity</th><th>Title</th><th>Host</th><th>Port</th><th>Source</th><th>CVE</th><th>CVSS</th><th style="width:80px;">Actions</th></tr></thead><tbody>' +
     findings.sort(function(a, b) { return WG.sevOrder(a.severity) - WG.sevOrder(b.severity); }).map(function(f) {
       var esc = WG.escHtml;
       var cvssColor = f.cvss >= 9 ? 'var(--critical)' : f.cvss >= 7 ? 'var(--high)' : f.cvss >= 4 ? 'var(--medium)' : 'var(--text-dim)';
+      var exploitBtn = '';
+      if (f.source === 'searchsploit') {
+        exploitBtn = '<button class="btn btn-sm" style="background:var(--bg-elevated);color:var(--accent);padding:3px 8px;font-size:0.75rem;" onclick="event.stopPropagation();WG._startFindingExploit(\'' + esc(f.id) + '\', \'' + esc(f.title || 'searchsploit finding') + '\', \'' + esc(f.host_ip || '') + '\', \'' + esc(f.port || '') + '\');" title="Launch exploit wizard">&#9876; Exploit</button>';
+      }
       return '<tr onclick="WG.navigate(\'finding\',{id:\'' + f.id + '\'})" data-sev="' + esc(f.severity) + '" data-source="' + esc(f.source) + '" data-search="' + esc((f.title + ' ' + f.host_ip + ' ' + (f.cve || '')).toLowerCase()) + '">' +
         '<td><span class="sev-badge ' + esc(f.severity) + '">' + esc(f.severity) + '</span></td>' +
         '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.title) + '</td>' +
@@ -132,7 +136,8 @@ WG.renderFindings = function() {
         '<td class="mono">' + esc(f.port || '\u2014') + '</td>' +
         '<td><span class="tag">' + esc(f.source) + '</span>' + (f.source === 'nuclei_external' ? '<span class="tag" style="background:var(--medium-bg,#f59e0b22);color:var(--medium,#f59e0b);font-size:0.6rem;margin-left:4px;" title="External template \u2014 may be a false positive">FP?</span>' : '') + '</td>' +
         '<td class="mono" style="color:var(--accent);">' + esc(f.cve || '\u2014') + '</td>' +
-        '<td class="mono" style="color:' + cvssColor + ';">' + esc(f.cvss || '\u2014') + '</td></tr>';
+        '<td class="mono" style="color:' + cvssColor + ';">' + esc(f.cvss || '\u2014') + '</td>' +
+        '<td>' + exploitBtn + '</td></tr>';
     }).join('') +
     '</tbody></table></div>' +
     WG._renderPagination();
@@ -160,4 +165,27 @@ WG.filterFindings = function() {
     WG.invalidateCache('findings');
     WG._fetchAndRenderFindings();
   }, 500);
+};
+
+// ---------------------------------------------------------------------------
+// Finding-based exploit wizard (searchsploit → MSF module lookup)
+// ---------------------------------------------------------------------------
+
+WG._startFindingExploit = function(findingId, title, hostIp, port) {
+  var target = hostIp + (port ? ':' + port : '');
+  if (!confirm('Start exploit wizard for:\n\n' + title + '\nTarget: ' + target + '\n\nThis will look up matching Metasploit modules for this finding. Continue?')) {
+    return;
+  }
+
+  WG.api('/exploit-sessions/', 'POST', { finding: findingId }).then(function(sess) {
+    if (!sess || sess.error) {
+      WG.showToast('Failed to start exploit session: ' + (sess && sess.error || 'Unknown error'), 'error');
+      return;
+    }
+    WG._exploitSession = sess;
+    WG._showExploitModal();
+    WG._pollExploitSession();
+  })['catch'](function(err) {
+    WG.showToast('Error: ' + (err.message || err), 'error');
+  });
 };

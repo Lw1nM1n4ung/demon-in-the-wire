@@ -1297,7 +1297,7 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
     permission_classes = [HasPerm("scan:read")]
     http_method_names = ["get", "post", "head", "options"]
     queryset = MSFExploitSession.objects.select_related(
-        "scan", "host", "exploit_match",
+        "scan", "host", "exploit_match", "finding",
     ).all()
 
     def get_serializer_class(self):
@@ -1347,44 +1347,82 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
         return Response(MSFExploitSessionSerializer(exploit).data)
 
     def create(self, request, *args, **kwargs):
-        """Start a new exploit session from an ExploitMatch.
+        """Start a new exploit session from an ExploitMatch or Finding.
 
-        Body: {"exploit_match": "<uuid>"} or {"exploit_match": "<uuid>", "overrides": {...}}
+        Body:
+          {"exploit_match": "<uuid>"}  — from ExploitMatch (CVE-based match)
+          {"finding": "<uuid>"}        — from Finding (searchsploit result)
+          {"finding": "<uuid>", "overrides": {...}}
         """
         from scanner.tasks.msf_exploit import msf_exploit_step
 
         match_id = request.data.get("exploit_match")
-        if not match_id:
-            return Response({"error": "exploit_match is required"}, status=400)
+        finding_id = request.data.get("finding")
 
-        try:
-            match = ExploitMatch.objects.select_related("scan", "host").get(id=match_id)
-        except ExploitMatch.DoesNotExist:
-            return Response({"error": "ExploitMatch not found"}, status=404)
+        if match_id:
+            # Existing flow: ExploitMatch-based session
+            try:
+                match = ExploitMatch.objects.select_related("scan", "host").get(id=match_id)
+            except ExploitMatch.DoesNotExist:
+                return Response({"error": "ExploitMatch not found"}, status=404)
 
-        overrides = request.data.get("overrides", {}) or {}
+            overrides = request.data.get("overrides", {}) or {}
 
-        session = MSFExploitSession.objects.create(
-            scan=match.scan,
-            host=match.host,
-            exploit_match=match,
-            module_fullname=match.module_fullname,
-            host_ip=match.host_ip or "",
-            port_number=match.port_number,
-            rhosts=match.host_ip or "",
-            rport=str(match.port_number) if match.port_number else "",
-            status="running",
-            current_step=0,
-            total_steps=2,
-            overrides=overrides,
-        )
+            session = MSFExploitSession.objects.create(
+                scan=match.scan,
+                host=match.host,
+                exploit_match=match,
+                module_fullname=match.module_fullname,
+                host_ip=match.host_ip or "",
+                port_number=match.port_number,
+                rhosts=match.host_ip or "",
+                rport=str(match.port_number) if match.port_number else "",
+                status="running",
+                current_step=0,
+                total_steps=2,
+                overrides=overrides,
+            )
 
-        msf_exploit_step.delay(str(session.id))
+            msf_exploit_step.delay(str(session.id))
 
-        return Response(
-            MSFExploitSessionSerializer(session).data,
-            status=status.HTTP_201_CREATED,
-        )
+            return Response(
+                MSFExploitSessionSerializer(session).data,
+                status=status.HTTP_201_CREATED,
+            )
+
+        if finding_id:
+            # New flow: Finding-based session (searchsploit → CVE extraction)
+            try:
+                finding = Finding.objects.select_related("scan", "host").get(id=finding_id)
+            except Finding.DoesNotExist:
+                return Response({"error": "Finding not found"}, status=404)
+
+            overrides = request.data.get("overrides", {}) or {}
+
+            session = MSFExploitSession.objects.create(
+                scan=finding.scan,
+                host=finding.host,
+                finding=finding,
+                module_fullname=finding.title or "searchsploit finding",
+                host_ip=finding.host_ip or "",
+                port_number=int(finding.port) if finding.port and str(finding.port).isdigit() else None,
+                rhosts=finding.host_ip or "",
+                rport=str(finding.port) if finding.port else "",
+                cve=finding.cve or "",
+                status="running",
+                current_step=0,
+                total_steps=2,
+                overrides=overrides,
+            )
+
+            msf_exploit_step.delay(str(session.id))
+
+            return Response(
+                MSFExploitSessionSerializer(session).data,
+                status=status.HTTP_201_CREATED,
+            )
+
+        return Response({"error": "exploit_match or finding is required"}, status=400)
 
 
 class ScanArtifactViewSet(viewsets.ReadOnlyModelViewSet):

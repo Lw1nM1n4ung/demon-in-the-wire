@@ -261,7 +261,7 @@ WG._buildAsm = function() {
     html += '<div class="panel anim-reveal" style="animation-delay:0.52s;margin-bottom:18px;" data-widget="web_surface">' +
       '<div class="panel-header">' +
         '<div class="panel-title">Web Surface</div>' +
-        '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'hosts\')">View all hosts</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'scans\')">View all hosts</button>' +
       '</div>' +
       '<div class="web-surface-grid" id="webSurfaceGrid">' +
         '<div class="spinner" style="margin:20px auto;"></div>' +
@@ -274,7 +274,7 @@ WG._buildAsm = function() {
     html += '<div class="panel anim-reveal" style="animation-delay:0.55s;" data-widget="asset_inventory">' +
       '<div class="panel-header">' +
         '<div class="panel-title">Asset Inventory</div>' +
-        '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'hosts\')">Hosts view</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="WG.navigate(\'scans\')">Hosts view</button>' +
       '</div>' +
       '<div class="filters-bar" style="padding:10px 16px;border-bottom:1px solid var(--border-dim);">' +
         '<input class="form-input" id="asmSearch" placeholder="Search ip / hostname / service" style="flex:2;">' +

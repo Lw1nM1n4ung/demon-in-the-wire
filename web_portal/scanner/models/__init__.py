@@ -560,8 +560,9 @@ class ExploitMatch(models.Model):
 class MSFExploitSession(models.Model):
     """Interactive step-by-step Metasploit exploitation session.
 
-    Each session targets one ExploitMatch. Steps flow:
-      1. Review — show module info + auto-populated RHOSTS/RPORT
+    Each session targets either an ExploitMatch (CVE-based match from scan)
+    or a Finding (searchsploit result with CVE extraction). Steps flow:
+      1. Review — show module info + auto-populated RHOSTS/RPORT + source code
       2. Execute — run msfconsole, capture output
 
     The Celery task runs one step at a time, saves output, and sets
@@ -578,6 +579,15 @@ class MSFExploitSession(models.Model):
     )
     exploit_match = models.ForeignKey(
         ExploitMatch, on_delete=models.CASCADE, related_name="exploit_sessions",
+        null=True, blank=True,
+    )
+    finding = models.ForeignKey(
+        Finding, on_delete=models.SET_NULL, related_name="exploit_sessions",
+        null=True, blank=True,
+    )
+    cve = models.CharField(
+        max_length=50, blank=True,
+        help_text="Primary CVE identifier used for module lookup",
     )
     module_fullname = models.CharField(max_length=500)
     host_ip = models.GenericIPAddressField()

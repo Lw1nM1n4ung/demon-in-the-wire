@@ -505,6 +505,8 @@ class MSFExploitSessionSerializer(serializers.ModelSerializer):
             "scan",
             "host",
             "exploit_match",
+            "finding",
+            "cve",
             "module_fullname",
             "host_ip",
             "port_number",

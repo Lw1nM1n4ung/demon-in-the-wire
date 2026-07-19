@@ -13,7 +13,7 @@ WG.renderHostDetail = function(id) {
           WG._cacheTime['host_' + id] = Date.now();
           if (main && !document.querySelector(".modal-overlay.active")) main.innerHTML = WG.renderHostDetail(id);
         } else if (main) {
-          main.innerHTML = '<div class="empty-state"><div class="icon">&#9678;</div><h3>Host not found</h3><p>This host may have been deleted or belongs to another scan.</p><button class="btn btn-secondary" style="margin-top:16px;" onclick="WG.navigate(\'hosts\')">Back to Hosts</button></div>';
+          main.innerHTML = '<div class="empty-state"><div class="icon">&#9678;</div><h3>Host not found</h3><p>This host may have been deleted or belongs to another scan.</p><button class="btn btn-secondary" style="margin-top:16px;" onclick="WG.navigate(\'scans\')">Back to Scans</button></div>';
         }
       }
     });
