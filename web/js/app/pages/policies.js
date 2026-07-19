@@ -225,7 +225,7 @@ WG._launchWithPolicy = function(id) {
   var policies = WG._getPolicies();
   var p = policies.find(function(x) { return x.id === id; });
   if (!p) return;
-  WG.navigate('new-scan');
+  WG.openModal('scanModal');
   setTimeout(function() {
     var el = document.getElementById('nsScanType');
     if (el) { el.value = p.scan_type; WG._nsUpdateType(p.scan_type); }

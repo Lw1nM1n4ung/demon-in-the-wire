@@ -18,12 +18,12 @@ WG.renderScanQueue = function() {
     '<div class="page-header-actions">' +
       '<button class="btn btn-secondary btn-sm" onclick="WG.invalidateCache(\'scans\');WG.render()">&#8635; Refresh</button>' +
       (running.length ? '<button class="btn btn-danger btn-sm" onclick="WG._cancelAllRunning()">Cancel All</button>' : '') +
-      '<button class="btn btn-primary" onclick="WG.navigate(\'new-scan\')"><span>+</span> New Scan</button>' +
+      '<button class="btn btn-primary" onclick="WG.openModal(\'scanModal\')"><span>+</span> New Scan</button>' +
     '</div></div>' +
 
     (queue.length === 0 ?
       '<div class="empty-state"><div class="icon">&#9776;</div><h3>Queue is empty</h3><p>No scans are running or pending.</p>' +
-      '<button class="btn btn-primary" style="margin-top:16px;" onclick="WG.navigate(\'new-scan\')">Launch a Scan</button></div>'
+      '<button class="btn btn-primary" style="margin-top:16px;" onclick="WG.openModal(\'scanModal\')">Launch a Scan</button></div>'
     :
       '<div style="display:flex;flex-direction:column;gap:14px;">' +
         queue.map(function(s, i) {

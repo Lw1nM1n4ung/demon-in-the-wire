@@ -35,7 +35,7 @@ WG.renderPhaseView = function(phase) {
     html += '<div class="empty-state"><div class="icon">&#8987;</div>';
     html += '<h3>No scans available</h3>';
     html += '<p>Launch a scan to see hosts in this phase.</p>';
-    html += '<button class="btn btn-primary" onclick="WG.navigate(\'new-scan\')" style="margin-top:16px;">';
+    html += '<button class="btn btn-primary" onclick="WG.openModal(\'scanModal\')" style="margin-top:16px;">';
     html += '<span>&#9654;</span> New Scan</button></div>';
     return html;
   }
