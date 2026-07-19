@@ -6,7 +6,7 @@
  */
 
 /* Pages allowed for each role. Owner has access to everything. */
-WG._VIEWER_PAGES = { dashboard: 1, findings: 1, finding: 1, settings: 1 };
+WG._VIEWER_PAGES = { dashboard: 1, finding: 1, settings: 1 };
 WG._ENGINEER_BLOCKED = { users: 1 };
 
 WG._canVisit = function(page) {
@@ -38,8 +38,6 @@ WG._ROUTES = [
   { page: 'dashboard',      path: '/dashboard' },
   { page: 'scans',          path: '/scans' },
   { page: 'scan',           path: '/scans/:id' },
-  { page: 'findings',       path: '/findings' },
-  { page: 'finding',        path: '/findings/:id' },
   { page: 'exploits',       path: '/exploits' },
   { page: 'host',           path: '/hosts/:id' },
   { page: 'topology',       path: '/topology' },
@@ -54,10 +52,7 @@ WG._ROUTES = [
   { page: 'ad-recon',       path: '/ad-recon' },
   { page: 'ad-recon-session', path: '/ad-recon/:id' },
   { page: 'live-discovery', path: '/live-discovery' },
-  { page: 'phase-portscan',   path: '/phase/portscan' },
   { page: 'phase-webdetect',  path: '/phase/webdetect' },
-  { page: 'phase-webcrawl',   path: '/phase/webcrawl' },
-  { page: 'phase-enumeration', path: '/phase/enumeration' },
   { page: 'phase-workflow',  path: '/phase-workflow/:id' },
 ];
 
@@ -180,8 +175,6 @@ WG.render = function() {
     dashboard:        WG.renderDashboard,
     scans:            WG.renderScans,
     scan:             function() { return WG.renderScanDetail(route.id); },
-    findings:         WG.renderFindings,
-    exploits:         WG.renderExploits,
     topology:         function() { return WG.renderTopology(route.id); },
     host:             function() { return WG.renderHostDetail(route.id); },
     finding:          function() { return WG.renderFindingDetail(route.id); },
@@ -196,10 +189,7 @@ WG.render = function() {
     'ad-recon':       WG.renderADRecon,
     'ad-recon-session': function() { return WG.AD.renderSessionDetail(route.id); },
     'live-discovery': WG.renderLiveDiscovery,
-    'phase-portscan':   function() { return WG.renderPhaseView('portscan'); },
     'phase-webdetect':  function() { return WG.renderPhaseView('webdetect'); },
-    'phase-webcrawl':   function() { return WG.renderPhaseView('webcrawl'); },
-    'phase-enumeration': function() { return WG.renderPhaseView('enumeration'); },
     'phase-workflow':  function() { return WG.renderPhaseWorkflow(route.id); },
   };
 

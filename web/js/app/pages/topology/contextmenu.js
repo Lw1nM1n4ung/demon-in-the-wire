@@ -17,7 +17,7 @@ WG._topoContextMenu = function(event, d) {
   menu.style.top = event.clientY + 'px';
 
   var items = [
-    { label: 'View Findings', icon: '\u{1f50d}', action: function() { WG.navigate('findings'); } },
+    { label: 'View Scan', icon: '\u{1f50d}', action: function() { WG.navigate('scans'); } },
     { label: 'View Details', icon: '\u{1f4cb}', action: function() { WG._topoShowDetail(d); } },
     { label: 'Copy IP', icon: '\u{1f4cb}', action: function() {
       if (navigator.clipboard) {
