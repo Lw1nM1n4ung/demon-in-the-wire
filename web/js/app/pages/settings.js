@@ -9,7 +9,6 @@ WG.renderSettings = function() {
       '<div class="tab active" data-tab="general" onclick="WG.switchSettingsTab(\'general\')">General</div>' +
       '<div class="tab" data-tab="theme" onclick="WG.switchSettingsTab(\'theme\')">Theme</div>' +
       '<div class="tab" data-tab="notifications" onclick="WG.switchSettingsTab(\'notifications\')">Notifications</div>' +
-      '<div class="tab" data-tab="tools" onclick="WG.switchSettingsTab(\'tools\')">Tools</div>' +
       '<div class="tab" data-tab="sessions" onclick="WG.switchSettingsTab(\'sessions\')">Sessions</div>' +
       '<div class="tab" data-tab="security" onclick="WG.switchSettingsTab(\'security\')">Security</div>' +
       '<div class="tab" data-tab="audit" onclick="WG.switchSettingsTab(\'audit\')">Audit Log</div>' +
@@ -414,7 +413,7 @@ WG._refreshToolsHealth = function() {
     if (Array.isArray(data)) {
       WG._cache['tools_health'] = data;
       WG.toast('Tools re-probed', 'info');
-      if (WG.state.currentPage === 'settings') WG.switchSettingsTab('tools');
+      if (WG.state.currentPage === 'settings') WG.switchSettingsTab('about');
     }
   });
 };
@@ -727,7 +726,8 @@ WG._settingsApi = function() {
     '</div></div>';
 };
 
-/* ── About ── */
+/* ── About ──
+ * Combines version/update info with tools health (moved from standalone Tools tab). */
 WG._settingsAbout = function() {
   var esc = WG.escHtml;
   var user = WG.currentUser && WG.currentUser();
@@ -740,6 +740,22 @@ WG._settingsAbout = function() {
     if (el) { el.textContent = ''; el.insertAdjacentHTML('beforeend', WG._aboutUpdateStatusHtml(data, isOwner)); }
   });
 
+  /* Tools health — background fetch, rerender in-place */
+  WG.api('/tools-health/').then(function(data) {
+    if (Array.isArray(data) && WG.state.currentPage === 'settings') {
+      WG._cache['tools_health'] = data;
+      var container = document.getElementById('aboutToolsBody');
+      if (container) {
+        container.textContent = '';
+        if (data.length) {
+          container.insertAdjacentHTML('beforeend', data.map(_toolsRow).join(''));
+        }
+      }
+    }
+  });
+
+  var tools = WG._cache['tools_health'] || [];
+
   return '<div class="panel" style="max-width:700px;"><div class="panel-header"><div class="panel-title">About Wire_Ghost</div></div>' +
     '<div class="panel-body"><div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;"><div class="topbar-logo" style="width:48px;height:48px;font-size:18px;border-radius:12px;">WG</div><div><div style="font-weight:800;font-size:1.2rem;color:var(--text-bright);">Wire<span style="color:var(--accent);font-family:var(--font-mono);">_Ghost</span></div><div style="font-size:0.82rem;color:var(--text-dim);">Vulnerability Assessment Portal</div></div></div>' +
     '<div class="info-grid" style="grid-template-columns:1fr 1fr;">' +
@@ -751,7 +767,40 @@ WG._settingsAbout = function() {
     '<div id="aboutUpdateStatus" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);">' +
       WG._aboutUpdateStatusHtml(ud, isOwner) +
     '</div>' +
-    '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);font-size:0.82rem;color:var(--text-dim);line-height:1.7;">Security scanning orchestration toolkit. Coordinates Nmap, Nuclei, Nikto, NetExec, WPScan, and more into a parallel pipeline with automated DOCX/XLSX/HTML reporting.</div></div></div>';
+    '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-dim);font-size:0.82rem;color:var(--text-dim);line-height:1.7;">Security scanning orchestration toolkit. Coordinates Nmap, Nuclei, Nikto, NetExec, WPScan, and more into a parallel pipeline with automated DOCX/XLSX/HTML reporting.</div></div></div>' +
+    /* Tools health panel */
+    '<div class="panel" style="max-width:700px;margin-top:16px;">' +
+      '<div class="panel-header">' +
+        '<div class="panel-title">Installed Tools <span class="count">' + tools.length + '</span></div>' +
+        '<button class="btn btn-secondary btn-sm" onclick="WG._refreshToolsHealthFromAbout()">Refresh</button>' +
+      '</div>' +
+      '<table class="data-table">' +
+        '<thead><tr><th>Tool</th><th>Binary</th><th>Path</th><th>Version</th><th>Status</th></tr></thead>' +
+        '<tbody id="aboutToolsBody">' + tools.map(_toolsRow).join('') + '</tbody>' +
+      '</table>' +
+      (tools.length ? '' : '<div class="panel-empty" style="padding:14px 0;font-size:0.82rem;color:var(--text-dim);">Probing tools…</div>') +
+    '</div>' +
+    ((isOwner)
+      ? '<div class="panel" style="max-width:700px;margin-top:16px;"><div class="panel-header"><div class="panel-title">Security Feeds</div></div>' +
+        '<div class="panel-body">' +
+          '<div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">Update nuclei templates and the Searchsploit database on the worker container.</div>' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<button class="btn btn-secondary btn-sm" id="btnUpdateFeeds" onclick="WG._updateFeeds()">Update Security Feeds</button>' +
+            '<span id="feedsUpdateStatus" style="font-size:0.78rem;color:var(--text-dim);"></span>' +
+          '</div>' +
+        '</div></div>'
+      : '');
+};
+
+/* Refresh tools from within the About tab (preserves the about view). */
+WG._refreshToolsHealthFromAbout = function() {
+  WG.api('/tools-health/?refresh=1').then(function(data) {
+    if (Array.isArray(data)) {
+      WG._cache['tools_health'] = data;
+      WG.toast('Tools re-probed', 'info');
+      if (WG.state.currentPage === 'settings') WG.switchSettingsTab('about');
+    }
+  });
 };
 
 WG._aboutUpdateStatusHtml = function(data, isOwner) {
@@ -1088,7 +1137,7 @@ WG.switchSettingsTab = function(tab) {
   var el = document.getElementById('settingsTabContent');
   var tabs = {
     general: WG._settingsGeneral, theme: WG._settingsTheme, notifications: WG._settingsNotifications,
-    tools: WG._settingsTools, sessions: WG._settingsSessions, security: WG._settingsSecurity,
+    sessions: WG._settingsSessions, security: WG._settingsSecurity,
     audit: WG._settingsAudit, export: WG._settingsExport, api: WG._settingsApi,
     tokens: WG._settingsTokens,
     admin: WG._settingsAdmin, support: WG._settingsSupport, about: WG._settingsAbout,
