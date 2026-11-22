@@ -1270,6 +1270,14 @@
   font-family: var(--font-mono); font-size: 0.72rem;
   color: var(--text-dim); white-space: pre-wrap; line-height: 1.5;
 }
+.exploit-output-error {
+  margin-bottom: 12px; padding: 12px 14px;
+  background: var(--bg-terminal); border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 59, 92, 0.35);
+  border-left: 3px solid var(--critical);
+  font-family: var(--font-mono); font-size: 0.72rem;
+  color: var(--critical); white-space: pre-wrap; word-break: break-word;
+}
 .exploit-source-section { margin-top: 12px; }
 .exploit-source-toggle {
   cursor: pointer; font-size: 0.82rem; color: var(--accent);
