@@ -1448,14 +1448,21 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
 
             overrides = request.data.get("overrides", {}) or {}
 
+            # host_ip is nullable on both ExploitMatch and Host-scoped rows;
+            # MSFExploitSession.host_ip is NOT NULL and Django stores an
+            # empty string as NULL for GenericIPAddressField, so fall back
+            # to the related Host's IP — the wizard always needs a routable
+            # target.
+            target_ip = match.host_ip or match.host.ip
+
             session = MSFExploitSession.objects.create(
                 scan=match.scan,
                 host=match.host,
                 exploit_match=match,
                 module_fullname=match.module_fullname,
-                host_ip=match.host_ip or "",
+                host_ip=target_ip,
                 port_number=match.port_number,
-                rhosts=match.host_ip or "",
+                rhosts=target_ip,
                 rport=str(match.port_number) if match.port_number else "",
                 status="running",
                 current_step=0,
@@ -1479,16 +1486,20 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
 
             overrides = request.data.get("overrides", {}) or {}
 
+            # See the exploit_match branch above — host_ip may be NULL and
+            # the session column is NOT NULL.
+            target_ip = finding.host_ip or finding.host.ip
+
             session = MSFExploitSession.objects.create(
                 scan=finding.scan,
                 host=finding.host,
                 finding=finding,
                 module_fullname=finding.title or "searchsploit finding",
-                host_ip=finding.host_ip or "",
+                host_ip=target_ip,
                 port_number=int(finding.port)
                 if finding.port and str(finding.port).isdigit()
                 else None,
-                rhosts=finding.host_ip or "",
+                rhosts=target_ip,
                 rport=str(finding.port) if finding.port else "",
                 cve=finding.cve or "",
                 status="running",
