@@ -605,6 +605,75 @@ test('route round-trip: routeToPath then matchPath', function() {
 
 
 // ════════════════════════════════════════
+// TEST SUITE: route ⇄ pages-map consistency (router)
+// ════════════════════════════════════════
+console.log('\n\x1b[1mRoute/pages-map consistency\x1b[0m');
+
+/* The router resolves a page with `pages[route.page] || WG.renderDashboard`.
+ * When a route exists in WG._ROUTES but is missing from the `pages` map, the
+ * URL silently renders the dashboard instead of its own page.  That happened
+ * to /exploits in commit 4c620cc and went unnoticed because the fallback is
+ * a perfectly valid page.  This check parses router.js and asserts both
+ * lists agree. */
+test('every route has a matching entry in the pages map', function() {
+  var src = fs.readFileSync(path.join(JS_DIR, 'app', 'router.js'), 'utf8');
+
+  var routes = [];
+  var routesBlock = src.split('WG._ROUTES = [', 2)[1].split('];', 1)[0];
+  var routeRe = /\{\s*page:\s*'([^']+)'/g;
+  var m;
+  while ((m = routeRe.exec(routesBlock)) !== null) routes.push(m[1]);
+
+  var pagesBlock = src.split('var pages = {', 2)[1].split('};', 1)[0];
+  var pages = [];
+  var pageRe = /^\s*'?([\w-]+)'?\s*:/gm;
+  while ((m = pageRe.exec(pagesBlock)) !== null) pages.push(m[1]);
+
+  assert.ok(routes.length > 0, 'Could not parse WG._ROUTES from router.js');
+  assert.ok(pages.length > 0, 'Could not parse the pages map from router.js');
+
+  var missing = routes.filter(function(r) { return pages.indexOf(r) === -1; });
+  assert.strictEqual(
+    missing.length,
+    0,
+    'Routes missing from the pages map (they render the dashboard instead): '
+      + missing.join(', ')
+  );
+});
+
+test('no page map entry is unreachable', function() {
+  var src = fs.readFileSync(path.join(JS_DIR, 'app', 'router.js'), 'utf8');
+
+  var routesBlock = src.split('WG._ROUTES = [', 2)[1].split('];', 1)[0];
+  var routes = [];
+  var routeRe = /\{\s*page:\s*'([^']+)'/g;
+  var m;
+  while ((m = routeRe.exec(routesBlock)) !== null) routes.push(m[1]);
+
+  var pagesBlock = src.split('var pages = {', 2)[1].split('};', 1)[0];
+  var pages = [];
+  var pageRe = /^\s*'?([\w-]+)'?\s*:/gm;
+  while ((m = pageRe.exec(pagesBlock)) !== null) pages.push(m[1]);
+
+  var orphans = pages.filter(function(p) { return routes.indexOf(p) === -1; });
+  assert.strictEqual(
+    orphans.length,
+    0,
+    'Pages map entries with no matching route (unreachable): ' + orphans.join(', ')
+  );
+});
+
+test('exploits route resolves to the exploits page, not the dashboard', function() {
+  var src = fs.readFileSync(path.join(JS_DIR, 'app', 'router.js'), 'utf8');
+  var pagesBlock = src.split('var pages = {', 2)[1].split('};', 1)[0];
+  assert.ok(
+    /exploits\s*:\s*WG\.renderExploits/.test(pagesBlock),
+    'Expected "exploits: WG.renderExploits" in the router pages map'
+  );
+});
+
+
+// ════════════════════════════════════════
 // TEST SUITE: Session lifecycle (auth)
 // ════════════════════════════════════════
 console.log('\n\x1b[1mSession lifecycle\x1b[0m');
