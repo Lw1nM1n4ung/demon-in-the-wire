@@ -33,7 +33,17 @@ RUN for i in 1 2 3 4 5; do \
     done \
     && test -x /go/bin/fingerprintx
 
-# ── Stage 2: final image ──
+# ── Stage 2: Metasploit Framework (official upstream image) ──
+# The framework is copied out of the official image rather than built from
+# source: it ships a complete, current module tree plus the exact gem set
+# the framework was tested against.
+#
+# That image is Alpine (musl libc); this one is Debian (glibc).  The Ruby
+# runtime and the gems are therefore relocated under /opt/msf and run
+# through musl's loader explicitly — see msfconsole-wrapper.sh.
+FROM metasploitframework/metasploit-framework:latest AS msf
+
+# ── Stage 3: final image ──
 FROM python:3.12-slim-bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -87,6 +97,34 @@ RUN for i in 1 2 3 4 5; do \
 # wpscan — WordPress vulnerability scanner (Ruby gem)
 RUN gem install wpscan --no-document \
     && ln -sf /usr/local/bin/wpscan /usr/bin/wpscan
+
+# ── Metasploit Framework ────────────────────────────────────────────────
+# Relocated out of the official Alpine image.  The musl loader and the
+# Alpine shared libraries go into a private prefix so the Debian system's
+# own (glibc) libraries are untouched; Ruby's stdlib and libruby stay at
+# /usr/local/lib because the Ruby binary has that path compiled in.
+COPY --from=msf /usr/src/metasploit-framework /opt/msf/framework
+COPY --from=msf /usr/local/bundle /opt/msf/bundle
+COPY --from=msf /usr/local/lib/ruby /usr/local/lib/ruby
+COPY --from=msf /usr/local/lib/libruby.so* /usr/local/lib/
+COPY --from=msf /usr/local/bin/ruby /opt/msf/ruby/bin/ruby
+COPY --from=msf /lib/ld-musl-x86_64.so.1 /opt/msf/alpine/lib/ld-musl-x86_64.so.1
+COPY --from=msf /usr/lib/*.so* /opt/msf/alpine/usr/lib/
+
+# The launcher the worker invokes.
+COPY web_portal/msfconsole-wrapper.sh /usr/local/bin/msfconsole
+RUN chmod 0755 /usr/local/bin/msfconsole
+
+# Prove at build time that the relocated framework actually runs — a
+# silently broken msfconsole would only surface as a failed exploit.
+RUN set -e; \
+    test -f /opt/msf/framework/msfconsole; \
+    test -d /opt/msf/framework/modules; \
+    test -s /opt/msf/framework/db/modules_metadata_base.json; \
+    timeout 300 msfconsole -q -x 'version; exit' 2>&1 | tee /tmp/msf-version.txt; \
+    grep -q '^Framework:' /tmp/msf-version.txt; \
+    rm -f /tmp/msf-version.txt; \
+    echo "MSF module tree: $(find /opt/msf/framework/modules -name '*.rb' | wc -l) module(s)"
 
 # Python deps (before Go binaries — pip httpx overwrites /usr/local/bin/httpx)
 COPY web_portal/requirements.txt .

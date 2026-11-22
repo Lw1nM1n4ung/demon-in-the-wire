@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from wireghost.models.finding import Finding
 from wireghost.models.severity import Severity
@@ -39,6 +41,25 @@ class MsfModule:
 # Static service → module map (curated, high-value scanners)
 # ---------------------------------------------------------------------------
 
+# The Metasploit Framework's data directory.  The worker image ships the
+# framework relocated under /opt/msf; a standalone install (source checkout,
+# apt package) uses a different prefix, so probe for the file we need.
+_MSF_DATA_DIRS = (
+    "/opt/msf/framework/data",
+    "/opt/metasploit-framework/data",
+    "/usr/share/metasploit-framework/data",
+)
+
+
+def _msf_data_file(relative: str) -> str:
+    """Locate a file in the Metasploit Framework's data directory."""
+    for base in _MSF_DATA_DIRS:
+        candidate = os.path.join(base, relative)
+        if os.path.isfile(candidate):
+            return candidate
+    return os.path.join(_MSF_DATA_DIRS[0], relative)
+
+
 _SERVICE_MODULES: dict[str, list[MsfModule]] = {
     "ssh": [
         MsfModule("auxiliary/scanner/ssh/ssh_version", Severity.INFO),
@@ -46,7 +67,7 @@ _SERVICE_MODULES: dict[str, list[MsfModule]] = {
             "auxiliary/scanner/ssh/ssh_enumusers",
             Severity.MEDIUM,
             {
-                "USER_FILE": "/opt/metasploit-framework/data/wordlists/unix_users.txt",
+                "USER_FILE": "wordlists/unix_users.txt",
                 "THRESHOLD": "10",
             },
         ),
@@ -316,6 +337,9 @@ def _build_rc_script(
         for opt_key, opt_val in mod.options.items():
             if opt_key.startswith("_"):
                 continue
+            if opt_key == "USER_FILE":
+                # Framework-relative path -> absolute path in this install.
+                opt_val = _msf_data_file(opt_val)
             if opt_val:
                 lines.append(f"set {opt_key} {opt_val}")
         lines.append("run")
@@ -325,6 +349,31 @@ def _build_rc_script(
     lines.append("spool off")
     lines.append("exit")
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Concurrency guard
+# ---------------------------------------------------------------------------
+
+# msfconsole is a heavyweight Ruby process (~150 MB RSS each).  The per-host
+# pipeline runs up to config.parallelism hosts concurrently and each one
+# spawns its own console, so the number of simultaneous consoles has to be
+# capped or the worker hits its memory limit.
+_MSF_MAX_CONCURRENCY = 3
+
+# Keyed by the running event loop: a module-level semaphore cannot be shared
+# between loops, and the test-suite runs each test in its own loop.
+_msf_semaphores: "weakref.WeakKeyDictionary[Any, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _msf_semaphore() -> asyncio.Semaphore:
+    """Semaphore bounding the number of simultaneous msfconsole processes."""
+    loop = asyncio.get_running_loop()
+    sem = _msf_semaphores.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(_MSF_MAX_CONCURRENCY)
+        _msf_semaphores[loop] = sem
+    return sem
 
 
 # ---------------------------------------------------------------------------
@@ -364,11 +413,12 @@ async def scan_msf(
         len({p for _, p in modules}),
     )
 
-    result = await run_tool(
-        ["msfconsole", "-q", "-r", str(rc_path)],
-        timeout=min(600, int(config.tool_timeout)),
-        label=f"msfconsole {host.ip}",
-    )
+    async with _msf_semaphore():
+        result = await run_tool(
+            ["msfconsole", "-q", "-r", str(rc_path)],
+            timeout=min(600, int(config.tool_timeout)),
+            label=f"msfconsole {host.ip}",
+        )
 
     if result.returncode != 0:
         log.warning("[%s] msfconsole exited with rc=%d", host.ip, result.returncode)

@@ -423,6 +423,42 @@ class TestBuildRcScript:
         assert "_rport" not in rc
         assert "set THREADS 3" in rc
 
+    def test_user_file_resolves_to_an_absolute_path(self, tmp_path: Path):
+        """USER_FILE is framework-relative; it must become a real path.
+
+        The framework's data directory differs per install layout (the
+        worker image relocates it under /opt/msf), so a hardcoded absolute
+        path would point at a file that does not exist.
+        """
+        wordlist = tmp_path / "unix_users.txt"
+        wordlist.write_text("root\n")
+
+        modules = [
+            (MsfModule("auxiliary/scanner/ssh/ssh_enumusers", Severity.MEDIUM,
+                       {"USER_FILE": "wordlists/unix_users.txt"}), 22),
+        ]
+        with patch(
+            "wireghost.pipeline.msf_scan._MSF_DATA_DIRS",
+            (str(tmp_path),),
+        ):
+            rc = _build_rc_script("10.0.0.1", modules, Path("/tmp/spool.txt"))
+
+        assert f"set USER_FILE {tmp_path}/wordlists/unix_users.txt" in rc
+
+    def test_user_file_falls_back_to_the_primary_data_dir(self):
+        """When no install has the wordlist, still emit a usable path."""
+        modules = [
+            (MsfModule("auxiliary/scanner/ssh/ssh_enumusers", Severity.MEDIUM,
+                       {"USER_FILE": "wordlists/unix_users.txt"}), 22),
+        ]
+        with patch(
+            "wireghost.pipeline.msf_scan._MSF_DATA_DIRS",
+            ("/nonexistent/msf/data",),
+        ):
+            rc = _build_rc_script("10.0.0.1", modules, Path("/tmp/spool.txt"))
+
+        assert "set USER_FILE /nonexistent/msf/data/wordlists/unix_users.txt" in rc
+
     def test_empty_option_value_skipped(self):
         modules = [
             (MsfModule("auxiliary/scanner/smb/smb_login", Severity.HIGH,
@@ -474,6 +510,54 @@ class TestScanMsf:
         with patch("wireghost.pipeline.msf_scan.shutil.which", return_value=None):
             result = await scan_msf(host, cfg, None)
         assert result == []
+
+    async def test_concurrent_msfconsole_runs_are_bounded(self, tmp_path: Path):
+        """msfconsole is ~150 MB RSS; an unbounded fan-out OOMs the worker.
+
+        The per-host pipeline runs up to config.parallelism hosts at once,
+        and each one spawns its own msfconsole, so the number of simultaneous
+        consoles has to be capped.
+        """
+        import asyncio
+
+        from wireghost.pipeline import msf_scan as msf_mod
+
+        running = 0
+        peak = 0
+        release = asyncio.Event()
+
+        async def fake_run_tool(cmd, timeout=None, label=None, **kwargs):
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            try:
+                await release.wait()
+            finally:
+                running -= 1
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        class _Tree:
+            def host_vuln_dir(self, ip):
+                path = tmp_path / ip
+                path.mkdir(parents=True, exist_ok=True)
+                return path
+
+        host = _make_host([(22, "ssh")])
+        cfg = ScanConfig(parallelism=20)
+
+        with patch("wireghost.pipeline.msf_scan.shutil.which", return_value="/usr/bin/msfconsole"):
+            with patch("wireghost.pipeline.msf_scan.run_tool", side_effect=fake_run_tool):
+                with patch.object(msf_mod, "_MSF_MAX_CONCURRENCY", 2):
+                    tasks = [
+                        asyncio.create_task(scan_msf(host, cfg, _Tree()))
+                        for _ in range(8)
+                    ]
+                    await asyncio.sleep(0.2)
+                    release.set()
+                    await asyncio.gather(*tasks)
+
+        assert peak <= 2, f"expected at most 2 concurrent msfconsole runs, saw {peak}"
+        assert peak > 1, "the test did not actually run concurrently"
 
 
 # ================================================================

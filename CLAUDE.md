@@ -160,6 +160,10 @@ One-command tool to update the host IP across all config files: `sudo python3 ip
 Four Dockerfiles:
 - `Dockerfile` (root) — standalone CLI scanner image with all scan tools + Metasploit. Pre-built: `callmedemon/wireghost`.
 - `web_portal/Dockerfile` — worker image with all scan tools (nmap, nuclei, metasploit-framework, etc.). Pre-built: `callmedemon/wireghost:worker`.
+  The Metasploit Framework is copied out of the official `metasploitframework/metasploit-framework:latest` image (build stage `msf`) into `/opt/msf/framework`.
+  That image is Alpine (musl) while the worker is Debian (glibc), so the musl loader and the Alpine shared libraries are copied to `/opt/msf/alpine` and
+  `web_portal/msfconsole-wrapper.sh` invokes the loader explicitly — `/usr/local/bin/msfconsole` is that wrapper. `MSF_BIN` overrides the binary; the
+  module tree is at `/opt/msf/framework/modules` and the metadata index at `/opt/msf/framework/db/modules_metadata_base.json`.
 - `web_portal/Dockerfile.web` — slim API/portal image (no scan tools, tools health dispatched to worker via Celery). Pre-built: `callmedemon/wireghost:web`.
 - `web_portal/Dockerfile.portal` — nginx + static SPA assets baked into the image. Pre-built: `callmedemon/wireghost:portal`. Replaces the raw `nginx:alpine` in docker-compose for `--full` rebuilds — no bind-mount dependency for source files.
 
@@ -182,7 +186,7 @@ Four Dockerfiles:
 | `src/wireghost/pipeline/vulnscan.py` | Phase: vulnscan — nuclei + nmap vuln + searchsploit + getsploit + nikto + NVD CVE pass 1 (runs in parallel with msf_scan via `asyncio.gather`) |
 | `src/wireghost/pipeline/cve_search.py` | NVD CVE search — CPE 2.3 URI builder, ~200-entry CPE vendor/product map, version extraction from 11 sources (nmap -sV, httpx tech detect, SMB/NetExec/SMTP/SSH/TLS/SNMP/LDAP/MySQL/PostgreSQL banners, service_enum), NVD API 2.0 client with rate limiting (5 req/30s without key, 50 with), two-pass architecture: pass 1 in vulnscan (ports+tech), pass 2 in orchestrator (full findings, deduplicated). Entry point: `scan_cve_search(host, findings, config)` |
 | `src/wireghost/pipeline/service_enum.py` | Phase: enumeration — Pure-Python enumeration of 18 services (SSH, FTP, Redis, MongoDB, MySQL, PostgreSQL, SMTP, VNC, RDP, LDAP, NTP, DNS, SIP, NNTP, Memcached, Elasticsearch, Docker, Telnet) — no brute force |
-| `src/wireghost/pipeline/msf_scan.py` | Phase: vulnscan — Service-routed Metasploit auxiliary/scanner modules (runs in parallel with scan_host_vulns; skips if msfconsole not installed) |
+| `src/wireghost/pipeline/msf_scan.py` | Phase: vulnscan — Service-routed Metasploit auxiliary/scanner modules (runs in parallel with scan_host_vulns). msfconsole ships in the worker image; concurrent consoles are capped at 3 (`_MSF_MAX_CONCURRENCY`) because each is ~150 MB RSS |
 | `src/wireghost/pipeline/smb_enum.py` | Phase: enumeration — SMB enumeration via NetExec (shares, users, groups, password policy) |
 | `src/wireghost/pipeline/netexec_enum.py` | Phase: enumeration — NetExec multi-protocol enumeration (SMB, SSH, FTP, RDP, LDAP, WinRM, MSSQL) |
 | `src/wireghost/pipeline/ldap_enum.py` | Phase: enumeration — LDAP directory enumeration (naming contexts, domain info, users, computers, groups) |

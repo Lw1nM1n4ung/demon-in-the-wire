@@ -120,6 +120,33 @@ Other command facts:
 - `web_portal/scanner/` is bind-mounted read-only into api/worker, so Django-side code changes
   only need a `docker compose restart worker` — no image rebuild.
 
+## Metasploit Framework in the worker image
+
+- The worker image ships the framework, copied out of the official
+  `metasploitframework/metasploit-framework:latest` image (Dockerfile build stage `msf`).
+  The rubygems `metasploit-framework` gem is a **4 KB meta-gem** — no code, no `modules/`,
+  no `msfconsole` binstub even with `CREATE_BINSTUBS=1`. Do not try to install it from rubygems.
+- **That image is Alpine (musl); the worker is Debian (glibc).** The Ruby binary cannot be run
+  in place. The musl loader and the Alpine shared libraries are copied to `/opt/msf/alpine`, the
+  Ruby stdlib and `libruby.so` stay at `/usr/local/lib` (that path is compiled into the Ruby
+  binary as RUNPATH), and `web_portal/msfconsole-wrapper.sh` — installed as
+  `/usr/local/bin/msfconsole` — invokes the loader explicitly.
+- The wrapper's env mirrors the official image's own: `GEM_HOME` points at the bundle and
+  **`BUNDLE_PATH` must stay unset** — setting it makes Bundler look for a `ruby/3.3.0/`
+  sub-layout that does not exist. `GEM_PATH` must stay unset too, or Ruby's bundled gems
+  (`rexml` and friends) become invisible.
+- Paths: framework `/opt/msf/framework`, module tree `/opt/msf/framework/modules`, metadata
+  index `/opt/msf/framework/db/modules_metadata_base.json`, wordlists
+  `/opt/msf/framework/data/wordlists/`. `MSF_BIN` / `MSF_MODULES_DIR` / `MSF_METADATA_PATH`
+  override the lookups.
+- `msfconsole -q -x '...'` output is a **column-aligned table**: the header row and the dashed
+  separator are on *separate* lines, and the "Current Setting" column is often empty, which
+  shifts every later column left if the row is split on whitespace. `_parse_option_table` takes
+  the column boundaries from the header row instead.
+- Each `msfconsole` process is ~150 MB RSS. `scan_msf` caps simultaneous consoles at
+  `_MSF_MAX_CONCURRENCY = 3`; without that cap the per-host pipeline can start
+  `config.parallelism` consoles at once and blow the worker's 2 GB memory limit.
+
 ## Pipeline facts that are easy to get wrong
 
 - Phase list is fixed and mirrored in two places that must stay in sync:
