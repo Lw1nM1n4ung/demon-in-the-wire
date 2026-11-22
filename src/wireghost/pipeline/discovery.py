@@ -450,12 +450,17 @@ async def discover_hosts(
             timeout=config.network_overwatch_timeout,
         )
         if overwatch.targets:
-            log.info(
-                "Network overwatch: monitoring %s — pause if all targets fail %dx",
-                ", ".join(overwatch.targets),
-                config.network_overwatch_fail_threshold,
-            )
-            await overwatch.check(is_aborted or (lambda: False))
+            if not overwatch.available:
+                log.warning(
+                    "Network overwatch: no ping/fping binary found — skipping overwatch check"
+                )
+            else:
+                log.info(
+                    "Network overwatch: monitoring %s — pause if all targets fail %dx",
+                    ", ".join(overwatch.targets),
+                    config.network_overwatch_fail_threshold,
+                )
+                await overwatch.check(is_aborted or (lambda: False))
 
     # Partition large targets into /24 subnets
     subnets = _partition_target(target)

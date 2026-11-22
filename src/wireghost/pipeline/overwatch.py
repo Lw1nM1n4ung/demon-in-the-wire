@@ -32,7 +32,7 @@ _DEFAULT_ROUTE_RE = re.compile(r"default via ([\d.]+)")
 async def _detect_gateway() -> str | None:
     """Return the default gateway IP, or None if it cannot be determined."""
     if shutil.which("ip") is None:
-        return None
+        return _detect_gateway_proc()
     try:
         proc = await asyncio.create_subprocess_exec(
             "ip",
@@ -43,9 +43,36 @@ async def _detect_gateway() -> str | None:
         stdout, _ = await proc.communicate()
         output = stdout.decode(errors="replace")
     except Exception:  # pragma: no cover — best-effort only
-        return None
+        return _detect_gateway_proc()
     m = _DEFAULT_ROUTE_RE.search(output)
-    return m.group(1) if m else None
+    return m.group(1) if m else _detect_gateway_proc()
+
+
+def _detect_gateway_proc() -> str | None:
+    """Fallback gateway lookup by parsing /proc/net/route.
+
+    The worker image does not always ship iproute2, but /proc/net/route is
+    always present on Linux.  The default route has destination 00000000 and
+    the gateway is stored as a little-endian hex IPv4 address.
+    """
+    try:
+        with open("/proc/net/route", encoding="utf-8") as f:
+            next(f, None)  # skip header
+            for line in f:
+                fields = line.split()
+                if len(fields) < 3 or fields[1] != "00000000":
+                    continue
+                raw = fields[2]
+                if len(raw) != 8:
+                    continue
+                # /proc/net/route stores the gateway little-endian.
+                octets = [int(raw[i : i + 2], 16) for i in (6, 4, 2, 0)]
+                gateway = ".".join(str(o) for o in octets)
+                if gateway != "0.0.0.0":
+                    return gateway
+    except Exception:  # pragma: no cover — best-effort only
+        return None
+    return None
 
 
 class NetworkOverwatch:
@@ -82,6 +109,20 @@ class NetworkOverwatch:
         self._consecutive_successes = 0
         self._paused = False
 
+    @property
+    def available(self) -> bool:
+        """True when a usable ICMP probe binary is present.
+
+        Without one every probe fails, which would look exactly like a dead
+        network and park the scan in an endless pause.  Callers must check
+        this and skip overwatching entirely rather than block forever.
+
+        ``fping`` is preferred because it is already a required pipeline tool
+        (and ``ping``/``iproute2`` are not guaranteed to be installed in every
+        image); ``ping`` is used as a fallback.
+        """
+        return shutil.which("fping") is not None or shutil.which("ping") is not None
+
     # -- public API -------------------------------------------------------
 
     @property
@@ -93,7 +134,20 @@ class NetworkOverwatch:
         return self._consecutive_failures
 
     async def ping_host(self, ip: str) -> bool:
-        """Ping a single host.  Returns True if reachable."""
+        """Ping a single host.  Returns True if reachable.
+
+        Uses ``fping`` when available (already present in the worker image as
+        a required pipeline tool), falling back to the ``ping`` binary.
+        """
+        timeout_ms = max(1000, int(self.timeout * 1000))
+        if shutil.which("fping") is not None:
+            result = await run_tool(
+                ["fping", "-c", "1", "-t", str(timeout_ms), ip],
+                timeout=self.timeout + 1,
+                label=f"fping {ip}",
+            )
+            return result.returncode == 0
+
         result = await run_tool(
             ["ping", "-c", "1", "-W", str(int(self.timeout)), ip],
             timeout=self.timeout + 1,
@@ -125,6 +179,9 @@ class NetworkOverwatch:
             If the task is cancelled while waiting.
         """
         if not self.targets:
+            return
+        if not self.available:
+            log.warning("Network overwatch: no ping/fping binary found — overwatching disabled")
             return
 
         while True:

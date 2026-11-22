@@ -126,6 +126,7 @@ class ScanViewSet(viewsets.ModelViewSet):
 
     def create(self, request):
         from django.utils import timezone
+
         serializer = ScanCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -150,7 +151,9 @@ class ScanViewSet(viewsets.ModelViewSet):
             ).count()
             if disco_running >= self.MAX_CONCURRENT_DISCOVERY:
                 return Response(
-                    {"error": f"Maximum {self.MAX_CONCURRENT_DISCOVERY} concurrent discovery scans allowed."},
+                    {
+                        "error": f"Maximum {self.MAX_CONCURRENT_DISCOVERY} concurrent discovery scans allowed."
+                    },
                     status=429,
                 )
 
@@ -264,6 +267,7 @@ class ScanViewSet(viewsets.ModelViewSet):
     def retry(self, request, pk=None):
         """Retry a failed or cancelled discovery scan."""
         from django.utils import timezone
+
         scan = self.get_object()
         if scan.status not in ("failed", "cancelled"):
             return Response(
@@ -295,9 +299,11 @@ class ScanViewSet(viewsets.ModelViewSet):
         if fmt not in ("json", "csv"):
             return Response({"error": "Export format must be 'json' or 'csv'"}, status=400)
 
-        hosts = scan.hosts.filter(status="up").values(
-            "ip", "hostname", "mac_address", "vendor", "current_phase", "discovered_by"
-        ).order_by("ip")
+        hosts = (
+            scan.hosts.filter(status="up")
+            .values("ip", "hostname", "mac_address", "vendor", "current_phase", "discovered_by")
+            .order_by("ip")
+        )
 
         if fmt == "csv":
             import csv
@@ -306,25 +312,32 @@ class ScanViewSet(viewsets.ModelViewSet):
             buf = io.StringIO()
             writer = csv.DictWriter(
                 buf,
-                fieldnames=["ip", "hostname", "mac_address", "vendor", "current_phase", "discovered_by"],
+                fieldnames=[
+                    "ip",
+                    "hostname",
+                    "mac_address",
+                    "vendor",
+                    "current_phase",
+                    "discovered_by",
+                ],
             )
             writer.writeheader()
             for h in hosts:
                 writer.writerow(h)
             return Response(
                 {"csv": buf.getvalue()},
-                headers={
-                    "Content-Disposition": f'attachment; filename="discovery_{scan.id}.csv"'
-                },
+                headers={"Content-Disposition": f'attachment; filename="discovery_{scan.id}.csv"'},
             )
 
-        return Response({
-            "scan_id": str(scan.id),
-            "scan_name": scan.name,
-            "target": scan.target,
-            "hosts_found": scan.hosts_count,
-            "hosts": list(hosts),
-        })
+        return Response(
+            {
+                "scan_id": str(scan.id),
+                "scan_name": scan.name,
+                "target": scan.target,
+                "hosts_found": scan.hosts_count,
+                "hosts": list(hosts),
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def findings(self, request, pk=None):
@@ -549,21 +562,33 @@ class ScanViewSet(viewsets.ModelViewSet):
     def discovery(self, request, pk=None):
         """Live host discovery status — hosts found so far and subnet progress."""
         scan = self.get_object()
-        hosts = scan.hosts.filter(status="up").values(
-            "ip", "hostname", "mac_address", "vendor", "current_phase", "discovery_method", "discovered_by"
-        ).order_by("ip")
+        hosts = (
+            scan.hosts.filter(status="up")
+            .values(
+                "ip",
+                "hostname",
+                "mac_address",
+                "vendor",
+                "current_phase",
+                "discovery_method",
+                "discovered_by",
+            )
+            .order_by("ip")
+        )
 
-        return Response({
-            "scan_id": str(scan.id),
-            "scan_name": scan.name,
-            "status": scan.status,
-            "current_phase": scan.current_phase,
-            "target": scan.target,
-            "hosts_total": scan.hosts_total or 0,
-            "hosts_scanned": scan.hosts_scanned or 0,
-            "live_hosts": hosts.count(),
-            "hosts": list(hosts),
-        })
+        return Response(
+            {
+                "scan_id": str(scan.id),
+                "scan_name": scan.name,
+                "status": scan.status,
+                "current_phase": scan.current_phase,
+                "target": scan.target,
+                "hosts_total": scan.hosts_total or 0,
+                "hosts_scanned": scan.hosts_scanned or 0,
+                "live_hosts": hosts.count(),
+                "hosts": list(hosts),
+            }
+        )
 
     # ── Phase-Based Scan endpoints ──────────────────────────────────────
 
@@ -585,10 +610,15 @@ class ScanViewSet(viewsets.ModelViewSet):
         for idx, phase in enumerate(enabled):
             if phase not in dict(PhaseRun.PHASE_CHOICES):
                 continue
-            runs.append(PhaseRun(
-                scan=scan, phase=phase, sequence=idx,
-                status="pending", tool_config=enabled_tools.get(phase, {}),
-            ))
+            runs.append(
+                PhaseRun(
+                    scan=scan,
+                    phase=phase,
+                    sequence=idx,
+                    status="pending",
+                    tool_config=enabled_tools.get(phase, {}),
+                )
+            )
         if not runs:
             return Response({"error": "No valid phases"}, status=400)
 
@@ -609,8 +639,9 @@ class ScanViewSet(viewsets.ModelViewSet):
         if phase_name:
             phase_run = get_object_or_404(PhaseRun, scan=scan, phase=phase_name)
         else:
-            phase_run = PhaseRun.objects.filter(
-                scan=scan, status="pending").order_by("sequence").first()
+            phase_run = (
+                PhaseRun.objects.filter(scan=scan, status="pending").order_by("sequence").first()
+            )
             if not phase_run:
                 return Response({"error": "No pending phases"}, status=400)
             phase_name = phase_run.phase
@@ -666,17 +697,19 @@ class ScanViewSet(viewsets.ModelViewSet):
         """Return all PhaseRun rows plus scan-level progress for polling."""
         scan = self.get_object()
         phase_runs = PhaseRun.objects.filter(scan=scan).order_by("sequence")
-        return Response({
-            "scan_id": str(scan.id),
-            "scan_name": scan.name,
-            "scan_status": scan.status,
-            "current_phase_index": scan.current_phase_index,
-            "phases_config": scan.phases,
-            "hosts_scanned": scan.hosts_scanned or 0,
-            "hosts_total": scan.hosts_total or 0,
-            "findings_count": scan.findings_count or 0,
-            "phases": PhaseRunSerializer(phase_runs, many=True).data,
-        })
+        return Response(
+            {
+                "scan_id": str(scan.id),
+                "scan_name": scan.name,
+                "scan_status": scan.status,
+                "current_phase_index": scan.current_phase_index,
+                "phases_config": scan.phases,
+                "hosts_scanned": scan.hosts_scanned or 0,
+                "hosts_total": scan.hosts_total or 0,
+                "findings_count": scan.findings_count or 0,
+                "phases": PhaseRunSerializer(phase_runs, many=True).data,
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def phase_export(self, request, pk=None):
@@ -699,19 +732,26 @@ class ScanViewSet(viewsets.ModelViewSet):
             stream = io.StringIO()
             writer = csv.writer(stream)
             writer.writerow(["severity", "title", "host_ip", "port", "cve", "cvss", "endpoint"])
-            for f in findings.values_list("severity", "title", "host_ip", "port", "cve", "cvss", "endpoint"):
+            for f in findings.values_list(
+                "severity", "title", "host_ip", "port", "cve", "cvss", "endpoint"
+            ):
                 writer.writerow(f)
             return HttpResponse(
-                stream.getvalue(), content_type="text/csv",
-                headers={"Content-Disposition": f'attachment; filename="{scan.name}_phase_export.csv"'},
+                stream.getvalue(),
+                content_type="text/csv",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{scan.name}_phase_export.csv"'
+                },
             )
 
-        return Response({
-            "scan_id": str(scan.id),
-            "scan_name": scan.name,
-            "phase": phase_name,
-            "findings": FindingListSerializer(findings, many=True).data,
-        })
+        return Response(
+            {
+                "scan_id": str(scan.id),
+                "scan_name": scan.name,
+                "phase": phase_name,
+                "findings": FindingListSerializer(findings, many=True).data,
+            }
+        )
 
 
 class HostViewSet(viewsets.ReadOnlyModelViewSet):
@@ -974,12 +1014,26 @@ def dashboard_stats(request):
         ExploitMatch.objects.values("confidence").annotate(n=Count("id")).order_by("confidence")
     )
     exploits_by_confidence_map = {r["confidence"]: r["n"] for r in exploits_by_confidence}
-    # Top exploited hosts — group by host_ip + service product/version
-    exploits_by_host = (
-        ExploitMatch.objects.values("host_ip", "service_product", "service_version")
-        .annotate(n=Count("id"))
-        .order_by("-n")[:10]
-    )
+    # Top exploited hosts — group by host_ip + service product/version.
+    # service_product/service_version live on the related Port (nullable),
+    # so the values() traversal yields "" for matches without a port.
+    exploits_by_host = [
+        {
+            "host_ip": r["host_ip"],
+            "service_product": r["port__service_product"] or "",
+            "service_version": r["port__service_version"] or "",
+            "n": r["n"],
+        }
+        for r in (
+            ExploitMatch.objects.values(
+                "host_ip",
+                "port__service_product",
+                "port__service_version",
+            )
+            .annotate(n=Count("id"))
+            .order_by("-n")[:10]
+        )
+    ]
 
     return Response(
         {
@@ -995,7 +1049,7 @@ def dashboard_stats(request):
                 "high": exploits_by_confidence_map.get("high", 0),
                 "medium": exploits_by_confidence_map.get("medium", 0),
                 "low": exploits_by_confidence_map.get("low", 0),
-                "by_host": list(exploits_by_host),
+                "by_host": exploits_by_host,
             },
             "severity_trend": severity_trend,
             "risk_by_source": risk_by_source,
@@ -1250,10 +1304,12 @@ class ScheduledScanViewSet(viewsets.ModelViewSet):
         deadline = _compute_deadline(schedule.stop_time) if schedule.stop_time else None
         if scan.scan_type == "discovery":
             from scanner.tasks.discovery import run_discovery_scan
+
             task = run_discovery_scan.delay(str(scan.id))
         else:
             task = run_scan.delay(str(scan.id))
         from django.utils import timezone
+
         scan.celery_task_id = task.id
         scan.status = "running"
         scan.deadline = deadline
@@ -1318,7 +1374,10 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
     permission_classes = [HasPerm("scan:read")]
     http_method_names = ["get", "post", "head", "options"]
     queryset = MSFExploitSession.objects.select_related(
-        "scan", "host", "exploit_match", "finding",
+        "scan",
+        "host",
+        "exploit_match",
+        "finding",
     ).all()
 
     def get_serializer_class(self):
@@ -1426,7 +1485,9 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
                 finding=finding,
                 module_fullname=finding.title or "searchsploit finding",
                 host_ip=finding.host_ip or "",
-                port_number=int(finding.port) if finding.port and str(finding.port).isdigit() else None,
+                port_number=int(finding.port)
+                if finding.port and str(finding.port).isdigit()
+                else None,
                 rhosts=finding.host_ip or "",
                 rport=str(finding.port) if finding.port else "",
                 cve=finding.cve or "",

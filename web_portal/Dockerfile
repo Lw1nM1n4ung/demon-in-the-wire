@@ -58,6 +58,23 @@ RUN for i in 1 2 3 4 5; do \
     done \
     && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
 
+# Metasploit module metadata — the JSON index the exploit matcher
+# (scanner/msf_matcher.py) reads to match scanned ports/findings against
+# known modules.  Without this file the matcher logs "exploit matching
+# disabled" and every scan stores zero ExploitMatch rows, which leaves the
+# /exploits page empty.  Only the metadata is needed for matching — the
+# full framework (msfconsole) is not required for detection.
+RUN mkdir -p /opt/metasploit-framework/embedded/framework/db \
+    && for i in 1 2 3 4 5; do \
+        curl -sSfL --retry 3 --retry-all-errors --retry-delay 3 \
+            "https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json" \
+            -o /opt/metasploit-framework/embedded/framework/db/modules_metadata_base.json && break || \
+        { echo "MSF metadata download attempt $i failed, retrying"; \
+          rm -f /opt/metasploit-framework/embedded/framework/db/modules_metadata_base.json; sleep 10; }; \
+    done \
+    && test -s /opt/metasploit-framework/embedded/framework/db/modules_metadata_base.json \
+    && python3 -c "import json,sys; d=json.load(open('/opt/metasploit-framework/embedded/framework/db/modules_metadata_base.json')); print('MSF modules:', len(d)); sys.exit(0 if len(d) > 1000 else 1)"
+
 # nikto — official portable install from the upstream git repo
 RUN for i in 1 2 3 4 5; do \
         git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto && break || \

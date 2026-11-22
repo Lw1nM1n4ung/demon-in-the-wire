@@ -98,6 +98,47 @@ async def test_no_targets_no_pause():
     assert not ow.is_paused
 
 
+async def test_missing_probe_binary_does_not_pause(monkeypatch):
+    """No ping/fping binary -> overwatch is skipped instead of pausing forever.
+
+    Without a probe binary every check fails, which is indistinguishable from
+    a dead network.  Parking the scan in an endless pause would be worse than
+    not overwatching at all.
+    """
+    monkeypatch.setattr("wireghost.pipeline.overwatch.shutil.which", lambda _: None)
+    ow = NetworkOverwatch(targets=["8.8.8.8"], fail_threshold=1, interval=0.01)
+    assert not ow.available
+    # Must return promptly rather than entering the pause loop.
+    await asyncio.wait_for(ow.check(lambda: False), timeout=1.0)
+    assert not ow.is_paused
+
+
+async def test_fping_counts_as_available(monkeypatch):
+    """fping alone is enough — ping may not be installed in the image."""
+    monkeypatch.setattr(
+        "wireghost.pipeline.overwatch.shutil.which",
+        lambda name: "/usr/bin/fping" if name == "fping" else None,
+    )
+    ow = NetworkOverwatch(targets=["8.8.8.8"], fail_threshold=1, interval=0.01)
+    assert ow.available
+
+
+def test_gateway_detection_falls_back_to_proc(monkeypatch):
+    """/proc/net/route is parsed when iproute2 is not installed."""
+    import io
+
+    import wireghost.pipeline.overwatch as ow_mod
+
+    monkeypatch.setattr(ow_mod.shutil, "which", lambda _: None)
+    route_file = io.StringIO(
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+        "eth0\t00000000\t0100A8C0\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
+    )
+    monkeypatch.setattr("builtins.open", lambda *a, **k: route_file)
+    # 0100A8C0 little-endian -> 192.168.0.1
+    assert ow_mod._detect_gateway_proc() == "192.168.0.1"
+
+
 async def test_single_target_failure_pauses():
     """With one target, a single failure pauses (all-targets rule)."""
     fake = _FakePing({"8.8.8.8": False})
