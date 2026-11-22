@@ -40,6 +40,7 @@ WG._ROUTES = [
   { page: 'scan',           path: '/scans/:id' },
   { page: 'exploits',       path: '/exploits' },
   { page: 'host',           path: '/hosts/:id' },
+  { page: 'finding',        path: '/findings/:id' },
   { page: 'topology',       path: '/topology' },
   { page: 'scan-queue',     path: '/scan-queue' },
   { page: 'scheduled',      path: '/scheduled' },
@@ -169,6 +170,15 @@ WG.render = function() {
     if (!toggle) return;
     var anyActive = parent.querySelector('.sidebar-children .sidebar-item.active');
     toggle.classList.toggle('active', !!anyActive);
+    /* Expand the parent so the active child (e.g. "Discovery") is actually
+     * visible — otherwise the sidebar only shows a highlighted group name
+     * and the user cannot tell which page they are on. */
+    if (anyActive && parent.classList.contains('collapsed')) {
+      var children = parent.querySelector('.sidebar-children');
+      if (children) children.style.maxHeight = children.scrollHeight + 'px';
+      parent.classList.remove('collapsed');
+      parent.classList.add('expanded');
+    }
   });
 
   var pages = {

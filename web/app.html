@@ -226,6 +226,7 @@
             <option value="port">Port Scan Only</option>
             <option value="web">Web Application Scan</option>
             <option value="service">Service Enumeration</option>
+            <option value="discovery">Host Discovery Only (Live Hosts)</option>
           </select>
         </div>
         <div class="form-group">
@@ -251,6 +252,11 @@
         <div class="form-group">
           <label class="form-label">Timeout (sec)</label>
           <input class="form-input" id="scanTimeout" type="number" value="3600">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Network Overwatch Targets</label>
+          <input class="form-input" id="scanOverwatchTargets" type="text" placeholder="8.8.8.8, 1.1.1.1">
+          <div style="font-size:0.72rem;color:var(--text-dim);margin-top:4px;">Comma-separated IPs to ping before/during discovery. If ALL go silent, the scan pauses.</div>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:12px;">
@@ -306,14 +312,14 @@
 
 <script src="/js/app/auth.js?v=28"></script>
 <script src="/js/app/utils.js?v=28"></script>
-<script src="/js/app/components.js?v=28"></script>
+<script src="/js/app/components.js?v=31"></script>
 <script src="/js/app/pages/dashboard.js?v=28"></script>
 <script src="/js/app/pages/scans.js?v=28"></script>
 <script src="/js/app/pages/scan-detail.js?v=28"></script>
 <script src="/js/app/pages/host-detail.js?v=28"></script>
 <script src="/js/app/pages/finding-detail.js?v=28"></script>
 <script src="/js/app/pages/exploits.js?v=28"></script>
-<script src="/js/app/pages/reports.js?v=28"></script>
+<script src="/js/app/pages/reports.js?v=31"></script>
 <script src="/js/app/pages/policies.js?v=28"></script>
 <script src="/js/app/pages/users.js?v=28"></script>
 <script src="/js/app/pages/scan-queue.js?v=28"></script>
@@ -333,10 +339,10 @@
 <script src="/js/app/pages/topology/core.js?v=29"></script>
 <script src="/js/app/pages/system.js?v=28"></script>
 <script src="/js/app/pages/ad-recon.js?v=29"></script>
-<script src="/js/app/pages/live-discovery.js?v=29"></script>
+<script src="/js/app/pages/live-discovery.js?v=34"></script>
 <script src="/js/app/pages/phase-view.js?v=30"></script>
 <script src="/js/app/components/lightbox.js?v=28"></script>
-<script src="/js/app/router.js?v=29"></script>
+<script src="/js/app/router.js?v=30"></script>
 
 </body>
 </html>

@@ -67,6 +67,7 @@ def run_discovery_scan(self, scan_id):
             parallelism=scan.parallelism,
             tool_timeout=scan.timeout,
             scan_unresponsive=scan.scan_unresponsive,
+            network_overwatch_targets=scan.network_overwatch_targets,
             output_dir=str(base_output),
         )
 
@@ -119,6 +120,7 @@ def run_discovery_scan(self, scan_id):
                                     "status": "up",
                                     "ports_count": 0,
                                     "discovered_by": list(tool_provenance.get(ip, [])),
+                                    "discovery_method": method_updates.get(ip, "") or "",
                                 },
                             )
                         if mac_updates:
@@ -126,6 +128,11 @@ def run_discovery_scan(self, scan_id):
                                 _DBHost.objects.filter(
                                     scan_id=scan_id, ip=ip
                                 ).update(mac_address=mac or "", vendor=vendor or "")
+                        if method_updates:
+                            for ip, method in method_updates.items():
+                                _DBHost.objects.filter(
+                                    scan_id=scan_id, ip=ip
+                                ).update(discovery_method=method or "")
                         if new_ips:
                             _Scan.objects.filter(id=scan_id).update(
                                 hosts_count=_F("hosts_count") + len(new_ips),
@@ -148,6 +155,7 @@ def run_discovery_scan(self, scan_id):
                                 "status": "up",
                                 "ports_count": 0,
                                 "discovered_by": list(tool_provenance.get(ip, [])),
+                                "discovery_method": method_map.get(ip, "") or "",
                             }
                             dns_name = dns_hostnames.get(ip, "")
                             if dns_name:
@@ -159,6 +167,15 @@ def run_discovery_scan(self, scan_id):
                             _DBHost.objects.get_or_create(
                                 scan_id=scan_id, ip=ip, defaults=defaults,
                             )
+                        # The rows usually already exist (created incrementally
+                        # by the "subnet_hosts" branch), where get_or_create
+                        # leaves the defaults untouched — so the final method
+                        # has to be written back explicitly.
+                        if method_map:
+                            for ip, method in method_map.items():
+                                _DBHost.objects.filter(
+                                    scan_id=scan_id, ip=ip
+                                ).update(discovery_method=method or "")
                         _Scan.objects.filter(id=scan_id).update(
                             hosts_count=len(live_ips),
                             hosts_total=len(live_ips),
@@ -240,6 +257,7 @@ def run_discovery_scan(self, scan_id):
                     tree,
                     on_progress=_wrap_progress,
                     on_subnet_complete=_wrap_subnet,
+                    is_aborted=_is_aborted,
                 )
             )
         except _TaskCancelled:

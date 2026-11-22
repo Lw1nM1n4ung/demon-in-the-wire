@@ -206,6 +206,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             nuclei_default_templates=data.get("nuclei_default_templates", True),
             status="pending",
             created_by=request.user,
+            network_overwatch_targets=data.get("network_overwatch_targets", []),
         )
 
         # Launch Celery task — discovery scans use a lightweight task

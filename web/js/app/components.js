@@ -188,13 +188,19 @@ WG.launchScan = function() {
     os_detect: document.querySelector('[data-opt="os_detect"]').classList.contains('on'),
     service_enum: document.querySelector('[data-opt="service_enum"]').classList.contains('on'),
     skip_nuclei: document.querySelector('[data-opt="skip_nuclei"]').classList.contains('on'),
+    network_overwatch_targets: (document.getElementById('scanOverwatchTargets').value || '')
+      .split(',')
+      .map(function(s) { return s.trim(); })
+      .filter(function(s) { return s.length > 0; }),
   };
 
   WG.api('/scans/', { method: 'POST', body: JSON.stringify(scanData) }).then(function(res) {
     if (res && res.id) {
       WG.toast('Scan launched: ' + target, 'success');
       WG.invalidateCache('scans');
-      WG.navigate('scan', { id: res.id });
+      /* Discovery scans only populate the live-discovery view. */
+      if (scanData.scan_type === 'discovery') WG.navigate('live-discovery');
+      else WG.navigate('scan', { id: res.id });
     } else {
       WG.toast((res && res.error) || 'Scan launch failed', 'error');
     }

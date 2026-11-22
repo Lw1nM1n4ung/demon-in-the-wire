@@ -1,29 +1,37 @@
 # ── Stage 1: pull ProjectDiscovery Go binaries (nuclei / httpx / naabu) ──
 FROM debian:bookworm-slim AS pd-tools
+# NOTE: apt-get update exits 0 even when every repo fetch fails, so this
+# layer cannot be retried in place. Keep the command text stable so the
+# builder cache can be reused when a mirror is briefly unreachable.
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip ca-certificates && rm -rf /var/lib/apt/lists/*
+# GitHub release downloads are unreliable from container networks: the TLS
+# connection is frequently reset (curl exit 35) and DNS may resolve only an
+# unreachable edge IP. fetch_release.sh handles both.
 WORKDIR /tools
-RUN NUCLEI_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/nuclei/releases/latest \
-        | grep -o '"browser_download_url": *"[^"]*linux_amd64.zip"' | head -1 | cut -d'"' -f4) \
-    && curl -sL "$NUCLEI_URL" -o /tmp/nuclei.zip && unzip -o /tmp/nuclei.zip nuclei -d /tools/ && chmod +x /tools/nuclei
-RUN HTTPX_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/httpx/releases/latest \
-        | grep -o '"browser_download_url": *"[^"]*linux_amd64.zip"' | head -1 | cut -d'"' -f4) \
-    && curl -sL "$HTTPX_URL" -o /tmp/httpx.zip && unzip -o /tmp/httpx.zip httpx -d /tools/ && chmod +x /tools/httpx
-RUN NAABU_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/naabu/releases/latest \
-        | grep -o '"browser_download_url": *"[^"]*linux_amd64.zip"' | head -1 | cut -d'"' -f4) \
-    && curl -sL "$NAABU_URL" -o /tmp/naabu.zip && unzip -o /tmp/naabu.zip naabu -d /tools/ && chmod +x /tools/naabu
+COPY web_portal/fetch_release.sh /usr/local/bin/fetch_release.sh
+RUN chmod +x /usr/local/bin/fetch_release.sh
+RUN fetch_release.sh projectdiscovery/nuclei linux_amd64.zip /tmp/nuclei.zip nuclei \
+    && chmod 0755 /tools/nuclei
+RUN fetch_release.sh projectdiscovery/httpx linux_amd64.zip /tmp/httpx.zip httpx \
+    && chmod 0755 /tools/httpx
+RUN fetch_release.sh projectdiscovery/naabu linux_amd64.zip /tmp/naabu.zip naabu \
+    && chmod 0755 /tools/naabu
 # gowitness (v3+ ships as a standalone binary)
-RUN GOWITNESS_URL=$(curl -sL https://api.github.com/repos/sensepost/gowitness/releases/latest \
-        | grep -o '"browser_download_url": *"[^"]*linux-amd64[^"]*"' | head -1 | cut -d'"' -f4) \
-    && curl -sL "$GOWITNESS_URL" -o /tools/gowitness && chmod +x /tools/gowitness
+RUN fetch_release.sh sensepost/gowitness linux-amd64 /tmp/gowitness.bin \
+    && install -m 0755 /tmp/gowitness.bin /tools/gowitness
 # katana — ProjectDiscovery web crawler (Go binary)
-RUN KATANA_URL=$(curl -sL https://api.github.com/repos/projectdiscovery/katana/releases/latest \
-        | grep -o '"browser_download_url": *"[^"]*linux_amd64.zip"' | head -1 | cut -d'"' -f4) \
-    && curl -sL "$KATANA_URL" -o /tmp/katana.zip && unzip -o /tmp/katana.zip katana -d /tools/ && chmod +x /tools/katana
+RUN fetch_release.sh projectdiscovery/katana linux_amd64.zip /tmp/katana.zip katana \
+    && chmod 0755 /tools/katana
 
 # ── Stage 1.5: build fingerprintx from source (Go toolchain required) ──
 # Repo is archived (read-only) and publishes no pre-built binaries.
 FROM golang:1.23-bookworm AS fpx-builder
-RUN go install github.com/praetorian-inc/fingerprintx/cmd/fingerprintx@latest
+# Module downloads are reset intermittently; retry the whole install.
+RUN for i in 1 2 3 4 5; do \
+        go install github.com/praetorian-inc/fingerprintx/cmd/fingerprintx@latest && break || \
+        { echo "go install attempt $i failed, retrying"; sleep 10; }; \
+    done \
+    && test -x /go/bin/fingerprintx
 
 # ── Stage 2: final image ──
 FROM python:3.12-slim-bookworm
@@ -44,13 +52,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # searchsploit (exploitdb) — shallow clone to keep image size reasonable.
-RUN git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb \
+RUN for i in 1 2 3 4 5; do \
+        git clone --depth 1 https://gitlab.com/exploit-database/exploitdb.git /opt/exploitdb && break || \
+        { echo "exploitdb clone attempt $i failed, retrying"; rm -rf /opt/exploitdb; sleep 10; }; \
+    done \
     && ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
 
 # nikto — official portable install from the upstream git repo
-RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
+RUN for i in 1 2 3 4 5; do \
+        git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto && break || \
+        { echo "nikto clone attempt $i failed, retrying"; rm -rf /opt/nikto; sleep 10; }; \
+    done \
     && ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto \
-    && chmod +x /usr/local/bin/nikto \
+    && chmod +x /opt/nikto/program/nikto.pl \
     && rm -rf /opt/nikto/.git
 
 # wpscan — WordPress vulnerability scanner (Ruby gem)
@@ -60,8 +74,10 @@ RUN gem install wpscan --no-document \
 # Python deps (before Go binaries — pip httpx overwrites /usr/local/bin/httpx)
 COPY web_portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec.git 2>/dev/null || \
-    echo "NetExec install skipped (optional — pipeline will skip nxc if unavailable)"
+RUN for i in 1 2 3 4 5; do \
+        pip install --no-cache-dir git+https://github.com/Pennyw0rth/NetExec.git && break || \
+        { echo "NetExec install attempt $i failed, retrying"; sleep 10; }; \
+    done || echo "NetExec install skipped (optional — pipeline will skip nxc if unavailable)"
 RUN pip install --no-cache-dir getsploit
 
 # ProjectDiscovery Go binaries + gowitness (AFTER pip to avoid overwrite)
@@ -75,10 +91,10 @@ COPY --from=pd-tools /tools/katana    /usr/local/bin/katana
 COPY --from=fpx-builder /go/bin/fingerprintx /usr/local/bin/fingerprintx
 
 # kerbrute — Kerberos brute-force (pre-built binary from GitHub)
-RUN KERBRUTE_URL=$(curl -sL https://api.github.com/repos/ropnop/kerbrute/releases/latest \
-        | grep -o '"browser_download_url": *"[^"]*linux_amd64"' | head -1 | cut -d'"' -f4) \
-    && curl -sL "$KERBRUTE_URL" -o /usr/local/bin/kerbrute \
-    && chmod +x /usr/local/bin/kerbrute
+COPY web_portal/fetch_release.sh /usr/local/bin/fetch_release.sh
+RUN chmod +x /usr/local/bin/fetch_release.sh
+RUN fetch_release.sh ropnop/kerbrute linux_amd64 /tmp/kerbrute.bin \
+    && install -m 0755 /tmp/kerbrute.bin /usr/local/bin/kerbrute
 
 # App code
 COPY web_portal/ .

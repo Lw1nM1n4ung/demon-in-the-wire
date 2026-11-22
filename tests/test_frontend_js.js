@@ -1,6 +1,6 @@
 /**
  * Node.js tests for Wire_Ghost frontend pure-logic functions.
- * Covers: utils.js, router.js, auth.js, api.js (cache), scheduled.js, new-scan.js
+ * Covers: utils.js, router.js, auth.js, api.js (cache), scheduled.js
  * Uses vm.runInContext to load browser-targeted JS in a sandboxed environment.
  * Run: node tests/test_frontend_js.js
  */
@@ -217,7 +217,8 @@ loadFile(ctx, path.join(JS_DIR, 'app', 'router.js'), 'router.js');
 
 /* Page files */
 loadFile(ctx, path.join(JS_DIR, 'app', 'pages', 'scheduled.js'), 'scheduled.js');
-loadFile(ctx, path.join(JS_DIR, 'app', 'pages', 'new-scan.js'), 'new-scan.js');
+/* new-scan.js was removed in 0e02332 — the page was replaced by a
+ * modal, so there is no module to load any more. */
 
 var WG = sandbox.WG;
 
@@ -462,10 +463,12 @@ test('engineer is blocked from users page', function() {
   assert.strictEqual(WG._canVisit('users'), false);
 });
 
-test('viewer can see dashboard, findings, finding, settings', function() {
+test('viewer can see dashboard, finding, settings', function() {
   sandbox.localStorage.setItem('wg_user_info', JSON.stringify({ role: 'viewer' }));
   assert.strictEqual(WG._canVisit('dashboard'), true);
-  assert.strictEqual(WG._canVisit('findings'), true);
+  /* The /findings list page was removed in 4c620cc; only the /findings/:id
+   * detail page remains. */
+  assert.strictEqual(WG._canVisit('findings'), false);
   assert.strictEqual(WG._canVisit('finding'), true);
   assert.strictEqual(WG._canVisit('settings'), true);
 });
@@ -778,63 +781,6 @@ test('monthly frequency advances by month', function() {
   var dt = new Date(result);
   /* Should be in the future */
   assert.ok(dt.getTime() > Date.now() - 1000);
-});
-
-
-// ════════════════════════════════════════
-// TEST SUITE: _nsCheckPartition (new-scan)
-// ════════════════════════════════════════
-console.log('\n\x1b[1m_nsCheckPartition\x1b[0m');
-
-test('/16 shows partition info with 256 subnets', function() {
-  /* Reset the element */
-  var el = sandbox._elements['nsPartitionInfo'];
-  if (el) { el._textContent = ''; el.style.color = ''; }
-  WG._nsCheckPartition('10.0.0.0/16');
-  el = sandbox._elements['nsPartitionInfo'];
-  assert.ok(el._textContent.indexOf('256') !== -1, 'Should mention 256 subnets, got: ' + el._textContent);
-});
-
-test('/20 shows partition info with 16 subnets', function() {
-  var el = sandbox._elements['nsPartitionInfo'];
-  el._textContent = ''; el.style.color = '';
-  WG._nsCheckPartition('192.168.0.0/20');
-  assert.ok(el._textContent.indexOf('16') !== -1, 'Should mention 16 subnets, got: ' + el._textContent);
-});
-
-test('/24 does not trigger partition message (prefix > 23)', function() {
-  var el = sandbox._elements['nsPartitionInfo'];
-  el._textContent = 'previous'; el.style.color = '';
-  WG._nsCheckPartition('10.0.0.0/24');
-  assert.strictEqual(el._textContent, '', 'Should clear text for /24');
-});
-
-test('/8 triggers partition message with 65536 subnets', function() {
-  var el = sandbox._elements['nsPartitionInfo'];
-  el._textContent = ''; el.style.color = '';
-  WG._nsCheckPartition('10.0.0.0/8');
-  assert.ok(el._textContent.indexOf('65536') !== -1, 'Should mention 65536 subnets, got: ' + el._textContent);
-});
-
-test('non-CIDR input clears message', function() {
-  var el = sandbox._elements['nsPartitionInfo'];
-  el._textContent = 'something'; el.style.color = '';
-  WG._nsCheckPartition('192.168.1.1');
-  assert.strictEqual(el._textContent, '');
-});
-
-test('empty input clears message', function() {
-  var el = sandbox._elements['nsPartitionInfo'];
-  el._textContent = 'something';
-  WG._nsCheckPartition('');
-  assert.strictEqual(el._textContent, '');
-});
-
-test('/23 shows partition info with 2 subnets', function() {
-  var el = sandbox._elements['nsPartitionInfo'];
-  el._textContent = ''; el.style.color = '';
-  WG._nsCheckPartition('10.0.0.0/23');
-  assert.ok(el._textContent.indexOf('2') !== -1, 'Should mention 2 subnets, got: ' + el._textContent);
 });
 
 

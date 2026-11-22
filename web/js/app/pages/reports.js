@@ -227,6 +227,11 @@ WG._downloadDemoReport = function(scanName, format, filename) {
 
 WG.renderReports = function() {
   var reports = [];
+  /* WG.getCached() is a synchronous in-memory lookup that never calls the
+   * API on its own, so on a direct load of this page it returned an empty
+   * list and the page fell back to demo data even when real reports
+   * existed. refreshAndRerender() fetches the scans and re-renders with
+   * them. */
   var scans = WG.getCached('scans', '/scans/');
   if (scans.length) {
     scans.forEach(function(s) {
@@ -240,6 +245,9 @@ WG.renderReports = function() {
   var esc = WG.escHtml;
 
   var fmtColors = { docx: '--accent', xlsx: '--success', html: '--info', dashboard: '--medium', csv: '--text-dim', json: '--low' };
+
+  /* Fetch the scans (and their reports) and re-render once they land. */
+  WG.refreshAndRerender('scans', '/scans/', WG.renderReports, 'reports');
 
   return '' +
     '<div class="page-header"><div class="page-header-left"><h1>Reports</h1><p>' + reports.length + ' generated reports' +

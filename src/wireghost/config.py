@@ -76,6 +76,44 @@ class ScanConfig:
     # benefit from corrected data.
     # Set to True when fingerprintx is not installed or not desired.
     skip_fingerprintx: bool = False
+    # Extra nmap flags for the host-discovery probe (nmap -sn).
+    #
+    # nmap's defaults wait roughly 8 s per unresponsive host (ICMP timeout
+    # plus a retransmit) and only keep a handful of hosts in flight, so a
+    # /24 where nothing answers costs ~10 minutes and a /16 longer still.
+    # These flags cap the per-host wait and raise the number of hosts probed
+    # concurrently: the same /24 drops to seconds. fping runs alongside
+    # nmap as an independent liveness signal, so a host nmap misses is
+    # still picked up. Override in wireghost.yml to dial them back on a
+    # high-latency or lossy link.
+    discovery_nmap_args: list[str] = field(
+        default_factory=lambda: [
+            "--max-retries",
+            "0",
+            "--host-timeout",
+            "5s",
+            "--min-parallelism",
+            "32",
+            "--max-parallelism",
+            "64",
+            "--initial-rtt-timeout",
+            "100ms",
+            "--max-rtt-timeout",
+            "1500ms",
+        ]
+    )
+    # Network overload detection for host discovery.
+    #
+    # Always on by default.  Pings a set of targets (8.8.8.8 + the auto-detected
+    # default gateway) before launching subnet scans; if ALL targets stop
+    # answering, discovery pauses and resumes automatically when they come back.
+    # Scan status stays "running" during a pause — no progress is lost.
+    network_overwatch_enabled: bool = True
+    network_overwatch_targets: list[str] = field(default_factory=lambda: ["8.8.8.8"])
+    network_overwatch_interval: float = 15.0
+    network_overwatch_fail_threshold: int = 3
+    network_overwatch_recover_threshold: int = 2
+    network_overwatch_timeout: float = 5.0
 
     @classmethod
     def load(
@@ -182,6 +220,13 @@ def _apply_yaml(cfg: ScanConfig, data: dict) -> None:
         "enhanced_discovery": "enhanced_discovery",
         "skip_passive_dns": "skip_passive_dns",
         "skip_fingerprintx": "skip_fingerprintx",
+        "discovery_nmap_args": "discovery_nmap_args",
+        "network_overwatch_enabled": "network_overwatch_enabled",
+        "network_overwatch_targets": "network_overwatch_targets",
+        "network_overwatch_interval": "network_overwatch_interval",
+        "network_overwatch_fail_threshold": "network_overwatch_fail_threshold",
+        "network_overwatch_recover_threshold": "network_overwatch_recover_threshold",
+        "network_overwatch_timeout": "network_overwatch_timeout",
     }
     for yaml_key, attr in _YAML_MAP.items():
         if yaml_key in data:
@@ -232,6 +277,15 @@ def _apply_env(cfg: ScanConfig) -> None:
         "WIREGHOST_ENHANCED_DISCOVERY": ("enhanced_discovery", bool),
         "WIREGHOST_SKIP_PASSIVE_DNS": ("skip_passive_dns", bool),
         "WIREGHOST_SKIP_FINGERPRINTX": ("skip_fingerprintx", bool),
+        "WIREGHOST_NETWORK_OVERWATCH_ENABLED": ("network_overwatch_enabled", bool),
+        "WIREGHOST_NETWORK_OVERWATCH_TARGETS": ("network_overwatch_targets", str),
+        "WIREGHOST_NETWORK_OVERWATCH_INTERVAL": ("network_overwatch_interval", float),
+        "WIREGHOST_NETWORK_OVERWATCH_FAIL_THRESHOLD": ("network_overwatch_fail_threshold", int),
+        "WIREGHOST_NETWORK_OVERWATCH_RECOVER_THRESHOLD": (
+            "network_overwatch_recover_threshold",
+            int,
+        ),
+        "WIREGHOST_NETWORK_OVERWATCH_TIMEOUT": ("network_overwatch_timeout", float),
     }
     for env_var, (attr, conv) in _ENV_MAP.items():
         raw = os.environ.get(env_var)

@@ -277,6 +277,7 @@ class ScanListSerializer(serializers.ModelSerializer):
             "hosts_total",
             "created_at",
             "reports",
+            "network_overwatch_targets",
         ]
 
 
@@ -312,6 +313,13 @@ class ScanCreateSerializer(serializers.Serializer):
     skip_nfs_enum = serializers.BooleanField(required=False, default=False)
     skip_ldap_enum = serializers.BooleanField(required=False, default=False)
     skip_web_crawl = serializers.BooleanField(required=False, default=False)
+    # Network overwatch targets — IPs to ping before/during host discovery.
+    # If ALL go silent, the scan pauses until they recover.
+    network_overwatch_targets = serializers.ListField(
+        child=serializers.CharField(max_length=255),
+        required=False,
+        default=list,
+    )
 
     def validate_target(self, value):
         """Block SSRF targets: localhost, link-local, cloud metadata, non-routable.

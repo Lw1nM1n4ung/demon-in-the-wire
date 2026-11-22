@@ -198,6 +198,11 @@ class Scan(models.Model):
     skip_nfs_enum = models.BooleanField(default=False)
     skip_ldap_enum = models.BooleanField(default=False)
     skip_web_crawl = models.BooleanField(default=False)
+    # Network overwatch targets for host discovery — ping these IPs before
+    # and during discovery; if ALL go silent, the scan pauses until they
+    # recover. Stored as a JSON list (e.g. ["8.8.8.8", "10.20.0.1"]).
+    network_overwatch_targets = models.JSONField(default=list, blank=True,
+        help_text="IPs to ping before/during discovery; scan pauses if all go silent")
 
     # Results
     hosts_count = models.IntegerField(default=0)

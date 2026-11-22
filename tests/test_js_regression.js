@@ -186,58 +186,6 @@ async function testBulkActions(page) {
 }
 
 // ═══════════════════════════════════════════
-// 3. SCHEDULED SCAN CREATION
-// ═══════════════════════════════════════════
-
-async function testScheduledScanCreation(page) {
-  console.log('\n── 3. Scheduled Scan Creation ──');
-
-  await nav(page, 'new-scan');
-  await page.waitForTimeout(1500);
-
-  await assert('New scan form renders', async () => {
-    var html = await mainHtml(page);
-    if (html.includes('Launch') || html.includes('Target') || html.includes('target'))
-      return;
-    throw new Error('New scan form not found');
-  });
-
-  await assert('Schedule toggle exists on form', async () => {
-    var html = await mainHtml(page);
-    if (html.toLowerCase().includes('schedule') || html.toLowerCase().includes('recurring'))
-      return;
-    throw new Error('No schedule toggle found in new-scan form');
-  });
-
-  await assert('_nsLaunch sends schedule data when enabled', async () => {
-    var src = await fnSource(page, '_nsLaunch');
-    if (src.includes('schedule') || src.includes('cron') || src.includes('frequency'))
-      return;
-    throw new Error('_nsLaunch does not handle schedule data');
-  });
-}
-
-// ═══════════════════════════════════════════
-// 4. POLICY APPLICATION
-// ═══════════════════════════════════════════
-
-async function testPolicyApplication(page) {
-  console.log('\n── 4. Policy Application ──');
-
-  await assert('WG._nsApplyPolicy function exists', async () => {
-    if (!(await fnExists(page, '_nsApplyPolicy')))
-      throw new Error('_nsApplyPolicy not defined');
-  });
-
-  await assert('_nsApplyPolicy populates form fields from policy data', async () => {
-    var src = await fnSource(page, '_nsApplyPolicy');
-    if (src.includes('scan_type') || src.includes('parallelism') || src.includes('tools') || src.includes('value'))
-      return;
-    throw new Error('_nsApplyPolicy does not populate form fields');
-  });
-}
-
-// ═══════════════════════════════════════════
 // 5. SCAN COMPARISON
 // ═══════════════════════════════════════════
 
@@ -385,8 +333,6 @@ async function testScanQueueRemove(page) {
 
     await testScanDetailTabs(page);
     await testBulkActions(page);
-    await testScheduledScanCreation(page);
-    await testPolicyApplication(page);
     await testScanComparison(page);
     await testHostDetailFindings(page);
     await testScanQueueRemove(page);

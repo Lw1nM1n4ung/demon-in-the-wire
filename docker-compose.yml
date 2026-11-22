@@ -190,6 +190,14 @@ services:
       timeout: 30s
       retries: 3
       start_period: 30s
+    # Discovery fans out with a dedicated semaphore of max(parallelism, 256),
+    # spawning that many nmap/fping subprocesses at once. The default 1024 fd
+    # limit is exhausted long before that, which makes every affected subnet
+    # fail with "Too many open files" and silently drops it from the results.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     cap_drop: [ALL]
     cap_add: [NET_RAW, NET_ADMIN, DAC_OVERRIDE, CHOWN, SETGID, SETUID]
     security_opt: [no-new-privileges:true]

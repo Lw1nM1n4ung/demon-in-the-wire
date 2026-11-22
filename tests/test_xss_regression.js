@@ -41,7 +41,7 @@ async function waitForAuthenticatedApp(page, timeout) {
           meStatus: meStatus,
           navigate: typeof wg.navigate,
           escHtml: typeof wg.escHtml,
-          renderFindings: typeof wg.renderFindings,
+          renderFindings: typeof wg._scanFindingsTab,
           scanHostsTab: typeof wg._scanHostsTab,
           hostPortsTab: typeof wg._hostPortsTab,
           renderFindingDetail: typeof wg.renderFindingDetail,
@@ -136,7 +136,7 @@ async function testRenderersUseEscHtml(page) {
         host_ip: '10.0.0.1', port: '80',
       };
       WG._cache.findings = [hostile];
-      return WG.renderFindings();
+      return WG._scanFindingsTab([hostile]);
     });
     if (html.includes('<img src=x'))
       throw new Error('Finding title not escaped — raw <img> tag in output');

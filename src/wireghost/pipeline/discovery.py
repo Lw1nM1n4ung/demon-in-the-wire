@@ -33,13 +33,45 @@ from typing import TYPE_CHECKING, Any, Callable
 from wireghost.utils.network import is_valid_ipv4
 from wireghost.utils.process import run_tool
 
+from wireghost.pipeline.overwatch import NetworkOverwatch, _detect_gateway
+
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
     from wireghost.utils.fs import OutputTree
 
 log = logging.getLogger("wireghost")
 
-_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# nmap -sn prints one block per live host:
+#   Nmap scan report for <host> [(<ip>)]
+#   Host is up (0.000056s latency).
+# The rest of the output mentions IPs too — e.g. "Warning: 10.20.0.67
+# giving up on port because retransmission cap hit (0)." — and those are NOT
+# live hosts. So parse the report blocks rather than every IP-looking
+# string in the output.
+_NMAP_REPORT_RE = re.compile(r"^Nmap scan report for (.+?)(?:\s+\(([\d.]+)\))?$")
+
+
+def _parse_nmap_hosts(stdout: str) -> list[str]:
+    """Return the IPs nmap reported as *up*.
+
+    Only a "Nmap scan report for ..." block immediately followed by
+    "Host is up" counts as a live host.
+    """
+    hosts: list[str] = []
+    pending = ""
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        m = _NMAP_REPORT_RE.match(line)
+        if m:
+            candidate = m.group(2) or m.group(1)
+            pending = candidate if is_valid_ipv4(candidate) else ""
+            continue
+        if pending:
+            if line.startswith("Host is up"):
+                hosts.append(pending)
+            pending = ""
+    return hosts
+
 
 # fping stderr: "ICMP Host Unreachable from <gateway> for ICMP Echo sent to <target>"
 # These are hosts that exist (the gateway knows about them) but are firewalled
@@ -231,6 +263,7 @@ async def _scan_subnet(
     has_netdiscover: bool,
     enhanced: bool = True,
     tool_provenance: dict[str, set[str]] | None = None,
+    nmap_timing: list[str] | None = None,
 ) -> tuple[set[str], dict[str, tuple[str, str]], dict[str, str], dict[str, set[str]]]:
     """Scan a single subnet — nmap, fping, and ARP tools run in parallel.
 
@@ -250,16 +283,20 @@ async def _scan_subnet(
             log.info("Scanning subnet %d/%d: %s", index, total, subnet)
 
         async def _run_nmap() -> None:
+            # The timing flags (config.discovery_nmap_args) keep a range where
+            # nothing answers from taking minutes — see ScanConfig for why.
+            timing = list(nmap_timing or [])
             if enhanced:
                 nmap_args = [
                     "nmap",
                     "-sn",
                     "-PS" + _TCP_DISCOVERY_PORTS,
                     "-PU" + _UDP_DISCOVERY_PORTS,
+                    *timing,
                     subnet,
                 ]
             else:
-                nmap_args = ["nmap", "-sn", subnet]
+                nmap_args = ["nmap", "-sn", *timing, subnet]
 
             result = await run_tool(
                 nmap_args,
@@ -267,11 +304,10 @@ async def _scan_subnet(
                 label=f"nmap -sn {subnet}",
             )
             if result.returncode == 0:
-                for ip in _IPV4_RE.findall(result.stdout):
-                    if is_valid_ipv4(ip):
-                        live_ips.add(ip)
-                        _set_method(method_map, ip, "nmap")
-                        tool_provenance.setdefault(ip, set()).add("nmap")
+                for ip in _parse_nmap_hosts(result.stdout):
+                    live_ips.add(ip)
+                    _set_method(method_map, ip, "nmap")
+                    tool_provenance.setdefault(ip, set()).add("nmap")
 
         async def _run_fping() -> None:
             result = await run_tool(
@@ -280,11 +316,13 @@ async def _scan_subnet(
                 label=f"fping -a -g {subnet}",
             )
             if result.returncode in (0, 1):
-                for ip in _IPV4_RE.findall(result.stdout):
-                    if is_valid_ipv4(ip):
-                        live_ips.add(ip)
-                        _set_method(method_map, ip, "fping")
-                        tool_provenance.setdefault(ip, set()).add("fping")
+                # fping prints one bare IP per live host on stdout.
+                for line in result.stdout.splitlines():
+                    candidate = line.strip()
+                    if is_valid_ipv4(candidate):
+                        live_ips.add(candidate)
+                        _set_method(method_map, candidate, "fping")
+                        tool_provenance.setdefault(candidate, set()).add("fping")
             # ICMP Host Unreachable → host exists but blocks ICMP (firewall/WAF).
             # These are NOT the same as silent/unresponsive — the gateway knows
             # about them.  Always include them in the scan.
@@ -323,11 +361,7 @@ async def _scan_subnet(
         new_ips = live_ips - before_ips
         new_mac = {ip: mac_vendor[ip] for ip in mac_vendor if ip not in before_mac_keys}
         new_methods = {ip: method_map[ip] for ip in new_ips if ip in method_map}
-        new_provenance = {
-            ip: tool_provenance[ip]
-            for ip in tool_provenance
-            if ip not in before_ips
-        }
+        new_provenance = {ip: tool_provenance[ip] for ip in tool_provenance if ip not in before_ips}
 
     return new_ips, new_mac, new_methods, new_provenance
 
@@ -369,6 +403,7 @@ async def discover_hosts(
     tree: OutputTree,
     on_progress: "Callable[[str, int, int], None] | None" = None,
     on_subnet_complete: "Callable[[list[str], dict[str, tuple[str, str]], dict[str, str]], None] | None" = None,
+    is_aborted: "Callable[[], bool] | None" = None,
 ) -> tuple[list[str], dict[str, tuple[str, str]], dict[str, str], dict[str, str]]:
     """Run nmap -sn, fping, ARP tools, and passive DNS against *config.target*.
 
@@ -384,6 +419,9 @@ async def discover_hosts(
     persist hosts incrementally rather than waiting for every subnet to
     finish.
 
+    If *is_aborted* is provided it is called to check for task cancellation
+    while the network overwatch is paused.
+
     Returns
     -------
     tuple[list[str], dict[str, tuple[str, str]], dict[str, str], dict[str, str]]
@@ -392,6 +430,32 @@ async def discover_hosts(
     """
     target = config.target
     timeout = int(config.tool_timeout)
+
+    # ── Network overload detection ─────────────────────────────────────
+    # Pings 8.8.8.8 + the auto-detected default gateway.  If ALL targets
+    # go silent, discovery pauses until they come back — no hosts, ports,
+    # or findings are missed because every subnet scan would otherwise
+    # time out and be recorded as "down".
+    overwatch: NetworkOverwatch | None = None
+    if config.network_overwatch_enabled:
+        targets = list(config.network_overwatch_targets or [])
+        gateway = await _detect_gateway()
+        if gateway and gateway not in targets:
+            targets.append(gateway)
+        overwatch = NetworkOverwatch(
+            targets=targets,
+            interval=config.network_overwatch_interval,
+            fail_threshold=config.network_overwatch_fail_threshold,
+            recover_threshold=config.network_overwatch_recover_threshold,
+            timeout=config.network_overwatch_timeout,
+        )
+        if overwatch.targets:
+            log.info(
+                "Network overwatch: monitoring %s — pause if all targets fail %dx",
+                ", ".join(overwatch.targets),
+                config.network_overwatch_fail_threshold,
+            )
+            await overwatch.check(is_aborted or (lambda: False))
 
     # Partition large targets into /24 subnets
     subnets = _partition_target(target)
@@ -464,13 +528,17 @@ async def discover_hosts(
             has_arpscan,
             has_netdiscover,
             enhanced=enhanced,
+            nmap_timing=list(config.discovery_nmap_args or []),
         )
         subnets_done += 1
         if on_subnet_complete and (new_ips or new_mac):
             try:
-                on_subnet_complete(list(new_ips), new_mac, new_methods, {
-                    ip: sorted(list(tools)) for ip, tools in new_provenance.items()
-                })
+                on_subnet_complete(
+                    list(new_ips),
+                    new_mac,
+                    new_methods,
+                    {ip: sorted(list(tools)) for ip, tools in new_provenance.items()},
+                )
             except TypeError:
                 on_subnet_complete(list(new_ips), new_mac, new_methods)
         if on_progress:

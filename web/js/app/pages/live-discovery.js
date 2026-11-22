@@ -44,16 +44,23 @@
   };
 
   function _toolBadges(tools) {
-    if (!tools || !tools.length) return '<span class="tool-badge nmap">NMAP</span>';
+    /* No provenance means no tool positively confirmed the host — show an
+     * empty marker instead of claiming nmap found it. */
+    if (!tools || !tools.length) {
+      return '<span style="color:var(--text-dim);font-size:0.75rem;">&mdash;</span>';
+    }
     return tools.map(function(t) {
       var cls = t.toLowerCase().replace(/[^a-z0-9-]/g, '');
       return '<span class="tool-badge ' + cls + '">' + WG.escHtml(t.toUpperCase()) + '</span>';
     }).join('');
   }
 
+  /* Provenance for a host. Hosts that no tool positively confirmed (e.g.
+   * fping_unreachable candidates) carry an empty list — do NOT fall back to
+   * 'nmap' here, or every unconfirmed address gets reported as an nmap hit
+   * and the per-tool tabs over-count. */
   function _toolList(h) {
-    var tools = h.discovered_by || [];
-    return tools.length ? tools : ['nmap'];
+    return h.discovered_by || [];
   }
 
   function _buildMethodBadge(method) {
@@ -126,17 +133,30 @@
 
   /* MAIN RENDER */
   WG.renderLiveDiscovery = function() {
-    var html = '<div class="page-header">' +
+    var html = '<div class="page-header"><div class="page-header-left">' +
       '<h1 class="page-title">Live Host Discovery</h1>' +
       '<p class="page-subtitle">Real-time visibility into which tools found each live host across your target scope.</p>' +
-      '</div><div id="discoveryContainer">' +
+      '</div><div class="page-header-actions">' +
+      '<button class="btn btn-primary" onclick="WG.openModal(\'discoveryModal\')">' +
+      '<span>&#9654;</span> New Discovery Scan</button>' +
+      '</div></div><div id="discoveryContainer">' +
       '<div class="empty-state"><div class="spinner"></div><p>Loading scans...</p></div></div>';
 
-    var scansPromise = WG.getCached ? WG.getCached('scans', '/scans/') : WG.api('/scans/');
-    Promise.resolve(scansPromise).then(function(data) {
+    /* WG.getCached() is a synchronous in-memory lookup — it never calls the
+     * API itself, so it returns [] on a direct load of this page. That left
+     * the page stuck on "No discovery scans yet" and, because the empty
+     * state suppresses polling, it never recovered. Fetch the list here
+     * instead and keep the shared cache in sync. */
+    WG.api('/scans/').then(function(data) {
       if (!data) return;
       var scans = data.results || data;
       if (!Array.isArray(scans)) return;
+      WG._cache['scans'] = scans;
+      WG._cacheTime['scans'] = Date.now();
+
+      var container = document.getElementById('discoveryContainer');
+      /* The user may have navigated away while the request was in flight. */
+      if (!container) return;
 
       var activeDiscovery = scans.filter(function(s) {
         return s.status === 'running' && s.scan_type === 'discovery';
@@ -144,10 +164,12 @@
       var allDiscovery = scans.filter(function(s) { return s.scan_type === 'discovery'; });
 
       if (!allDiscovery.length) {
-        document.getElementById('discoveryContainer').innerHTML =
+        container.innerHTML =
           '<div class="empty-state"><div style="font-size:2rem;margin-bottom:8px;opacity:0.3">&#8998;</div>' +
           '<p>No discovery scans yet</p>' +
-          '<p style="font-size:0.78rem;color:var(--text-dim)">Launch a new scan from the Scan Queue.</p></div>';
+          '<p style="font-size:0.78rem;color:var(--text-dim)">Launch a discovery scan to find live hosts on a target network.</p>' +
+          '<button class="btn btn-primary" style="margin-top:16px;" onclick="WG.openModal(\'discoveryModal\')">Launch Discovery Scan</button>' +
+          '</div>';
         WG._stopDiscoveryPolling();
         return;
       }
@@ -215,10 +237,29 @@
         cardsHtml += '</div>';
       });
 
-      document.getElementById('discoveryContainer').innerHTML = cardsHtml;
+      container.innerHTML = cardsHtml;
+
+      /* Host data is only polled for scans that are currently running, so a
+       * completed (or failed) discovery scan would keep an empty host table.
+       * Fetch it once for every scan we have no data for yet. */
+      allDiscovery.forEach(function(scan) {
+        if (WG._discoveryData && WG._discoveryData[scan.id]) return;
+        WG.api('/scans/' + scan.id + '/discovery/').then(function(dd) {
+          if (!dd) return;
+          if (!WG._discoveryData) WG._discoveryData = {};
+          WG._discoveryData[scan.id] = dd;
+          _updateScanCard(scan.id, dd);
+          _updateHostTable(scan.id, dd.hosts || []);
+          _updateToolTabs(scan.id, dd.hosts || []);
+        });
+      });
+
       if (activeDiscovery.length > 0) { WG._startDiscoveryPolling(); }
       else { WG._stopDiscoveryPolling(); }
     });
+
+    /* Keep the card list in sync with scans started/finished elsewhere. */
+    WG.refreshAndRerender('scans', '/scans/', WG.renderLiveDiscovery, 'live-discovery');
 
     if (WG._startElapsedTicker) WG._startElapsedTicker();
     return html;
