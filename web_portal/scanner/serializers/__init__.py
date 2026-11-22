@@ -480,6 +480,15 @@ class ScheduledScanSerializer(serializers.ModelSerializer):
 
 
 class ExploitMatchSerializer(serializers.ModelSerializer):
+    # Service product/version from the related Port — used to group exploits
+    # by "host:version" on the exploits page.
+    service_product = serializers.CharField(
+        source="port.service_product", read_only=True, default=""
+    )
+    service_version = serializers.CharField(
+        source="port.service_version", read_only=True, default=""
+    )
+
     class Meta:
         model = ExploitMatch
         fields = [
@@ -501,6 +510,8 @@ class ExploitMatchSerializer(serializers.ModelSerializer):
             "match_reason",
             "host_ip",
             "port_number",
+            "service_product",
+            "service_version",
             "created_at",
         ]
 

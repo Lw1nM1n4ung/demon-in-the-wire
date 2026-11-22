@@ -22,6 +22,7 @@ WG._WIDGET_LABELS = {
   top_technologies:  'Top Technologies',
   web_surface:       'Web Surface Screenshots',
   asset_inventory:   'Asset Inventory',
+  exploits:          'Detected Exploits',
 };
 
 /* Default widget config — all visible, standard order. */
@@ -35,6 +36,7 @@ WG._DEFAULT_DASHBOARD_CONFIG = {
     { id: 'top_technologies', visible: true },
     { id: 'web_surface', visible: true },
     { id: 'asset_inventory', visible: true },
+    { id: 'exploits', visible: true },
   ]
 };
 
@@ -253,6 +255,39 @@ WG._buildAsm = function() {
     html += '<div class="panel anim-reveal" style="animation-delay:0.50s;margin-bottom:18px;" data-widget="top_technologies">' +
       '<div class="panel-header"><div class="panel-title">Top Technologies</div></div>' +
       '<div class="panel-body">' + WG._topTechHtml(data.top_technologies || [], loaded) + '</div>' +
+    '</div>';
+  }
+
+  /* ══ Detected Exploits widget ══ */
+  var exp = data.exploits || {};
+  if (w('exploits')) {
+    html += '<div class="panel anim-reveal" style="animation-delay:0.53s;margin-bottom:18px;" data-widget="exploits">' +
+      '<div class="panel-header">' +
+        '<div class="panel-title">Detected Exploits <span class="count">' + WG._kNumber(exp.total || 0) + '</span></div>' +
+        '<span style="font-size:0.68rem;color:var(--text-dim);">Metasploit module matches across all scans</span>' +
+      '</div>' +
+      '<div class="panel-body" style="padding:10px 16px;">' +
+        '<div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap;">' +
+          '<div class="asm-exp-stat"><div class="asm-exp-label">Total</div><div class="asm-exp-value">' + WG._kNumber(exp.total || 0) + '</div></div>' +
+          '<div class="asm-exp-stat"><div class="asm-exp-label">High Confidence</div><div class="asm-exp-value" style="color:var(--critical);">' + WG._kNumber(exp.high || 0) + '</div></div>' +
+          '<div class="asm-exp-stat"><div class="asm-exp-label">Medium</div><div class="asm-exp-value" style="color:var(--high);">' + WG._kNumber(exp.medium || 0) + '</div></div>' +
+          '<div class="asm-exp-stat"><div class="asm-exp-label">Low</div><div class="asm-exp-value" style="color:var(--medium);">' + WG._kNumber(exp.low || 0) + '</div></div>' +
+        '</div>' +
+        (exp.by_host && exp.by_host.length
+          ? '<table class="data-table" style="margin-top:8px;"><thead><tr>' +
+            '<th>Host</th><th>Service / Version</th><th style="text-align:right;">Exploits</th>' +
+            '</tr></thead><tbody>' +
+            exp.by_host.map(function(h) {
+              var svc = (h.service_product || '') + (h.service_version ? ' ' + h.service_version : '');
+              return '<tr>' +
+                '<td class="mono">' + WG.escHtml(h.host_ip || '—') + '</td>' +
+                '<td style="font-size:0.8rem;color:var(--text-dim);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + WG.escHtml(svc || '—') + '</td>' +
+                '<td class="mono" style="text-align:right;">' + h.n + '</td>' +
+              '</tr>';
+            }).join('') +
+            '</tbody></table>'
+          : '<div style="font-size:0.8rem;color:var(--text-dim);margin-top:8px;">No exploit matches yet.</div>') +
+      '</div>' +
     '</div>';
   }
 

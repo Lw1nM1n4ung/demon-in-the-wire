@@ -968,6 +968,19 @@ def dashboard_stats(request):
         for r in Technology.objects.values("name").annotate(n=Count("id")).order_by("-n")[:10]
     ]
 
+    # ── Exploit statistics ──────────────────────────────────────────────
+    total_exploits = ExploitMatch.objects.count()
+    exploits_by_confidence = (
+        ExploitMatch.objects.values("confidence").annotate(n=Count("id")).order_by("confidence")
+    )
+    exploits_by_confidence_map = {r["confidence"]: r["n"] for r in exploits_by_confidence}
+    # Top exploited hosts — group by host_ip + service product/version
+    exploits_by_host = (
+        ExploitMatch.objects.values("host_ip", "service_product", "service_version")
+        .annotate(n=Count("id"))
+        .order_by("-n")[:10]
+    )
+
     return Response(
         {
             "kpis": {
@@ -976,6 +989,13 @@ def dashboard_stats(request):
                 "new_assets_7d": new_assets_7d,
                 "assets_with_cves": assets_with_cves,
                 "attack_surface_score": attack_surface_score,
+            },
+            "exploits": {
+                "total": total_exploits,
+                "high": exploits_by_confidence_map.get("high", 0),
+                "medium": exploits_by_confidence_map.get("medium", 0),
+                "low": exploits_by_confidence_map.get("low", 0),
+                "by_host": list(exploits_by_host),
             },
             "severity_trend": severity_trend,
             "risk_by_source": risk_by_source,
