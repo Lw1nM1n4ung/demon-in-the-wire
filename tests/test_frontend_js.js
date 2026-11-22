@@ -217,6 +217,7 @@ loadFile(ctx, path.join(JS_DIR, 'app', 'router.js'), 'router.js');
 
 /* Page files */
 loadFile(ctx, path.join(JS_DIR, 'app', 'pages', 'scheduled.js'), 'scheduled.js');
+loadFile(ctx, path.join(JS_DIR, 'app', 'pages', 'exploits.js'), 'exploits.js');
 /* new-scan.js was removed in 0e02332 — the page was replaced by a
  * modal, so there is no module to load any more. */
 
@@ -671,6 +672,174 @@ test('exploits route resolves to the exploits page, not the dashboard', function
     'Expected "exploits: WG.renderExploits" in the router pages map'
   );
 });
+
+
+// ════════════════════════════════════════
+// TEST SUITE: renderExploits (exploits page)
+// ════════════════════════════════════════
+console.log('\n\x1b[1mrenderExploits\x1b[0m');
+
+/* Two bugs shipped on this page because nothing ever executed it:
+ *   1. the function built its HTML but never returned it, so the router
+ *      painted the literal string "undefined" into #mainContent;
+ *   2. the host-grouping renderer called esc() in a scope where esc was
+ *      not declared, throwing "esc is not defined".
+ * Both are invisible to static checks — the page has to actually run. */
+
+var SAMPLE_EXPLOITS = [
+  {
+    id: 'm-1',
+    module_fullname: 'exploit/windows/smb/ms17_010_eternalblue',
+    module_name: 'MS17-010 EternalBlue SMB Remote Windows Code Execution',
+    module_type: 'exploit',
+    module_rank: 600,
+    module_rank_name: 'normal',
+    platform: 'Windows',
+    confidence: 'high',
+    match_reason: 'CVE match: CVE-2017-0143',
+    references: ['CVE-2017-0143'],
+    disclosure_date: '2017-03-16',
+    description: 'A remote code execution vulnerability.',
+    host_ip: '10.10.200.51',
+    port_number: 445,
+    service_product: 'Windows Server 2019',
+    service_version: '10.0.17763',
+    finding: null,
+  },
+  {
+    id: 'm-2',
+    module_fullname: 'auxiliary/scanner/rdp/cve_2019_0708_bluekeep',
+    module_name: 'RDP Scanner Module for CVE-2019-0708 (BlueKeep)',
+    module_type: 'auxiliary',
+    module_rank: 300,
+    module_rank_name: 'normal',
+    platform: 'Windows',
+    confidence: 'medium',
+    match_reason: 'Product "microsoft terminal services" + port 3389',
+    references: ['CVE-2019-0708'],
+    disclosure_date: '2019-05-14',
+    description: 'Scanner for the BlueKeep vulnerability.',
+    host_ip: '10.10.200.51',
+    port_number: 3389,
+    service_product: 'Microsoft Terminal Services',
+    service_version: '',
+    finding: null,
+  },
+];
+
+function seedExploitsCache(list) {
+  WG._cache['exploits'] = list;
+  WG._cacheTime['exploits'] = Date.now();
+}
+
+test('renderExploits returns a rendered string, not undefined', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS);
+  var html = WG.renderExploits();
+  assert.strictEqual(typeof html, 'string', 'renderExploits must return a string');
+  assert.ok(html.length > 0, 'renderExploits returned an empty string');
+  assert.notStrictEqual(html, 'undefined', 'renderExploits returned the string "undefined"');
+});
+
+test('renderExploits does not throw when the host group has data', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS);
+  var html;
+  assert.doesNotThrow(function() { html = WG.renderExploits(); });
+  assert.ok(html.indexOf('10.10.200.51') !== -1, 'host IP missing from rendered page');
+});
+
+test('renderExploits renders the database-size stat card', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS);
+  var html = WG.renderExploits();
+  assert.ok(html.indexOf('Database Size') !== -1, '"Database Size" stat card missing');
+  assert.ok(html.indexOf('>2<') !== -1, 'database size value (match count) missing');
+});
+
+test('renderExploits groups matches by host and service version', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS);
+  var html = WG.renderExploits();
+  assert.ok(
+    html.indexOf('Detected Exploits by Host') !== -1,
+    'grouped-by-host section missing'
+  );
+  assert.ok(
+    html.indexOf('Windows Server 2019 10.0.17763') !== -1,
+    'service product/version not shown in the host group header'
+  );
+  assert.ok(
+    html.indexOf('Microsoft Terminal Services') !== -1,
+    'service product of the second match missing'
+  );
+  /* The host tag must be the bare IP.  The grouping key is
+   * ip::product::version — rendering that key verbatim leaks the internal
+   * separator into the UI. */
+  var tagMatch = html.match(/class="host-tag"[^>]*>([^<]*)</);
+  assert.ok(tagMatch, 'host tag not found in grouped section');
+  assert.strictEqual(
+    tagMatch[1],
+    '10.10.200.51',
+    'host tag should be the bare IP, got: ' + tagMatch[1]
+  );
+  assert.ok(
+    html.indexOf('10.10.200.51::') === -1,
+    'the internal grouping key leaked into the rendered HTML'
+  );
+});
+
+test('renderExploits creates one group per host+service, not per host', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS);
+  var html = WG.renderExploits();
+  /* Two matches on the same IP but different services must not collapse
+   * into a single group that only shows the first service label.
+   * Only count the grouped section — the flat table below it also renders
+   * a host cell per row. */
+  var groupedSection = html.split('All Exploit Matches')[0];
+  var groupBlocks = groupedSection.split('class="host-tag"').length - 1;
+  assert.strictEqual(
+    groupBlocks,
+    2,
+    'expected 2 host groups (SMB + RDP on the same IP), got ' + groupBlocks
+  );
+});
+
+test('renderExploits keeps the flat all-matches table', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS);
+  var html = WG.renderExploits();
+  assert.ok(html.indexOf('All Exploit Matches') !== -1, 'flat matches table missing');
+  assert.ok(html.indexOf('id="exploitsTable"') !== -1, 'exploits table id missing');
+});
+
+test('renderExploits shows an empty state with no matches', function() {
+  seedExploitsCache([]);
+  var html = WG.renderExploits();
+  assert.ok(html.indexOf('No exploit matches detected yet') !== -1, 'empty state missing');
+});
+
+test('renderExploits escapes dynamic values', function() {
+  seedExploitsCache([{
+    id: 'm-x',
+    module_fullname: 'exploit/x/<img src=x onerror=alert(1)>',
+    module_name: '"><script>alert(2)</script>',
+    module_type: 'exploit',
+    module_rank: 1,
+    module_rank_name: 'normal',
+    platform: 'Windows',
+    confidence: 'high',
+    match_reason: 'reason',
+    references: [],
+    disclosure_date: null,
+    description: 'desc',
+    host_ip: '10.0.0.1',
+    port_number: 1,
+    service_product: 'prod',
+    service_version: '',
+    finding: null,
+  }]);
+  var html = WG.renderExploits();
+  assert.ok(html.indexOf('<img src=x') === -1, 'raw <img> tag was not escaped');
+  assert.ok(html.indexOf('<script>alert(2)') === -1, 'raw <script> tag was not escaped');
+});
+
+seedExploitsCache([]);
 
 
 // ════════════════════════════════════════
