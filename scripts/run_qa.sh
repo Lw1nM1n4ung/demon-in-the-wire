@@ -251,6 +251,12 @@ run_fast_gate() {
         fail "Topology JS suite failed"
     fi
 
+    if run_logged "$RESULTS_DIR/phase-2-exploit-wizard.log" node tests/test_exploit_wizard_js.js; then
+        pass "Exploit wizard JS suite passed"
+    else
+        fail "Exploit wizard JS suite failed"
+    fi
+
     if run_logged "$RESULTS_DIR/phase-2-installers.log" bash tests/test_installers.sh; then
         pass "Installer shell tests passed"
     else

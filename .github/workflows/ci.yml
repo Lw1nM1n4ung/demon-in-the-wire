@@ -73,6 +73,9 @@ jobs:
       - name: Run topology JS unit tests
         run: node tests/test_topology_js.js
 
+      - name: Run exploit wizard JS unit tests
+        run: node tests/test_exploit_wizard_js.js
+
       - name: Run installer shell tests
         run: bash tests/test_installers.sh
 

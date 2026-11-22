@@ -21,5 +21,8 @@ node tests/test_frontend_js.js
 echo "==> topology-js"
 node tests/test_topology_js.js
 
+echo "==> exploit-wizard-js"
+node tests/test_exploit_wizard_js.js
+
 echo "==> installers"
 bash tests/test_installers.sh
