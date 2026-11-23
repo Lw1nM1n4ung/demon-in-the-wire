@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.utils import timezone
 
-from scanner.models import Permission, RolePermission, SiteConfig
+from scanner.models import Permission, RolePermission, Scan, SiteConfig
 from scanner.tasks import _calc_next_run
 
 User = get_user_model()
@@ -257,6 +257,24 @@ class RolePermissionTests(TestCase):
             content_type='application/json',
         )
         self.assertEqual(res.status_code, 403)
+
+    @patch('scanner.tasks.run_scan.delay')
+    def test_owner_can_create_scan_with_skip_brute_force(self, mock_delay):
+        from unittest.mock import MagicMock
+        mock_delay.return_value = MagicMock(id='fake-task-id')
+        self._login(self.owner)
+        res = self.client.post(
+            '/api/scans/',
+            data=json.dumps({
+                'name': 'brute-force-skip', 'target': '10.99.99.1',
+                'scan_type': 'quick', 'skip_brute_force': True,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertIsNotNone(res.json().get('id'))
+        scan = Scan.objects.get(id=res.json()['id'])
+        self.assertTrue(scan.skip_brute_force)
 
     def test_all_roles_can_view_findings(self):
         for user in (self.owner, self.engineer, self.viewer):

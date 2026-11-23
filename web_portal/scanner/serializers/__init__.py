@@ -57,9 +57,19 @@ class PhaseRunSerializer(serializers.ModelSerializer):
     class Meta:
         model = PhaseRun
         fields = [
-            "id", "scan", "phase", "phase_label", "sequence", "status",
-            "started_at", "completed_at", "duration_seconds", "error_message",
-            "retry_count", "tool_config", "output_summary",
+            "id",
+            "scan",
+            "phase",
+            "phase_label",
+            "sequence",
+            "status",
+            "started_at",
+            "completed_at",
+            "duration_seconds",
+            "error_message",
+            "retry_count",
+            "tool_config",
+            "output_summary",
         ]
 
     def get_phase_label(self, obj):
@@ -278,6 +288,7 @@ class ScanListSerializer(serializers.ModelSerializer):
             "created_at",
             "reports",
             "network_overwatch_targets",
+            "skip_brute_force",
         ]
 
 
@@ -298,6 +309,7 @@ class ScanCreateSerializer(serializers.Serializer):
     service_enum = serializers.BooleanField(default=True)
     skip_nuclei = serializers.BooleanField(default=False)
     skip_screenshots = serializers.BooleanField(default=False)
+    skip_brute_force = serializers.BooleanField(required=False, default=False)
     nuclei_templates = serializers.CharField(
         max_length=500, required=False, default="", allow_blank=True
     )

@@ -181,15 +181,20 @@ class Scan(models.Model):
     service_enum = models.BooleanField(default=True)
     skip_nuclei = models.BooleanField(default=False)
     skip_screenshots = models.BooleanField(default=False)
+    skip_brute_force = models.BooleanField(default=False)
     nuclei_templates = models.CharField(max_length=500, blank=True)
     nuclei_default_templates = models.BooleanField(default=True)
     # If True, ICMP-silent hosts get port-scanned too (nmap -Pn path). Default
     # False because it can blow up scope on big CIDRs.
     scan_unresponsive = models.BooleanField(default=False)
-    phases = models.JSONField(default=list, blank=True,
-        help_text="Ordered list of enabled phase names for phase-based scans")
-    current_phase_index = models.IntegerField(default=-1,
-        help_text="0-based index of the currently executing/completed phase")
+    phases = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Ordered list of enabled phase names for phase-based scans",
+    )
+    current_phase_index = models.IntegerField(
+        default=-1, help_text="0-based index of the currently executing/completed phase"
+    )
     enum4linux = models.BooleanField(default=True)
     skip_nikto = models.BooleanField(default=False)
     skip_netexec = models.BooleanField(default=False)
@@ -201,8 +206,11 @@ class Scan(models.Model):
     # Network overwatch targets for host discovery — ping these IPs before
     # and during discovery; if ALL go silent, the scan pauses until they
     # recover. Stored as a JSON list (e.g. ["8.8.8.8", "10.20.0.1"]).
-    network_overwatch_targets = models.JSONField(default=list, blank=True,
-        help_text="IPs to ping before/during discovery; scan pauses if all go silent")
+    network_overwatch_targets = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="IPs to ping before/during discovery; scan pauses if all go silent",
+    )
 
     # Results
     hosts_count = models.IntegerField(default=0)
@@ -562,6 +570,7 @@ class ExploitMatch(models.Model):
     def __str__(self):
         return f"{self.confidence.upper()} {self.module_fullname}"
 
+
 class MSFExploitSession(models.Model):
     """Interactive step-by-step Metasploit exploitation session.
 
@@ -577,21 +586,32 @@ class MSFExploitSession(models.Model):
 
     id = models.UUIDField(primary_key=True, default=generate_uuid7, editable=False)
     scan = models.ForeignKey(
-        Scan, on_delete=models.CASCADE, related_name="msf_exploit_sessions",
+        Scan,
+        on_delete=models.CASCADE,
+        related_name="msf_exploit_sessions",
     )
     host = models.ForeignKey(
-        Host, on_delete=models.CASCADE, related_name="msf_exploit_sessions",
+        Host,
+        on_delete=models.CASCADE,
+        related_name="msf_exploit_sessions",
     )
     exploit_match = models.ForeignKey(
-        ExploitMatch, on_delete=models.CASCADE, related_name="exploit_sessions",
-        null=True, blank=True,
+        ExploitMatch,
+        on_delete=models.CASCADE,
+        related_name="exploit_sessions",
+        null=True,
+        blank=True,
     )
     finding = models.ForeignKey(
-        Finding, on_delete=models.SET_NULL, related_name="exploit_sessions",
-        null=True, blank=True,
+        Finding,
+        on_delete=models.SET_NULL,
+        related_name="exploit_sessions",
+        null=True,
+        blank=True,
     )
     cve = models.CharField(
-        max_length=50, blank=True,
+        max_length=50,
+        blank=True,
         help_text="Primary CVE identifier used for module lookup",
     )
     module_fullname = models.CharField(max_length=500)
@@ -600,11 +620,13 @@ class MSFExploitSession(models.Model):
     rhosts = models.CharField(max_length=255, blank=True, help_text="Auto-populated target IP")
     rport = models.CharField(max_length=10, blank=True, help_text="Auto-populated target port")
     options = models.JSONField(
-        default=dict, blank=True,
+        default=dict,
+        blank=True,
         help_text="Auto-populated MSF options: {RHOSTS, RPORT, ...}",
     )
     overrides = models.JSONField(
-        default=dict, blank=True,
+        default=dict,
+        blank=True,
         help_text="User-modified option overrides before execution",
     )
     current_step = models.PositiveSmallIntegerField(default=0)
@@ -625,7 +647,8 @@ class MSFExploitSession(models.Model):
         help_text="List of step objects: {num, name, description, command, output, status}",
     )
     output_dir = models.CharField(
-        max_length=512, blank=True,
+        max_length=512,
+        blank=True,
         help_text="Temporary directory for command output",
     )
     created_at = models.DateTimeField(auto_now_add=True)

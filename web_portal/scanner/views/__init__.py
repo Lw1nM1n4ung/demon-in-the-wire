@@ -198,6 +198,7 @@ class ScanViewSet(viewsets.ModelViewSet):
             service_enum=data["service_enum"],
             skip_nuclei=data["skip_nuclei"],
             skip_screenshots=data.get("skip_screenshots", False),
+            skip_brute_force=data.get("skip_brute_force", False),
             scan_unresponsive=data.get("scan_unresponsive", False),
             enum4linux=data.get("enum4linux", True),
             skip_nikto=data.get("skip_nikto", False),

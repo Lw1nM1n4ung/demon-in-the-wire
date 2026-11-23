@@ -69,6 +69,7 @@ def run_scan(self, scan_id):
             service_enum=scan.service_enum,
             skip_nuclei=scan.skip_nuclei,
             skip_screenshots=scan.skip_screenshots,
+            skip_brute_force=scan.skip_brute_force,
             nuclei_templates=scan.nuclei_templates,
             nuclei_default_templates=scan.nuclei_default_templates,
             scan_unresponsive=scan.scan_unresponsive,
