@@ -359,4 +359,5 @@ class TestRunNucleiCommand:
         cmd = mock_run.call_args.args[0]
         assert "-c" not in cmd, "internal nuclei concurrency flag must be removed"
         assert "-rl" not in cmd, "nuclei rate-limit flag must be removed"
+        assert "-timeout" not in cmd, "explicit nuclei request timeout must be removed"
         assert cmd.count("-t") == 1

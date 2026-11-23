@@ -108,8 +108,6 @@ async def run_nuclei(
         "-l",
         str(targets_file),
         "-jsonl",
-        "-timeout",
-        "10",
         "-stats",
         "-severity",
         "critical,high,medium,low",
