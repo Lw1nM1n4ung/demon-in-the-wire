@@ -437,6 +437,49 @@ async def _check_ldap(ip: str, port: int) -> list[Finding]:
     return []
 
 
+async def _check_generic(ip: str, port: int, service_name: str = "") -> list[Finding]:
+    """Fallback probe for ports with no service-specific check.
+
+    Connects, grabs any banner, and — when the protocol requires the client
+    to speak first — sends a CRLF probe.  Always reports the open port so
+    unhandled services (e.g. tcpwrapped, unknown high ports) are never
+    silently skipped.
+    """
+    conn = await _tcp_connect(ip, port)
+    if not conn:
+        return []
+    reader, writer = conn
+    banner = ""
+    try:
+        banner = (
+            (await asyncio.wait_for(reader.read(1024), timeout=_TIMEOUT))
+            .decode(errors="replace")
+            .strip()
+        )
+        if not banner:
+            writer.write(b"\r\n")
+            await writer.drain()
+            banner = (
+                (await asyncio.wait_for(reader.read(1024), timeout=_TIMEOUT))
+                .decode(errors="replace")
+                .strip()
+            )
+    except Exception:
+        banner = ""
+    finally:
+        writer.close()
+
+    label = (service_name or "tcp").lower()
+    if banner:
+        first_line = banner.splitlines()[0] if banner.splitlines() else banner
+        title = f"{label} on port {port}: {first_line[:60]}"
+        desc = f"Banner: {banner}"
+    else:
+        title = f"Open TCP port {port} ({label}) — no banner"
+        desc = f"TCP service detected on port {port}; no banner returned."
+    return [_f(ip, port, title, Severity.INFO, desc, raw=banner)]
+
+
 # ── Router ───────────────────────────────────────────────
 
 _CHECKS: dict[str, object] = {
@@ -468,11 +511,7 @@ _PORT_CHECKS: dict[int, object] = {
 }
 
 
-async def enumerate_services(
-    host: Host,
-    config: ScanConfig,
-    tree: OutputTree
-) -> list[Finding]:
+async def enumerate_services(host: Host, config: ScanConfig, tree: OutputTree) -> list[Finding]:
     """Pure Python service enumeration. No brute force."""
     if not host.open_ports:
         return []
@@ -486,9 +525,7 @@ async def enumerate_services(
         if svc in ("http", "https", "http-proxy", "http-alt"):
             # But check well-known ports
             if port.number in _PORT_CHECKS:
-                tasks.append(
-                    asyncio.create_task(_PORT_CHECKS[port.number](host.ip, port.number))
-                )
+                tasks.append(asyncio.create_task(_PORT_CHECKS[port.number](host.ip, port.number)))
                 checked.add(port.number)
             continue
 
@@ -500,6 +537,12 @@ async def enumerate_services(
         # Also check by well-known port
         if port.number in _PORT_CHECKS and port.number not in checked:
             tasks.append(asyncio.create_task(_PORT_CHECKS[port.number](host.ip, port.number)))
+            checked.add(port.number)
+
+        # Anything still unhandled (tcpwrapped, unknown services, exotic
+        # protocols) gets the generic banner/probe check — never silently skip.
+        if port.number not in checked:
+            tasks.append(asyncio.create_task(_check_generic(host.ip, port.number, svc)))
             checked.add(port.number)
 
     if not tasks:

@@ -6,9 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from wireghost.models.severity import Severity
 from wireghost.pipeline.service_enum import (
-    _check_docker,
-    _check_elasticsearch,
     _check_ftp,
+    _check_generic,
     _check_ldap,
     _check_memcached,
     _check_mongodb,
@@ -46,11 +45,13 @@ class TestCheckFtp:
     @patch("wireghost.pipeline.service_enum._tcp_connect", new_callable=AsyncMock)
     async def test_ftp_anonymous(self, mock_connect):
         reader = AsyncMock()
-        reader.read = AsyncMock(side_effect=[
-            b"220 vsftpd 3.0.3\r\n",
-            b"331 Please specify the password.\r\n",
-            b"230 Login successful.\r\n",
-        ])
+        reader.read = AsyncMock(
+            side_effect=[
+                b"220 vsftpd 3.0.3\r\n",
+                b"331 Please specify the password.\r\n",
+                b"230 Login successful.\r\n",
+            ]
+        )
         writer = MagicMock()
         writer.write = MagicMock()
         writer.drain = AsyncMock()
@@ -114,7 +115,8 @@ class TestCheckPostgresql:
     @patch("wireghost.pipeline.service_enum._tcp_send_recv", new_callable=AsyncMock)
     async def test_pg_trust_auth(self, mock_send):
         import struct
-        mock_send.return_value = b'R' + b'\x00\x00\x00\x08' + struct.pack(">I", 0)
+
+        mock_send.return_value = b"R" + b"\x00\x00\x00\x08" + struct.pack(">I", 0)
         findings = await _check_postgresql(IP, 5432)
         assert len(findings) == 1
         assert findings[0].severity == Severity.CRITICAL
@@ -123,7 +125,8 @@ class TestCheckPostgresql:
     @patch("wireghost.pipeline.service_enum._tcp_send_recv", new_callable=AsyncMock)
     async def test_pg_md5_auth(self, mock_send):
         import struct
-        mock_send.return_value = b'R' + b'\x00\x00\x00\x08' + struct.pack(">I", 5) + b'\x00' * 4
+
+        mock_send.return_value = b"R" + b"\x00\x00\x00\x08" + struct.pack(">I", 5) + b"\x00" * 4
         findings = await _check_postgresql(IP, 5432)
         assert len(findings) == 1
         assert findings[0].severity == Severity.INFO
@@ -140,10 +143,12 @@ class TestCheckSmtp:
     @patch("wireghost.pipeline.service_enum._tcp_connect", new_callable=AsyncMock)
     async def test_smtp_vrfy(self, mock_connect):
         reader = AsyncMock()
-        reader.read = AsyncMock(side_effect=[
-            b"220 mail.test.local ESMTP\r\n",
-            b"250-Hello\r\n250 VRFY\r\n",
-        ])
+        reader.read = AsyncMock(
+            side_effect=[
+                b"220 mail.test.local ESMTP\r\n",
+                b"250-Hello\r\n250 VRFY\r\n",
+            ]
+        )
         writer = MagicMock()
         writer.write = MagicMock()
         writer.drain = AsyncMock()
@@ -166,7 +171,7 @@ class TestCheckSmtp:
 class TestCheckLdap:
     @patch("wireghost.pipeline.service_enum._tcp_send_recv", new_callable=AsyncMock)
     async def test_ldap_anonymous_bind(self, mock_send):
-        mock_send.return_value = b'\x30\x0c\x02\x01\x01\x61\x07\x0a\x01\x00\x04\x00\x04\x00'
+        mock_send.return_value = b"\x30\x0c\x02\x01\x01\x61\x07\x0a\x01\x00\x04\x00\x04\x00"
         findings = await _check_ldap(IP, 389)
         assert len(findings) == 1
         assert "Anonymous Bind" in findings[0].title
@@ -253,10 +258,12 @@ class TestCheckVnc:
     async def test_vnc_no_auth(self, mock_banner, mock_connect):
         mock_banner.return_value = "RFB 003.008"
         reader = AsyncMock()
-        reader.read = AsyncMock(side_effect=[
-            b"RFB 003.008\n",
-            bytes([2, 1, 2]),
-        ])
+        reader.read = AsyncMock(
+            side_effect=[
+                b"RFB 003.008\n",
+                bytes([2, 1, 2]),
+            ]
+        )
         writer = MagicMock()
         writer.write = MagicMock()
         writer.drain = AsyncMock()
@@ -289,3 +296,67 @@ class TestAllSourcesServiceEnum:
         mock_banner.return_value = "SSH-2.0-OpenSSH_8.9"
         findings = await _check_ssh(IP, 22)
         assert all(f.host == IP for f in findings)
+
+
+class TestCheckGeneric:
+    @patch("wireghost.pipeline.service_enum._tcp_connect", new_callable=AsyncMock)
+    async def test_generic_banner_finding(self, mock_connect):
+        reader = AsyncMock()
+        reader.read = AsyncMock(return_value=b"220 H323 ready\r\n")
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        writer.close = MagicMock()
+        mock_connect.return_value = (reader, writer)
+
+        findings = await _check_generic(IP, 1720, "h323q931")
+
+        assert len(findings) == 1
+        assert findings[0].source == "service_enum"
+        assert "h323q931" in findings[0].title
+        assert findings[0].severity == Severity.INFO
+
+    @patch("wireghost.pipeline.service_enum._tcp_connect", new_callable=AsyncMock)
+    async def test_generic_no_banner_still_reports(self, mock_connect):
+        reader = AsyncMock()
+        reader.read = AsyncMock(side_effect=[b"", b""])
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        writer.close = MagicMock()
+        mock_connect.return_value = (reader, writer)
+
+        findings = await _check_generic(IP, 33221, "")
+
+        assert len(findings) == 1
+        assert "33221" in findings[0].title
+
+    @patch("wireghost.pipeline.service_enum._tcp_connect", new_callable=AsyncMock)
+    async def test_generic_connection_failure_skips(self, mock_connect):
+        mock_connect.return_value = None
+        assert await _check_generic(IP, 33221, "") == []
+
+
+class TestEnumerateRouting:
+    @patch("wireghost.pipeline.service_enum._check_generic", new_callable=AsyncMock)
+    async def test_unknown_and_tcpwrapped_ports_use_generic(self, mock_generic):
+        from unittest.mock import AsyncMock as _AM
+        import wireghost.pipeline.service_enum as se
+        from wireghost.models.scan import Host, Port, Service
+
+        mock_ssh = _AM(return_value=[])
+        with patch.dict(se._CHECKS, {"ssh": mock_ssh}):
+            mock_generic.return_value = []
+            host = Host(
+                ip=IP,
+                ports=[
+                    Port(number=22, service=Service(name="ssh")),
+                    Port(number=1720, service=Service(name="tcpwrapped")),
+                    Port(number=33221),
+                ],
+            )
+            results = await enumerate_services(host, None, None)
+
+        assert results == []
+        assert mock_ssh.await_count == 1
+        assert mock_generic.await_count == 2
