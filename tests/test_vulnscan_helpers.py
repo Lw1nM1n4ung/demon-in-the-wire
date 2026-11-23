@@ -6,6 +6,7 @@ from pathlib import Path
 
 from wireghost.models.scan import Host, Port, Service, WebTech
 from wireghost.pipeline.vulnscan import (
+    _build_nuclei_targets,
     _build_script_arg,
     _collect_template_dirs,
     _collect_versions,
@@ -25,6 +26,66 @@ class _FakeConfig:
     def __init__(self, nuclei_templates="", nuclei_default_templates=True):
         self.nuclei_templates = nuclei_templates
         self.nuclei_default_templates = nuclei_default_templates
+
+
+class TestBuildNucleiTargets:
+    def test_all_open_tcp_ports_become_targets(self):
+        host = Host(
+            ip="10.0.0.5",
+            ports=[
+                Port(number=80, service=Service(name="http")),
+                Port(number=443, service=Service(name="https")),
+                Port(number=22, service=Service(name="ssh")),
+                Port(number=3306, service=Service(name="mysql")),
+                Port(number=3389),
+            ],
+        )
+        targets = _build_nuclei_targets(host)
+        assert targets == [
+            "http://10.0.0.5:80",
+            "https://10.0.0.5:443",
+            "10.0.0.5:22",
+            "10.0.0.5:3306",
+            "10.0.0.5:3389",
+        ]
+
+    def test_non_web_ports_use_host_port_form(self):
+        host = Host(ip="10.0.0.5", ports=[Port(number=22, service=Service(name="ssh"))])
+        assert _build_nuclei_targets(host) == ["10.0.0.5:22"]
+
+    def test_http_alt_service_maps_to_http_scheme(self):
+        host = Host(ip="10.0.0.5", ports=[Port(number=8080, service=Service(name="http-proxy"))])
+        assert _build_nuclei_targets(host) == ["http://10.0.0.5:8080"]
+
+    def test_https_alt_service_maps_to_https_scheme(self):
+        host = Host(ip="10.0.0.5", ports=[Port(number=8443, service=Service(name="https-alt"))])
+        assert _build_nuclei_targets(host) == ["https://10.0.0.5:8443"]
+
+    def test_web_endpoints_kept_and_deduplicated_against_ports(self):
+        host = Host(
+            ip="10.0.0.5",
+            web_endpoints=["http://10.0.0.5", "https://10.0.0.5:8443"],
+            ports=[
+                Port(number=80, service=Service(name="http")),
+                Port(number=8443, service=Service(name="https-alt")),
+                Port(number=22, service=Service(name="ssh")),
+            ],
+        )
+        assert _build_nuclei_targets(host) == [
+            "http://10.0.0.5",
+            "https://10.0.0.5:8443",
+            "10.0.0.5:22",
+        ]
+
+    def test_no_ports_or_endpoints_returns_empty(self):
+        assert _build_nuclei_targets(Host(ip="10.0.0.5")) == []
+
+    def test_udp_ports_skipped(self):
+        host = Host(
+            ip="10.0.0.5",
+            ports=[Port(number=161, protocol="udp", service=Service(name="snmp"))],
+        )
+        assert _build_nuclei_targets(host) == []
 
 
 class TestCollectTemplateDirs:
@@ -115,10 +176,7 @@ class TestGlobTemplates:
 def _host_with_services(services: list[tuple[int, str]]) -> Host:
     return Host(
         ip="10.0.0.1",
-        ports=[
-            Port(number=n, service=Service(name=s) if s else None)
-            for n, s in services
-        ],
+        ports=[Port(number=n, service=Service(name=s) if s else None) for n, s in services],
     )
 
 
@@ -270,7 +328,8 @@ class TestCollectVersions:
                 Port(
                     number=22,
                     service=Service(
-                        name="ssh", product="OpenSSH",
+                        name="ssh",
+                        product="OpenSSH",
                         version="9.6p1 Ubuntu 3ubuntu13.15",
                     ),
                 ),

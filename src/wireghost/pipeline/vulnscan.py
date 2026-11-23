@@ -7,6 +7,7 @@ import logging
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from wireghost.models.finding import Finding
 from wireghost.models.scan import Host
@@ -23,6 +24,49 @@ if TYPE_CHECKING:
     from wireghost.utils.fs import OutputTree
 
 log = logging.getLogger("wireghost")
+
+_HTTP_SERVICES = frozenset({"http", "http-alt", "http-proxy"})
+_HTTPS_SERVICES = frozenset({"https", "ssl", "ssl/http", "ssl/https", "https-alt"})
+
+
+def _build_nuclei_targets(host: Host) -> list[str]:
+    """Build the nuclei target list for *host* — every open TCP port.
+
+    Web endpoints keep their URL form; HTTP-like services get an http://
+    URL, TLS-like services an https:// URL, and every other open TCP port
+    gets nuclei's ``host:port`` network-target form.  Web endpoints that
+    already cover a port are not duplicated.
+    """
+    targets: list[str] = []
+    seen: set[str] = set()
+    covered_ports: set[int] = set()
+    for url in host.web_endpoints:
+        if url and url not in seen:
+            seen.add(url)
+            targets.append(url)
+        try:
+            parsed = urlparse(url)
+            if parsed.hostname == host.ip:
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                covered_ports.add(port)
+        except ValueError:
+            pass
+    for port in host.open_ports:
+        if not port.number or port.protocol not in ("", "tcp"):
+            continue
+        if port.number in covered_ports:
+            continue
+        service = (port.service_name or "").lower()
+        if service in _HTTP_SERVICES:
+            target = f"http://{host.ip}:{port.number}"
+        elif service in _HTTPS_SERVICES:
+            target = f"https://{host.ip}:{port.number}"
+        else:
+            target = f"{host.ip}:{port.number}"
+        if target not in seen:
+            seen.add(target)
+            targets.append(target)
+    return targets
 
 
 def _collect_template_dirs(config: ScanConfig) -> list[Path]:
@@ -50,13 +94,14 @@ async def run_nuclei(
     config: ScanConfig,
     tree: OutputTree,
 ) -> list[Finding]:
-    """Run nuclei against each web endpoint on *host*."""
-    if not host.web_endpoints:
+    """Run nuclei against every open port on *host*."""
+    targets = _build_nuclei_targets(host)
+    if not targets:
         return []
 
     vuln_dir = tree.host_vuln_dir(host.ip)
     targets_file = vuln_dir / "nuclei_targets.txt"
-    targets_file.write_text("\n".join(host.web_endpoints) + "\n", encoding="utf-8")
+    targets_file.write_text("\n".join(targets) + "\n", encoding="utf-8")
 
     base_cmd = [
         "nuclei",
@@ -515,11 +560,7 @@ async def run_getsploit(
     return all_findings
 
 
-async def scan_host_vulns(
-    host: Host,
-    config: ScanConfig,
-    tree: OutputTree
-) -> list[Finding]:
+async def scan_host_vulns(host: Host, config: ScanConfig, tree: OutputTree) -> list[Finding]:
     """Run nuclei, nmap vuln, and searchsploit concurrently for a single host.
 
     *sem* limits how many hosts are scanned in parallel.
