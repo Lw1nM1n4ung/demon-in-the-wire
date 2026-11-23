@@ -1391,7 +1391,7 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
 
         Body: {"action": "approve"} or {"action": "reject"}
         """
-        from scanner.tasks.msf_exploit import msf_exploit_step
+        from scanner.tasks.msf_exploit import _validate_msf_overrides, msf_exploit_step
 
         exploit = self.get_object()
 
@@ -1410,14 +1410,37 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
             exploit.save(update_fields=["status", "updated_at"])
             return Response(MSFExploitSessionSerializer(exploit).data)
 
-        # Approve — merge any overrides from the request, then dispatch next step
-        overrides = {}
+        # Approve — validate the typed override object before dispatching the
+        # execution step.  Legacy top-level target values remain accepted for
+        # older clients, but are folded into the same validation path.
+        submitted = dict(ser.validated_data.get("overrides") or {})
         for key in ("RHOSTS", "RHOST", "RPORT"):
             if key in request.data:
-                overrides[key] = request.data[key]
-        if overrides:
-            exploit.overrides = {**(exploit.overrides or {}), **overrides}
+                submitted.setdefault(key, request.data[key])
+
+        option_metadata = {}
+        for step in exploit.steps or []:
+            if isinstance(step, dict) and isinstance(step.get("option_metadata"), dict):
+                option_metadata = step["option_metadata"]
+                break
+
+        candidate_overrides = {**(exploit.overrides or {}), **submitted}
+        if option_metadata:
+            try:
+                validated_overrides = _validate_msf_overrides(
+                    option_metadata,
+                    candidate_overrides,
+                    exploit.options or {},
+                )
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=400)
+            exploit.overrides = validated_overrides
             exploit.save(update_fields=["overrides", "updated_at"])
+        elif candidate_overrides:
+            return Response(
+                {"error": "Metasploit runtime option metadata is unavailable"},
+                status=400,
+            )
 
         exploit.status = "running"
         exploit.save(update_fields=["status", "updated_at"])

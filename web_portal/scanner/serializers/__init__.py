@@ -545,6 +545,17 @@ class MSFExploitSessionSerializer(serializers.ModelSerializer):
 
 class MSFExploitRespondSerializer(serializers.Serializer):
     action = serializers.ChoiceField(choices=[("approve", "Approve"), ("reject", "Reject")])
+    overrides = serializers.JSONField(required=False, default=dict)
+
+    def validate_overrides(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("overrides must be an object")
+        for name, option_value in value.items():
+            if not isinstance(name, str) or not name:
+                raise serializers.ValidationError("override names must be non-empty strings")
+            if isinstance(option_value, (dict, list, tuple, set)) or option_value is None:
+                raise serializers.ValidationError("override value for %s must be a scalar" % name)
+        return value
 
 
 class ScanArtifactListSerializer(serializers.ModelSerializer):
