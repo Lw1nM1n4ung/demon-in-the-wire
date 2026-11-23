@@ -1355,6 +1355,10 @@ class ExploitMatchViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ExploitMatch.objects.all()
     serializer_class = ExploitMatchSerializer
     permission_classes = [HasPerm("scan:read")]
+    # The /exploits page renders every match (grouped by host/service) and
+    # performs its own client-side filters; paginating here would silently
+    # show only the first page on large installs.
+    pagination_class = None
 
     def get_queryset(self):
         qs = super().get_queryset()
