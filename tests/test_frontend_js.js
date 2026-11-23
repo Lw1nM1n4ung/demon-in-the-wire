@@ -928,6 +928,45 @@ test('_exploitDragHost writes the host ip to the drag data', function() {
   assert.strictEqual(payload, 'text/plain=10.10.200.51');
 });
 
+test('_loadExploitStats stores DB counts and rerenders', function() {
+  var originalApi = WG.api;
+  WG.api = function() {
+    return { then: function(onOk) { onOk({ msf_total: 9, searchsploit: 5 }); } };
+  };
+  WG._exploitStats = null;
+  WG._exploitStatsLoading = false;
+  WG._exploitStatsRetries = 0;
+
+  WG._loadExploitStats();
+
+  assert.ok(WG._exploitStats, 'stats were not stored');
+  assert.strictEqual(WG._exploitStats.msf_total, 9);
+  assert.strictEqual(WG._exploitStats.searchsploit, 5);
+  assert.strictEqual(WG._exploitStatsLoading, false);
+  WG.api = originalApi;
+});
+
+test('_loadExploitStats retries after a failed request and then gives up', function() {
+  var originalApi = WG.api;
+  var calls = 0;
+  WG.api = function() {
+    calls += 1;
+    return { then: function(onOk) { onOk(null); } };
+  };
+  WG._exploitStats = null;
+  WG._exploitStatsLoading = false;
+  WG._exploitStatsRetries = 0;
+  WG._exploitStatsRetryTimer = null;
+
+  WG._loadExploitStats();
+
+  assert.strictEqual(calls, 4, 'expected the first attempt plus 3 retries');
+  assert.strictEqual(WG._exploitStatsRetries, 4, 'counter should record 4 attempts (1 initial + 3 retries)');
+  assert.strictEqual(WG._exploitStats, null, 'failed requests must not store stats');
+  assert.strictEqual(WG._exploitStatsLoading, false, 'loading flag must clear after giving up');
+  WG.api = originalApi;
+});
+
 seedExploitsCache([]);
 
 
