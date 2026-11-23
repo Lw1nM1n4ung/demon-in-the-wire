@@ -1369,6 +1369,31 @@ class ExploitMatchViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(confidence=confidence)
         return qs
 
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        """DB-backed exploit counts for the /exploits page header.
+
+        MSF counts come from the ExploitMatch table; the searchsploit count is
+        the number of Findings the searchsploit tool produced, regardless of
+        whether they were later matched to an MSF module.
+        """
+        matches = ExploitMatch.objects.all()
+        return Response(
+            {
+                "msf_total": matches.count(),
+                "by_confidence": {
+                    r["confidence"]: r["n"]
+                    for r in matches.values("confidence").annotate(n=Count("id"))
+                },
+                "by_type": {
+                    r["module_type"]: r["n"]
+                    for r in matches.values("module_type").annotate(n=Count("id"))
+                },
+                "searchsploit": Finding.objects.filter(source__iexact="searchsploit").count(),
+                "hosts": matches.values("host_ip").distinct().count(),
+            }
+        )
+
 
 class MSFExploitSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for MSF exploit sessions — poll and respond."""

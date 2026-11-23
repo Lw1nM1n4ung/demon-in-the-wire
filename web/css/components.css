@@ -1232,6 +1232,82 @@
 /* Full-width widget when sibling in same row is hidden */
 .widget-full { flex: 1 1 100% !important; }
 
+/* ── Exploit page — host panel + drop zone + match cards ── */
+.exploit-layout {
+  display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px;
+  margin-top: 20px; align-items: start;
+}
+.exploit-host-panel {
+  position: sticky; top: 16px; display: flex; flex-direction: column; gap: 10px;
+  padding: 14px; background: var(--bg-elevated);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
+  max-height: calc(100vh - 96px); overflow-y: auto;
+}
+.exploit-panel-title {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.8rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.exploit-host-chip {
+  display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+  font-size: 0.8rem; font-weight: 600; color: var(--text);
+  background: var(--bg-input); border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md); cursor: pointer; user-select: none;
+}
+.exploit-host-chip:hover { border-color: var(--accent); }
+.exploit-host-chip.selected { border-color: var(--accent); color: var(--accent); }
+.exploit-host-card {
+  display: flex; flex-direction: column; gap: 5px; padding: 10px 12px;
+  background: var(--bg-input); border: 1px solid var(--border-dim);
+  border-left: 3px solid var(--accent-dim); border-radius: var(--radius-md);
+  cursor: grab; user-select: none;
+}
+.exploit-host-card:hover { border-color: var(--accent); border-left-color: var(--accent); }
+.exploit-host-card:active { cursor: grabbing; }
+.exploit-host-card.selected { border-color: var(--accent); border-left-color: var(--accent); background: var(--bg-elevated); }
+.exploit-host-card .host-tag { align-self: flex-start; }
+.exploit-host-services {
+  font-size: 0.72rem; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.exploit-drop-zone {
+  min-height: 320px; padding: 14px; background: var(--bg-elevated);
+  border: 1px dashed var(--border-soft); border-radius: var(--radius-lg);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.exploit-drop-zone.dragover { border-color: var(--accent); background: var(--bg-input); }
+.exploit-drop-hint { font-size: 0.78rem; color: var(--text-dim); }
+.exploit-group { display: flex; flex-direction: column; gap: 10px; }
+.exploit-group-head {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: var(--bg-input); border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md);
+}
+.exploit-group-label { font-size: 0.8rem; color: var(--text-dim); flex: 1; }
+.exploit-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.exploit-match-card {
+  display: flex; flex-direction: column; gap: 7px; padding: 12px 14px;
+  background: var(--bg-input); border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md);
+}
+.exploit-match-card:hover { border-color: var(--accent-dim); }
+.exploit-card-head { display: flex; align-items: center; gap: 8px; }
+.exploit-card-module { flex: 1; font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exploit-card-title { font-size: 0.82rem; font-weight: 600; color: var(--text-bright); }
+.exploit-card-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: 0.72rem; color: var(--text-dim);
+}
+.exploit-card-cves {
+  font-size: 0.7rem; color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.exploit-card-reason {
+  font-size: 0.75rem; color: var(--text-dim); line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.exploit-card-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+
 /* ── Exploit Wizard ── */
 .exploit-reviewed-payload {
   display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px;
@@ -1385,4 +1461,9 @@
 @media (max-width: 640px) {
   .exploit-options { padding: 14px; }
   .exploit-options-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 960px) {
+  .exploit-layout { grid-template-columns: 1fr; }
+  .exploit-host-panel { position: static; max-height: none; }
+  .exploit-cards { grid-template-columns: 1fr; }
 }

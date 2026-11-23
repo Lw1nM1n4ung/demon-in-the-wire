@@ -747,19 +747,35 @@ test('renderExploits does not throw when the host group has data', function() {
   assert.ok(html.indexOf('10.10.200.51') !== -1, 'host IP missing from rendered page');
 });
 
-test('renderExploits renders the database-size stat card', function() {
+test('renderExploits renders the MSF Matches stat card from the list', function() {
   seedExploitsCache(SAMPLE_EXPLOITS);
   var html = WG.renderExploits();
-  assert.ok(html.indexOf('Database Size') !== -1, '"Database Size" stat card missing');
-  assert.ok(html.indexOf('>2<') !== -1, 'database size value (match count) missing');
+  assert.ok(html.indexOf('MSF Matches') !== -1, '"MSF Matches" stat card missing');
+  assert.ok(html.indexOf('>2<') !== -1, 'msf match count missing from stat card');
+});
+
+test('renderExploits renders DB-backed stats when loaded', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS);
+  WG._exploitStats = {
+    msf_total: 7,
+    searchsploit: 3,
+    by_confidence: { high: 2, medium: 1, low: 4 },
+    by_type: { exploit: 6, auxiliary: 1 },
+    hosts: 1,
+  };
+  var html = WG.renderExploits();
+  assert.ok(html.indexOf('Searchsploit Exploits') !== -1, 'searchsploit stat card missing');
+  assert.ok(html.indexOf('>7<') !== -1, 'DB msf_total not rendered');
+  assert.ok(html.indexOf('>3<') !== -1, 'DB searchsploit count not rendered');
+  assert.ok(html.indexOf('>4<') !== -1, 'DB low-confidence count not rendered');
 });
 
 test('renderExploits groups matches by host and service version', function() {
   seedExploitsCache(SAMPLE_EXPLOITS);
   var html = WG.renderExploits();
   assert.ok(
-    html.indexOf('Detected Exploits by Host') !== -1,
-    'grouped-by-host section missing'
+    html.indexOf('exploit-drop-zone') !== -1,
+    'grouped match drop zone missing'
   );
   assert.ok(
     html.indexOf('Windows Server 2019 10.0.17763') !== -1,
@@ -789,23 +805,21 @@ test('renderExploits creates one group per host+service, not per host', function
   seedExploitsCache(SAMPLE_EXPLOITS);
   var html = WG.renderExploits();
   /* Two matches on the same IP but different services must not collapse
-   * into a single group that only shows the first service label.
-   * Only count the grouped section — the flat table below it also renders
-   * a host cell per row. */
-  var groupedSection = html.split('All Exploit Matches')[0];
-  var groupBlocks = groupedSection.split('class="host-tag"').length - 1;
+   * into a single group that only shows the first service label. */
+  var groupBlocks = html.split('class="exploit-group"').length - 1;
   assert.strictEqual(
     groupBlocks,
     2,
-    'expected 2 host groups (SMB + RDP on the same IP), got ' + groupBlocks
+    'expected 2 match groups (SMB + RDP on the same IP), got ' + groupBlocks
   );
 });
 
-test('renderExploits keeps the flat all-matches table', function() {
+test('renderExploits renders draggable host cards', function() {
   seedExploitsCache(SAMPLE_EXPLOITS);
   var html = WG.renderExploits();
-  assert.ok(html.indexOf('All Exploit Matches') !== -1, 'flat matches table missing');
-  assert.ok(html.indexOf('id="exploitsTable"') !== -1, 'exploits table id missing');
+  assert.ok(html.indexOf('class="exploit-host-card') !== -1, 'host card missing');
+  assert.ok(html.indexOf('draggable="true"') !== -1, 'host card is not draggable');
+  assert.ok(html.indexOf('WG._exploitDragHost(event,') !== -1, 'dragstart handler missing');
 });
 
 test('renderExploits shows an empty state with no matches', function() {
@@ -837,6 +851,81 @@ test('renderExploits escapes dynamic values', function() {
   var html = WG.renderExploits();
   assert.ok(html.indexOf('<img src=x') === -1, 'raw <img> tag was not escaped');
   assert.ok(html.indexOf('<script>alert(2)') === -1, 'raw <script> tag was not escaped');
+});
+
+test('_exploitDropHost filters the rendered matches to the dropped host', function() {
+  var list = SAMPLE_EXPLOITS.concat([{
+    id: 'm-3',
+    module_fullname: 'exploit/linux/ssh/openssh',
+    module_name: 'OpenSSH User Enumeration',
+    module_type: 'exploit',
+    module_rank: 400,
+    module_rank_name: 'good',
+    platform: 'Linux',
+    confidence: 'high',
+    match_reason: 'CVE match: CVE-2020-15778 via nuclei',
+    references: ['CVE-2020-15778'],
+    disclosure_date: '2020-06-09',
+    description: 'ssh',
+    host_ip: '10.10.200.99',
+    port_number: 22,
+    service_product: 'OpenSSH',
+    service_version: '8.2',
+    finding: null,
+  }]);
+  seedExploitsCache(list);
+  WG._exploitHostFilter = '';
+  var html = WG.renderExploits();
+  assert.ok(html.indexOf('class="exploit-group" data-host="10.10.200.99"') !== -1, 'unfiltered page should show both host groups');
+
+  WG._exploitDropHost({
+    preventDefault: function() {},
+    dataTransfer: { getData: function() { return '10.10.200.51'; } },
+  });
+  html = WG.renderExploits();
+  assert.ok(html.indexOf('Showing matches for') !== -1, 'filter label missing after drop');
+  assert.ok(html.indexOf('class="exploit-group" data-host="10.10.200.51"') !== -1, 'dropped host group missing from filtered page');
+  assert.ok(html.indexOf('class="exploit-group" data-host="10.10.200.99"') === -1, 'other host group leaked into filtered page');
+});
+
+test('_exploitClearHostFilter restores all hosts', function() {
+  seedExploitsCache(SAMPLE_EXPLOITS.concat([{
+    id: 'm-3',
+    module_fullname: 'exploit/linux/ssh/openssh',
+    module_name: 'OpenSSH User Enumeration',
+    module_type: 'exploit',
+    module_rank: 400,
+    module_rank_name: 'good',
+    platform: 'Linux',
+    confidence: 'high',
+    match_reason: 'CVE match: CVE-2020-15778 via nuclei',
+    references: ['CVE-2020-15778'],
+    disclosure_date: '2020-06-09',
+    description: 'ssh',
+    host_ip: '10.10.200.99',
+    port_number: 22,
+    service_product: 'OpenSSH',
+    service_version: '8.2',
+    finding: null,
+  }]));
+  WG._exploitDropHost({
+    preventDefault: function() {},
+    dataTransfer: { getData: function() { return '10.10.200.51'; } },
+  });
+  var filtered = WG.renderExploits();
+  assert.ok(filtered.indexOf('class="exploit-group" data-host="10.10.200.99"') === -1, 'filter should be active');
+
+  WG._exploitClearHostFilter();
+  var html = WG.renderExploits();
+  assert.ok(html.indexOf('class="exploit-group" data-host="10.10.200.99"') !== -1, 'clear should restore all host groups');
+});
+
+test('_exploitDragHost writes the host ip to the drag data', function() {
+  var payload = '';
+  WG._exploitDragHost({
+    dataTransfer: { setData: function(type, value) { payload = type + '=' + value; } },
+  }, '10.10.200.51');
+  assert.strictEqual(payload, 'text/plain=10.10.200.51');
 });
 
 seedExploitsCache([]);
