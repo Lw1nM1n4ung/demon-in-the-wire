@@ -8,9 +8,8 @@ Wire_Ghost — security scanning toolkit. Two delivery modes over one shared asy
 Both call the same core: `wireghost.pipeline.orchestrator.run_pipeline()`.
 The frontend SPA is vanilla JS in `web/` (no build step, no bundler).
 
-Long-form docs already exist: `CLAUDE.md` (architecture, gotchas), `README.md` (user/ops guide),
-`API.md` (REST reference), `docs/ARCHITECTURE.md`. Read those before changing behavior;
-this file only records what is easy to get wrong.
+Long-form docs already exist: `README.md` (user/ops guide) and `API.md` (REST reference).
+Read those before changing behavior; this file only records what is easy to get wrong.
 
 ## Setup
 
@@ -70,7 +69,7 @@ wireghost scan 192.168.1.0/24               # ERROR: Missing option '--target'
 ```
 
 This changed in commit `c97505e` (Typer 0.23+ parsing bug with `invoke_without_command=True`).
-README/CLAUDE.md still show the old positional form — trust the code.
+README.md still shows the old positional form — trust the code.
 
 Other command facts:
 - `wireghost scan` launches a **detached tmux session** named `wg-<target>` by default.
@@ -98,9 +97,8 @@ Other command facts:
   portal image bakes in; `config/nginx.conf.tpl` is the template rendered by
   `offline-export.sh`/`offline-install.sh`/`run_qa.sh` into root `nginx.conf`.
   The three files have drifted — the root one is the one the running stack serves.
-- Root `nginx.conf` redirects to `https://$host:2007/...` and uses `server_name _` (no hardcoded IP).
-  The CLAUDE.md "host IP hardcoded in three places" note is stale for the root file; the hardcoded
-  `127.0.0.1:2006` still exists in `config/nginx.conf`.
+- Root `nginx.conf` redirects to `https://$host:2007/...` and uses `server_name _` (no hardcoded IP);
+  the hardcoded `127.0.0.1:2006` still exists in `config/nginx.conf`.
 - After editing root `nginx.conf`: `docker exec wireghost-portal-1 nginx -s reload` (volume mount, no recreate).
 - Container name is `wireghost-portal-1` only when the project dir is named `demon-in-the-wire`
   (compose derives it from the directory basename). `COMPOSE_PROJECT` is hardcoded to
@@ -158,8 +156,8 @@ Other command facts:
 - Port scan is **two-phase**: a symmetric SYN-only fallback chain (nmap → naabu → masscan), then a
   targeted `nmap -sV -sC [-O]` over only the discovered ports, then fingerprintx augmentation.
   Steps 1 and 2 are separate; changing one does not change the other.
-- masscan currently runs **without** `--rate` (reverted in `52102e1`); CLAUDE.md still says
-  `--rate 5000` is mandatory. Do not re-add it without measuring.
+- masscan currently runs **without** `--rate` (reverted in `52102e1`). Do not re-add it
+  without measuring.
 - gowitness v3 renamed `--resolution-x/y` to `--chrome-window-x/y` and defaults to JPEG —
   the pipeline passes `--screenshot-format png` explicitly. v2 flags fail *silently* (caught exception → zero screenshots).
 - fingerprintx and nmap use different protocol names (`dns`/`domain`, `postgres`/`postgresql`,
@@ -230,12 +228,9 @@ Other command facts:
 
 - `ruff check` currently reports **28 errors** and `ruff format --check` reports **30 Python + 9 Markdown
   files** needing reformat — the branch is not lint-clean. Ruff also formats Markdown code blocks,
-  so `ruff format` will rewrite `CLAUDE.md`/`README.md`/`docs/*.md`; scope it to changed files.
-- `CLAUDE.md` is long but partly stale (masscan `--rate`, nginx hardcoded IP, "hash-router",
-  positional `wireghost scan <target>`). Verify against code before following it.
+  so scope `ruff format` to changed files.
 - `API.md` says the API is unauthenticated; it is not — the portal uses session + CSRF + API keys +
   role gates (owner/engineer/viewer) with `HasPerm`/`HasMethodPerm` on the ViewSets.
-- `docs/ARCHITECTURE.md` predates the current CLI split (still describes a single `cli.py`).
 - There is no `script/` directory; v1 bash orchestration was removed. References to
   `script/main.sh` or `/root/output/` are stale.
 - `tests/test_full_qa.py` and `tests/test_portal_stable.py` hit a live portal at
