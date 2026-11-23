@@ -1,6 +1,8 @@
+from django.db import transaction
 from django.db.models import Count
-from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
@@ -1371,7 +1373,7 @@ class ExploitMatchViewSet(viewsets.ReadOnlyModelViewSet):
 class MSFExploitSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for MSF exploit sessions — poll and respond."""
 
-    permission_classes = [HasPerm("scan:read")]
+    permission_classes = [HasMethodPerm("scan:read", "scan:write")]
     http_method_names = ["get", "post", "head", "options"]
     queryset = MSFExploitSession.objects.select_related(
         "scan",
@@ -1398,25 +1400,39 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
         if exploit.status != "awaiting_confirm":
             return Response(
                 {"error": "Session status is %s, not awaiting_confirm" % exploit.status},
-                status=400,
+                status=status.HTTP_409_CONFLICT,
             )
+
+        if isinstance(request.data, dict):
+            unexpected = sorted(set(request.data) - {"action", "overrides"})
+            if unexpected:
+                return Response(
+                    {"error": "Unexpected approval fields: %s" % ", ".join(unexpected)},
+                    status=400,
+                )
 
         ser = MSFExploitRespondSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         action_val = ser.validated_data["action"]
 
         if action_val == "reject":
+            with transaction.atomic():
+                cancelled = MSFExploitSession.objects.filter(
+                    pk=exploit.pk, status="awaiting_confirm"
+                ).update(status="cancelled", updated_at=timezone.now())
+            if not cancelled:
+                return Response(
+                    {"error": "Session approval was already resolved"},
+                    status=status.HTTP_409_CONFLICT,
+                )
             exploit.status = "cancelled"
-            exploit.save(update_fields=["status", "updated_at"])
             return Response(MSFExploitSessionSerializer(exploit).data)
 
         # Approve — validate the typed override object before dispatching the
-        # execution step.  Legacy top-level target values remain accepted for
-        # older clients, but are folded into the same validation path.
+        # execution step.  The serializer enforces the documented
+        # {action, overrides} request shape, so every execution-affecting
+        # value arrives through one authoritative object.
         submitted = dict(ser.validated_data.get("overrides") or {})
-        for key in ("RHOSTS", "RHOST", "RPORT"):
-            if key in request.data:
-                submitted.setdefault(key, request.data[key])
 
         option_metadata = {}
         for step in exploit.steps or []:
@@ -1424,7 +1440,10 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
                 option_metadata = step["option_metadata"]
                 break
 
-        candidate_overrides = {**(exploit.overrides or {}), **submitted}
+        # Approval is the only point at which execution-affecting values may
+        # be chosen.  Ignore any legacy values stored on the session so a
+        # hidden create-time override can never reach the console.
+        candidate_overrides = dict(submitted)
         if option_metadata:
             try:
                 validated_overrides = _validate_msf_overrides(
@@ -1434,19 +1453,32 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
                 )
             except ValueError as exc:
                 return Response({"error": str(exc)}, status=400)
-            exploit.overrides = validated_overrides
-            exploit.save(update_fields=["overrides", "updated_at"])
         elif candidate_overrides:
             return Response(
                 {"error": "Metasploit runtime option metadata is unavailable"},
                 status=400,
             )
+        else:
+            validated_overrides = {}
+
+        expected_step = exploit.current_step
+        with transaction.atomic():
+            claimed = MSFExploitSession.objects.filter(
+                pk=exploit.pk, status="awaiting_confirm"
+            ).update(
+                status="running",
+                overrides=validated_overrides,
+                updated_at=timezone.now(),
+            )
+            if not claimed:
+                return Response(
+                    {"error": "Session approval was already resolved"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            transaction.on_commit(lambda: msf_exploit_step.delay(str(exploit.id), expected_step))
 
         exploit.status = "running"
-        exploit.save(update_fields=["status", "updated_at"])
-
-        msf_exploit_step.delay(str(exploit.id))
-
+        exploit.overrides = validated_overrides
         return Response(MSFExploitSessionSerializer(exploit).data)
 
     def create(self, request, *args, **kwargs):
@@ -1455,9 +1487,30 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
         Body:
           {"exploit_match": "<uuid>"}  — from ExploitMatch (CVE-based match)
           {"finding": "<uuid>"}        — from Finding (searchsploit result)
-          {"finding": "<uuid>", "overrides": {...}}
+
+        Execution-affecting overrides are deliberately rejected here.  The
+        operator must choose them in the review step, where they are visible
+        and validated before approval.
         """
         from scanner.tasks.msf_exploit import msf_exploit_step
+
+        if not isinstance(request.data, dict):
+            return Response({"error": "Request body must be an object"}, status=400)
+
+        if "overrides" in request.data:
+            create_overrides = request.data["overrides"]
+            if not isinstance(create_overrides, dict):
+                return Response({"error": "overrides must be an object"}, status=400)
+            if create_overrides:
+                return Response(
+                    {
+                        "error": (
+                            "overrides must be empty at creation; choose changed "
+                            "values in the review step before approval"
+                        )
+                    },
+                    status=400,
+                )
 
         match_id = request.data.get("exploit_match")
         finding_id = request.data.get("finding")
@@ -1468,8 +1521,6 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
                 match = ExploitMatch.objects.select_related("scan", "host").get(id=match_id)
             except ExploitMatch.DoesNotExist:
                 return Response({"error": "ExploitMatch not found"}, status=404)
-
-            overrides = request.data.get("overrides", {}) or {}
 
             # host_ip is nullable on both ExploitMatch and Host-scoped rows;
             # MSFExploitSession.host_ip is NOT NULL and Django stores an
@@ -1490,10 +1541,10 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
                 status="running",
                 current_step=0,
                 total_steps=2,
-                overrides=overrides,
+                overrides={},
             )
 
-            msf_exploit_step.delay(str(session.id))
+            msf_exploit_step.delay(str(session.id), 0)
 
             return Response(
                 MSFExploitSessionSerializer(session).data,
@@ -1506,8 +1557,6 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
                 finding = Finding.objects.select_related("scan", "host").get(id=finding_id)
             except Finding.DoesNotExist:
                 return Response({"error": "Finding not found"}, status=404)
-
-            overrides = request.data.get("overrides", {}) or {}
 
             # See the exploit_match branch above — host_ip may be NULL and
             # the session column is NOT NULL.
@@ -1528,10 +1577,10 @@ class MSFExploitSessionViewSet(viewsets.ModelViewSet):
                 status="running",
                 current_step=0,
                 total_steps=2,
-                overrides=overrides,
+                overrides={},
             )
 
-            msf_exploit_step.delay(str(session.id))
+            msf_exploit_step.delay(str(session.id), 0)
 
             return Response(
                 MSFExploitSessionSerializer(session).data,
