@@ -20,8 +20,6 @@ which tool won the chain.
 """
 
 from __future__ import annotations
-
-import asyncio
 import json
 import logging
 import shutil
@@ -68,7 +66,7 @@ async def _run_naabu(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_dir = tree.host_dir(ip)
     json_path = out_dir / "naabu_scan.json"
     port_range = getattr(config, "port_range", "") or "1-65535"
-    naabu_cmd = ["naabu", "-host", ip, "-json", "-o", str(json_path), "-Pn", "-rate", "1000"]
+    naabu_cmd = ["naabu", "-host", ip, "-json", "-o", str(json_path), "-Pn"]
     if port_range and port_range != "1-65535":
         naabu_cmd.insert(1, "-p")
         naabu_cmd.insert(2, port_range)
@@ -87,7 +85,14 @@ async def _run_masscan(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     out_dir = tree.host_dir(ip)
     xml_path = out_dir / "masscan_scan.xml"
     result = await run_tool(
-        ["masscan", ip, "-p" + (getattr(config, "port_range", "") or "1-65535"), "--banners", "-oX", str(xml_path)],
+        [
+            "masscan",
+            ip,
+            "-p" + (getattr(config, "port_range", "") or "1-65535"),
+            "--banners",
+            "-oX",
+            str(xml_path),
+        ],
         timeout=int(config.tool_timeout),
         label=f"masscan:{ip}",
     )
@@ -291,11 +296,7 @@ def _merge_fpx_results(
     return augmented
 
 
-async def scan_host(
-    ip: str,
-    config: ScanConfig,
-    tree: OutputTree
-) -> Host:
+async def scan_host(ip: str, config: ScanConfig, tree: OutputTree) -> Host:
     """Port discovery (nmap → naabu → masscan) + targeted service analysis.
 
     Phase 3a: Find open ports. Tries each scanner in order, returns as
@@ -325,11 +326,7 @@ async def scan_host(
             # Augments ports where nmap -sV was uncertain — runs on all
             # open ports so downstream phases (service_enum, MSF, vulnscan,
             # web detection) all benefit from corrected service names.
-            if (
-                not config.skip_fingerprintx
-                and shutil.which("fingerprintx")
-                and host.open_ports
-            ):
+            if not config.skip_fingerprintx and shutil.which("fingerprintx") and host.open_ports:
                 fpx_timeout = min(30, int(config.tool_timeout))
                 fpx_results = await _run_fingerprintx(
                     host.ip,
