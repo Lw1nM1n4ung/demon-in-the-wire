@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from wireghost.models.scan import Host, Port, Service, WebTech
+from wireghost.pipeline import vulnscan
 from wireghost.pipeline.vulnscan import (
     _build_nuclei_targets,
     _build_script_arg,
@@ -26,6 +28,7 @@ class _FakeConfig:
     def __init__(self, nuclei_templates="", nuclei_default_templates=True):
         self.nuclei_templates = nuclei_templates
         self.nuclei_default_templates = nuclei_default_templates
+        self.tool_timeout = 3600
 
 
 class TestBuildNucleiTargets:
@@ -337,3 +340,23 @@ class TestCollectVersions:
         )
         terms = _collect_versions(h)
         assert terms[0][0] == "OpenSSH 9.6"
+
+
+class TestRunNucleiCommand:
+    @patch("wireghost.pipeline.vulnscan.run_tool", new_callable=AsyncMock)
+    async def test_single_run_without_batching_or_concurrency_flags(self, mock_run, tmp_path):
+        class Tree:
+            def host_vuln_dir(self, ip):
+                return tmp_path
+
+        mock_run.return_value = MagicMock(returncode=0)
+        host = Host(ip="10.0.0.1", ports=[Port(number=22, service=Service(name="ssh"))])
+        cfg = _FakeConfig(nuclei_templates=str(tmp_path), nuclei_default_templates=False)
+
+        await vulnscan.run_nuclei(host, cfg, Tree())
+
+        assert mock_run.await_count == 1, "nuclei must run once per host — no template batching"
+        cmd = mock_run.call_args.args[0]
+        assert "-c" not in cmd, "internal nuclei concurrency flag must be removed"
+        assert "-rl" not in cmd, "nuclei rate-limit flag must be removed"
+        assert cmd.count("-t") == 1
