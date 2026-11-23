@@ -29,6 +29,21 @@ class TaskRegistrationTests(TestCase):
         self.assertTrue(hasattr(run_scan, 'delay'))
         self.assertEqual(run_scan.name, 'scanner.tasks.run_scan')
 
+    def test_run_scan_skips_cancelled_scan(self):
+        """A redelivered/stale task must not rescan a cancelled scan."""
+        from scanner.tasks import run_scan
+
+        owner = User.objects.create_superuser(
+            username='owner', password='pw-owner-123!', email='o@test.com',
+        )
+        scan = Scan.objects.create(
+            name='cancelled', target='10.0.0.1', scan_type='full',
+            status='cancelled', created_by=owner,
+        )
+        run_scan.run(str(scan.id))
+        scan.refresh_from_db()
+        self.assertEqual(scan.status, 'cancelled')
+
     def test_generate_report_registered(self):
         from scanner.tasks import generate_report
         self.assertTrue(hasattr(generate_report, 'delay'))

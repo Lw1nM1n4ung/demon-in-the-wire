@@ -27,6 +27,11 @@ def run_scan(self, scan_id):
     from scanner.models import Scan, Port, Report
 
     scan = Scan.objects.get(id=scan_id)
+    if scan.status in ("cancelled", "failed"):
+        # Stale/redelivered task — never rescan a scan the operator
+        # cancelled (or that already failed terminally).
+        logger.info("Scan %s is %s — skipping run_scan", scan_id, scan.status)
+        return None
     scan.status = "running"
     scan.started_at = timezone.now()
     scan.celery_task_id = self.request.id
