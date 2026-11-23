@@ -193,10 +193,12 @@ class TestMatchExploits(TestCase):
     def test_comma_separated_cves(self):
         slim1 = self._slim(fullname="exploit/a", references=["CVE-2021-41773"])
         slim2 = self._slim(fullname="exploit/b", references=["CVE-2017-0144"])
-        self._set_indexes(cve={
-            "CVE-2021-41773": [slim1],
-            "CVE-2017-0144": [slim2],
-        })
+        self._set_indexes(
+            cve={
+                "CVE-2021-41773": [slim1],
+                "CVE-2017-0144": [slim2],
+            }
+        )
         findings = [{"cve": "CVE-2021-41773, CVE-2017-0144", "host_ip": "10.0.0.1"}]
         result = msf_matcher.match_exploits([], findings)
         self.assertEqual(len(result), 2)
@@ -204,12 +206,14 @@ class TestMatchExploits(TestCase):
     def test_product_match_medium_confidence(self):
         slim = self._slim(fullname="exploit/linux/ssh/openssh", rport=22)
         self._set_indexes(product={"openssh": [slim]})
-        ports = [{
-            "number": 22,
-            "service_name": "ssh",
-            "service_product": "OpenSSH",
-            "host_ip": "10.0.0.1",
-        }]
+        ports = [
+            {
+                "number": 22,
+                "service_name": "ssh",
+                "service_product": "OpenSSH",
+                "host_ip": "10.0.0.1",
+            }
+        ]
         result = msf_matcher.match_exploits(ports, [])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["confidence"], "medium")
@@ -217,24 +221,28 @@ class TestMatchExploits(TestCase):
     def test_product_match_requires_port_match(self):
         slim = self._slim(fullname="exploit/linux/ssh/openssh", rport=22)
         self._set_indexes(product={"openssh": [slim]})
-        ports = [{
-            "number": 2222,
-            "service_name": "ssh",
-            "service_product": "OpenSSH",
-            "host_ip": "10.0.0.1",
-        }]
+        ports = [
+            {
+                "number": 2222,
+                "service_name": "ssh",
+                "service_product": "OpenSSH",
+                "host_ip": "10.0.0.1",
+            }
+        ]
         result = msf_matcher.match_exploits(ports, [])
         self.assertEqual(len(result), 0)
 
     def test_low_match_for_restricted_service(self):
         slim = self._slim(fullname="exploit/unix/ftp/vsftpd_234", rport=21)
         self._set_indexes(port={21: [slim]})
-        ports = [{
-            "number": 21,
-            "service_name": "ftp",
-            "service_product": "",
-            "host_ip": "10.0.0.1",
-        }]
+        ports = [
+            {
+                "number": 21,
+                "service_name": "ftp",
+                "service_product": "",
+                "host_ip": "10.0.0.1",
+            }
+        ]
         result = msf_matcher.match_exploits(ports, [])
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["confidence"], "low")
@@ -242,12 +250,14 @@ class TestMatchExploits(TestCase):
     def test_low_match_skips_http(self):
         slim = self._slim(fullname="exploit/multi/http/something", rport=80)
         self._set_indexes(port={80: [slim]})
-        ports = [{
-            "number": 80,
-            "service_name": "http",
-            "service_product": "",
-            "host_ip": "10.0.0.1",
-        }]
+        ports = [
+            {
+                "number": 80,
+                "service_name": "http",
+                "service_product": "",
+                "host_ip": "10.0.0.1",
+            }
+        ]
         result = msf_matcher.match_exploits(ports, [])
         self.assertEqual(len(result), 0)
 
@@ -280,7 +290,9 @@ class TestMatchExploits(TestCase):
             port={21: [slim_low]},
         )
         findings = [{"cve": "CVE-2021-41773", "host_ip": "10.0.0.1", "port": "80"}]
-        ports = [{"number": 21, "service_name": "ftp", "service_product": "", "host_ip": "10.0.0.1"}]
+        ports = [
+            {"number": 21, "service_name": "ftp", "service_product": "", "host_ip": "10.0.0.1"}
+        ]
         result = msf_matcher.match_exploits(ports, findings)
         self.assertEqual(result[0]["confidence"], "high")
 
@@ -305,12 +317,14 @@ class TestMatchExploits(TestCase):
     def test_unknown_product_ignored(self):
         slim = self._slim(fullname="exploit/linux/ssh/openssh", rport=22)
         self._set_indexes(product={"openssh": [slim]})
-        ports = [{
-            "number": 22,
-            "service_name": "ssh",
-            "service_product": "unknown",
-            "host_ip": "10.0.0.1",
-        }]
+        ports = [
+            {
+                "number": 22,
+                "service_name": "ssh",
+                "service_product": "unknown",
+                "host_ip": "10.0.0.1",
+            }
+        ]
         result = msf_matcher.match_exploits(ports, [])
         self.assertEqual(len(result), 0)
 
@@ -327,6 +341,73 @@ class TestMatchExploits(TestCase):
         findings = [{"cve": "CVE-2021-41773", "host_ip": "10.0.0.1"}]
         result = msf_matcher.match_exploits([], findings)
         self.assertIsNone(result[0]["port_number"])
+
+    def test_cve_match_reason_includes_tool_and_command(self):
+        slim = self._slim(references=["CVE-2021-41773"])
+        self._set_indexes(cve={"CVE-2021-41773": [slim]})
+        findings = [
+            {
+                "cve": "CVE-2021-41773",
+                "host_ip": "10.0.0.1",
+                "source": "nuclei",
+                "curl_command": "curl -k https://10.0.0.1/.%2e/etc/passwd",
+            }
+        ]
+        result = msf_matcher.match_exploits([], findings)
+        self.assertIn("nuclei", result[0]["match_reason"])
+        self.assertIn("curl -k", result[0]["match_reason"])
+
+    def test_cve_match_reason_omits_missing_command(self):
+        slim = self._slim(references=["CVE-2021-41773"])
+        self._set_indexes(cve={"CVE-2021-41773": [slim]})
+        findings = [
+            {
+                "cve": "CVE-2021-41773",
+                "host_ip": "10.0.0.1",
+                "source": "nuclei",
+            }
+        ]
+        result = msf_matcher.match_exploits([], findings)
+        self.assertIn("nuclei", result[0]["match_reason"])
+        self.assertNotIn("curl", result[0]["match_reason"])
+
+    def test_port_match_reason_includes_service_source(self):
+        slim = self._slim(fullname="exploit/linux/ssh/openssh", rport=22)
+        self._set_indexes(product={"openssh": [slim]})
+        ports = [
+            {
+                "number": 22,
+                "service_name": "ssh",
+                "service_product": "OpenSSH",
+                "host_ip": "10.0.0.1",
+                "service_source": "nmap",
+            }
+        ]
+        result = msf_matcher.match_exploits(ports, [])
+        self.assertIn("nmap", result[0]["match_reason"])
+
+    def test_match_reason_unchanged_without_tool(self):
+        slim = self._slim(references=["CVE-2021-41773"])
+        self._set_indexes(cve={"CVE-2021-41773": [slim]})
+        findings = [{"cve": "CVE-2021-41773", "host_ip": "10.0.0.1"}]
+        result = msf_matcher.match_exploits([], findings)
+        self.assertEqual(result[0]["match_reason"], "CVE match: CVE-2021-41773")
+
+    def test_long_command_is_truncated_to_field_limit(self):
+        slim = self._slim(references=["CVE-2021-41773"])
+        self._set_indexes(cve={"CVE-2021-41773": [slim]})
+        long_command = "curl -k " + ("https://10.0.0.1/x?" + "a" * 700)
+        findings = [
+            {
+                "cve": "CVE-2021-41773",
+                "host_ip": "10.0.0.1",
+                "source": "nuclei",
+                "curl_command": long_command,
+            }
+        ]
+        result = msf_matcher.match_exploits([], findings)
+        self.assertLessEqual(len(result[0]["match_reason"]), 500)
+        self.assertNotIn("a" * 700, result[0]["match_reason"])
 
 
 class TestLowMatchServices(TestCase):

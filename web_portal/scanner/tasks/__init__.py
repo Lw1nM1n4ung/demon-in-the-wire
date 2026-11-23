@@ -450,6 +450,7 @@ def run_scan(self, scan_id):
                 "service_name",
                 "service_product",
                 "service_version",
+                "service_source",
                 "host__ip",
             )
             ports_for_match = [
@@ -458,17 +459,22 @@ def run_scan(self, scan_id):
                     "service_name": p["service_name"],
                     "service_product": p["service_product"],
                     "service_version": p["service_version"],
+                    "service_source": p["service_source"],
                     "host_ip": p["host__ip"],
                     "_port_id": p["id"],
                 }
                 for p in ports_qs
             ]
-            findings_qs = scan.findings.values("id", "cve", "host_ip", "port", "host_id")
+            findings_qs = scan.findings.values(
+                "id", "cve", "host_ip", "port", "host_id", "source", "curl_command"
+            )
             findings_for_match = [
                 {
                     "cve": f["cve"],
                     "host_ip": f["host_ip"],
                     "port": f["port"],
+                    "source": f["source"],
+                    "curl_command": f["curl_command"],
                     "_finding_id": f["id"],
                     "_host_id": f["host_id"],
                 }

@@ -61,6 +61,22 @@ RANK_NAMES = {
     600: "Excellent",
 }
 
+# ExploitMatch.match_reason is a CharField(max_length=500) — composed reasons
+# must stay within that limit.
+MAX_MATCH_REASON_LENGTH = 500
+
+
+def _format_match_reason(base: str, tool: str = "", command: str = "") -> str:
+    """Append evidence provenance (the tool and its command) to a match reason."""
+    reason = base
+    if tool:
+        reason += f" via {tool}"
+    if command:
+        reason += f" — {command}"
+    if len(reason) > MAX_MATCH_REASON_LENGTH:
+        reason = reason[: MAX_MATCH_REASON_LENGTH - 1] + "…"
+    return reason
+
 
 def _slim_module(mod: dict) -> dict:
     """Extract only the fields we need for display/storage."""
@@ -152,9 +168,10 @@ def match_exploits(ports: list[dict], findings: list[dict]) -> list[dict]:
 
     Args:
         ports: list of dicts with keys: number, service_name, service_product,
-               service_version, host_ip (optional)
+               service_version, host_ip (optional), service_source (optional)
         findings: list of dicts with keys: cve (comma-separated string),
-                  host_ip (optional), port (optional)
+                  host_ip (optional), port (optional), source (optional),
+                  curl_command (optional)
 
     Returns:
         list of match dicts with: module_fullname, module_name, confidence,
@@ -189,18 +206,22 @@ def match_exploits(ports: list[dict], findings: list[dict]) -> list[dict]:
         host_ip = f.get("host_ip", "")
         f_port = f.get("port")
         port_num = int(f_port) if f_port and str(f_port).isdigit() else None
+        tool = (f.get("source") or "").strip().lower()
+        command = (f.get("curl_command") or "").strip()
 
         for cve in cves:
             if not cve.startswith("CVE-"):
                 continue
             for slim in (_cve_index or {}).get(cve, []):
-                _add(slim, "high", f"CVE match: {cve}", host_ip, port_num)
+                reason = _format_match_reason(f"CVE match: {cve}", tool=tool, command=command)
+                _add(slim, "high", reason, host_ip, port_num)
 
     for p in ports:
         port_num = p.get("number")
         service_name = (p.get("service_name") or "").lower().strip()
         service_product = (p.get("service_product") or "").lower().strip()
         host_ip = p.get("host_ip", "")
+        tool = (p.get("service_source") or "").strip().lower()
 
         if service_product and service_product not in ("unknown", ""):
             product_tokens = set(re.findall(r"[a-z][a-z0-9_]{2,}", service_product))
@@ -208,14 +229,18 @@ def match_exploits(ports: list[dict], findings: list[dict]) -> list[dict]:
                 for slim in (_product_index or {}).get(token, []):
                     mod_rport = slim.get("rport")
                     if mod_rport and mod_rport == port_num:
-                        reason = f'Product "{service_product}" + port {port_num}'
+                        reason = _format_match_reason(
+                            f'Product "{service_product}" + port {port_num}', tool=tool
+                        )
                         _add(slim, "medium", reason, host_ip, port_num)
 
         if service_name in LOW_MATCH_SERVICES and port_num:
             for slim in (_port_index or {}).get(port_num, []):
                 fullname = slim.get("module_fullname", "").lower()
                 if service_name in fullname:
-                    reason = f"Service {service_name} on port {port_num}"
+                    reason = _format_match_reason(
+                        f"Service {service_name} on port {port_num}", tool=tool
+                    )
                     _add(slim, "low", reason, host_ip, port_num)
 
     results.sort(
