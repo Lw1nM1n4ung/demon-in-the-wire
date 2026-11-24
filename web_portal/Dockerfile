@@ -58,12 +58,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium perl libnet-ssleay-perl libio-socket-ssl-perl \
     libjson-perl libxml-writer-perl libxml-libxml-perl \
     sslscan snmp nfs-common ldap-utils curl unzip \
-    samba-common-bin smbclient \
+    samba-common-bin smbclient bind9-dnsutils \
     ruby ruby-dev build-essential libcurl4 \
     && rm -rf /var/lib/apt/lists/*
 
 # enum4linux — Debian has no package; the classic perl script is what
 # parsers/enum4linux.py expects (enum4linux-ng emits a different format).
+# It shells out to dig for its DNS step, so bind9-dnsutils is installed above;
+# without dig every run aborts with "Can't exec dig".
 RUN curl -fsSL -o /usr/local/bin/enum4linux \
         https://raw.githubusercontent.com/CiscoCXSecurity/enum4linux/master/enum4linux.pl \
     && chmod +x /usr/local/bin/enum4linux \
@@ -102,9 +104,21 @@ RUN for i in 1 2 3 4 5; do \
     && chmod +x /opt/nikto/program/nikto.pl \
     && rm -rf /opt/nikto/.git
 
-# wpscan — WordPress vulnerability scanner (Ruby gem)
-RUN gem install wpscan --no-document \
-    && ln -sf /usr/local/bin/wpscan /usr/bin/wpscan
+# wpscan — WordPress vulnerability scanner (Ruby gem).  rubygems is not always
+# reachable from build networks; retry and, if it stays unavailable, continue
+# without wpscan rather than failing the whole image (it only ever triggers on
+# hosts detected as WordPress).
+RUN set -e; \
+    installed=0; \
+    for i in 1 2 3 4; do \
+        if gem install wpscan --no-document; then installed=1; break; fi; \
+        echo "wpscan gem attempt $i failed, retrying"; sleep 15; \
+    done; \
+    if [ "$installed" = "1" ]; then \
+        ln -sf /usr/local/bin/wpscan /usr/bin/wpscan; \
+    else \
+        echo "WARNING: wpscan unavailable after retries — tool disabled"; \
+    fi
 
 # ── Metasploit Framework ────────────────────────────────────────────────
 # Relocated out of the official Alpine image.  The musl loader and the
