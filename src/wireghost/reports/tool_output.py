@@ -94,7 +94,7 @@ TOOL_SPECS: list[dict] = [
         "source": "httpx",
         "label": "httpx",
         "command": "httpx -l <endpoints> -tech-detect -sc -title -server -favicon -jarm -json -o <json> -silent",
-        "globs": ["web/tech_detect.json"],
+        "globs": ["web/tech_detect.json", "web/endpoints.txt"],
     },
     {
         "source": "katana",
@@ -112,13 +112,19 @@ TOOL_SPECS: list[dict] = [
         "source": "searchsploit",
         "label": "searchsploit",
         "command": "searchsploit <product> <version>",
-        "globs": [],
+        "globs": ["vuln/searchsploit_*.json"],
     },
     {
         "source": "getsploit",
         "label": "getsploit (Vulners)",
         "command": "getsploit -j -c 5 <software> -k <vulners_api_key>",
-        "globs": [],
+        "globs": ["vuln/getsploit_*.json"],
+    },
+    {
+        "source": "wpscan",
+        "label": "WPScan (CMS)",
+        "command": "wpscan --url <url> --format json --output wpscan.json --no-banner",
+        "globs": ["vuln/wpscan.json"],
     },
     {
         "source": "nvd",

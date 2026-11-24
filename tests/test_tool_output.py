@@ -87,3 +87,16 @@ def test_missing_ips_tree_does_not_crash(tmp_path):
     reports.mkdir()
     outputs = collect_tool_outputs(_report(), reports)
     assert all(t["files"] == [] for t in outputs)
+
+
+def test_every_finding_source_has_a_tool_entry():
+    """`nuclei_external` folds into nuclei and nettacker is not wired into the
+    pipeline, so every other source must appear in the tool report."""
+    from typing import get_args
+
+    from wireghost.models.finding import Finding
+
+    declared = set(get_args(Finding.__dataclass_fields__["source"].type))
+    covered = {spec["source"] for spec in TOOL_SPECS}
+    missing = declared - covered - {"nuclei_external", "nettacker"}
+    assert not missing, f"tools with findings but no report entry: {sorted(missing)}"
