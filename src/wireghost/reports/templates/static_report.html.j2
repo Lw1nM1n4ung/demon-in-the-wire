@@ -239,22 +239,23 @@
   {% endif %}
 
   <!-- Web Services -->
-  {% set services = [] %}
-  {% for host in hosts %}
-    {% for url, title in host.web_titles.items() %}
-      {% if url %}{% if services.append({"url": url, "title": title, "ip": host.ip}) %}{% endif %}{% endif %}
-    {% endfor %}
-  {% endfor %}
-  {% if services %}
+  {% if web_services %}
   <div class="section">
     <h2>Web Services</h2>
     <table>
       <thead>
-        <tr><th>URL</th><th>Page Title</th><th>Host</th></tr>
+        <tr><th>Screenshot</th><th>URL</th><th>Page Title</th><th>Host</th></tr>
       </thead>
       <tbody>
-        {% for s in services %}
+        {% for s in web_services %}
         <tr>
+          <td>
+            {% if s.screenshot_b64 %}
+            <a href="{{ s.screenshot_b64 }}"><img src="{{ s.screenshot_b64 }}" alt="{{ s.url }}" style="max-width:220px;border:1px solid #ddd;"></a>
+            {% else %}
+            <span style="color:#888;font-size:0.75rem;">no capture</span>
+            {% endif %}
+          </td>
           <td><a href="{{ s.url }}">{{ s.url }}</a></td>
           <td>{{ s.title }}</td>
           <td>{{ s.ip }}</td>

@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 
 from wireghost.models.finding import Finding
 from wireghost.models.report import ScanReport
-from wireghost.models.scan import Host, Port, Service, WebTech
+from wireghost.models.scan import Host, Port, Screenshot, Service, WebTech
 from wireghost.models.severity import Severity
 from wireghost.reports.dashboard import DashboardRenderer
 from wireghost.reports.docx_renderer import DocxRenderer
@@ -256,3 +256,49 @@ def test_docx_includes_web_services_and_technologies(tmp_path):
     assert "Intranet Portal" in joined
     assert "Detected Technologies" in joined
     assert "nginx" in joined
+
+
+PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d494844520000000800000008080200000"
+    "04b6d29dc0000001449444154789c633c2127c7800d3061151db41200d"
+    "0ca01143e63a8990000000049454e44ae426082"
+)
+
+
+def _shot_report() -> ScanReport:
+    host = Host(
+        ip=IP,
+        web_titles={"https://10.0.0.1/": "Intranet Portal"},
+        screenshots=[
+            Screenshot(url="https://10.0.0.1/", filename="shot.png", title="Intranet Portal", status_code=200)
+        ],
+    )
+    return ScanReport(target=f"{IP}/32", hosts=[host], findings=[])
+
+
+def _tree_with_shot(tmp_path: Path) -> Path:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    shots = tmp_path / "ips" / IP / "web" / "screenshots"
+    shots.mkdir(parents=True)
+    (shots / "shot.png").write_bytes(PNG_1PX)
+    return reports
+
+
+def test_html_web_services_include_screenshot(tmp_path):
+    reports = _tree_with_shot(tmp_path)
+    out = HtmlRenderer().render(_shot_report(), _config(), reports)
+    html = out.read_text(encoding="utf-8")
+    assert "Web Services" in html
+    assert "data:image/png;base64," in html
+    assert "Intranet Portal" in html
+
+
+def test_docx_web_services_include_screenshot(tmp_path):
+    reports = _tree_with_shot(tmp_path)
+    out = DocxRenderer().render(_shot_report(), _config(), reports)
+    doc = Document(str(out))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Web Service Screenshots" in text
+    assert "https://10.0.0.1/" in text
+    assert len(doc.inline_shapes) >= 1, "screenshot image not embedded"

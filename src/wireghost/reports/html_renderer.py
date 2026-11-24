@@ -75,6 +75,7 @@ class HtmlRenderer:
             medium=stats.get(Severity.MEDIUM, 0),
             findings=sorted_findings,
             hosts=report.hosts,
+            web_services=_build_web_services(report, reports_dir),
             tool_outputs=collect_tool_outputs(report, reports_dir),
             recommendations=recommendations,
         )
@@ -82,6 +83,33 @@ class HtmlRenderer:
         out = reports_dir / "summary.html"
         out.write_text(html, encoding="utf-8")
         return out
+
+
+def _build_web_services(report: ScanReport, reports_dir: Path) -> list[dict]:
+    """Web endpoints per host, each paired with its screenshot when captured."""
+    services: list[dict] = []
+    for host in report.hosts:
+        by_url = {s.url: s for s in (host.screenshots or [])}
+        urls = list((host.web_titles or {}).items())
+        for shot in host.screenshots or []:
+            if shot.url not in dict(urls):
+                urls.append((shot.url, shot.title))
+        for url, title in urls:
+            if not url:
+                continue
+            shot = by_url.get(url)
+            services.append(
+                {
+                    "url": url,
+                    "title": title or (shot.title if shot else ""),
+                    "ip": host.ip,
+                    "screenshot": shot.filename if shot else "",
+                    "screenshot_b64": (
+                        _screenshot_b64(reports_dir, host.ip, shot.filename) if shot else ""
+                    ),
+                }
+            )
+    return services
 
 
 def _build_recommendations(

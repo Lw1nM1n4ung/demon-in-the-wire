@@ -236,7 +236,7 @@ class DocxRenderer:
         self._open_ports(doc, report)
         self._tool_by_tool(doc, report, reports_dir)
         doc.add_page_break()
-        self._web_services(doc, report)
+        self._web_services(doc, report, reports_dir)
         self._web_screenshots(doc, report, reports_dir)
         self._identified_issues(doc, report, reports_dir)
 
@@ -629,7 +629,7 @@ class DocxRenderer:
                     )
             doc.add_paragraph()
 
-    def _web_services(self, doc: Document, report: ScanReport) -> None:
+    def _web_services(self, doc: Document, report: ScanReport, reports_dir: Path) -> None:
         services: list[tuple[str, str, str]] = []
         techs: dict[str, dict[str, set]] = {}
         for host in report.hosts:
@@ -666,6 +666,28 @@ class DocxRenderer:
                 row[2].text = ip
         else:
             doc.add_paragraph("No HTTP endpoints were discovered.")
+
+        # Screenshots belong with the web services they depict.
+        shots = [(host.ip, shot) for host in report.hosts for shot in (host.screenshots or [])]
+        if shots:
+            doc.add_heading("Web Service Screenshots", level=2)
+            for ip, shot in shots:
+                png = reports_dir.parent / "ips" / ip / "web" / "screenshots" / shot.filename
+                caption = f"{shot.url}"
+                if shot.title:
+                    caption += f" — {shot.title}"
+                if shot.status_code:
+                    caption += f" (HTTP {shot.status_code})"
+                cap = doc.add_paragraph()
+                cap.add_run(caption).bold = True
+                if png.is_file():
+                    try:
+                        doc.add_picture(str(png), width=Inches(5.5))
+                    except Exception:
+                        log.debug("Could not embed screenshot %s", png)
+                        doc.add_paragraph(f"Screenshot file: {png.name}")
+                else:
+                    doc.add_paragraph(f"Screenshot file not found: {png.name}")
 
         if techs:
             doc.add_heading("Detected Technologies", level=2)

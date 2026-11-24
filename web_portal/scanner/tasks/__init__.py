@@ -837,6 +837,7 @@ def generate_report(self, scan_id, formats=None):
     from wireghost.models.scan import (
         Host as PHost,
         Port as PPort,
+        Screenshot as PScreenshot,
         Service as PService,
         WebTech as PWebTech,
     )
@@ -854,7 +855,7 @@ def generate_report(self, scan_id, formats=None):
 
     # Reconstruct ScanReport from DB
     hosts = []
-    for db_host in scan.hosts.prefetch_related("ports", "technologies").all():
+    for db_host in scan.hosts.prefetch_related("ports", "technologies", "screenshots").all():
         ports = [
             PPort(
                 number=p.number,
@@ -881,6 +882,15 @@ def generate_report(self, scan_id, formats=None):
                 os=db_host.os,
                 mac_address=db_host.mac_address,
                 vendor=db_host.vendor,
+                screenshots=[
+                    PScreenshot(
+                        url=sc.url,
+                        filename=sc.filename,
+                        title=sc.title,
+                        status_code=sc.status_code,
+                    )
+                    for sc in db_host.screenshots.all()
+                ],
             )
         )
 
