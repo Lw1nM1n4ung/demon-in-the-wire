@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,6 +15,7 @@ from docx.shared import Emu, Inches, Pt, RGBColor
 from lxml import etree
 
 from wireghost.models.severity import SEVERITY_COLORS, Severity
+from wireghost.reports.ordering import tool_label, tool_sort_key
 from wireghost.reports.tool_output import collect_tool_outputs
 
 if TYPE_CHECKING:
@@ -781,7 +782,17 @@ class DocxRenderer:
                 level=1,
             )
 
+            # Grouped by the tool that produced them, severity ordering inside
+            # each tool — assessors triage tool by tool.
+            subnet_findings.sort(key=tool_sort_key)
+            tool_counts = Counter(tool_label(f.source) for f in subnet_findings)
+            current_tool = ""
+
             for idx, finding in enumerate(subnet_findings, 1):
+                label = tool_label(finding.source)
+                if label != current_tool:
+                    current_tool = label
+                    doc.add_heading(f"{label} ({tool_counts[label]})", level=2)
                 sev_label = (
                     finding.severity.name.upper()
                     if hasattr(finding.severity, "name")

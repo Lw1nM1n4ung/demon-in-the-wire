@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader
 
-from wireghost.models.severity import SEVERITY_ORDER, Severity
+from wireghost.models.severity import Severity
+from wireghost.reports.ordering import tool_sort_key
 from wireghost.reports.tool_output import collect_tool_outputs
 
 if TYPE_CHECKING:
@@ -58,7 +59,7 @@ class HtmlRenderer:
         # Sort findings by severity order (critical first)
         sorted_findings = sorted(
             report.findings,
-            key=lambda f: SEVERITY_ORDER.get(f.severity, 99),
+            key=tool_sort_key,
         )
 
         recommendations = _build_recommendations(report, stats)

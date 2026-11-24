@@ -308,3 +308,66 @@ def test_docx_web_services_include_screenshot(tmp_path):
     assert "Web Service Screenshots" in text
     assert "https://10.0.0.1/" in text
     assert len(doc.inline_shapes) >= 1, "screenshot image not embedded"
+
+
+def _multi_tool_report() -> ScanReport:
+    def f(source, sev, title, host=IP):
+        return Finding(
+            source=source,
+            host=host,
+            port="22",
+            protocol="tcp",
+            severity=sev,
+            title=title,
+            description="d",
+        )
+
+    findings = [
+        f("nuclei", Severity.LOW, "NUCLEI-LOW"),
+        f("msf_scan", Severity.HIGH, "MSF-HIGH"),
+        f("nuclei", Severity.CRITICAL, "NUCLEI-CRIT"),
+        f("nvd", Severity.MEDIUM, "NVD-MED"),
+    ]
+    return ScanReport(target=f"{IP}/32", hosts=[Host(ip=IP)], findings=findings)
+
+
+def test_identified_issues_grouped_by_tool_not_severity(tmp_path):
+    reports, _ = _tree(tmp_path)
+    out = DocxRenderer().render(_multi_tool_report(), _config(), reports)
+    doc = Document(str(out))
+    text = "\n".join(p.text for p in doc.paragraphs)
+
+    # Tool headings appear, ordered by tool
+    for label in ("Metasploit Framework", "NVD CVE lookup", "Nuclei"):
+        assert label in text
+
+    # Inside a tool, severity still orders (critical before low)
+    assert text.index("NUCLEI-CRIT") < text.index("NUCLEI-LOW")
+    # And a critical nuclei finding no longer jumps ahead of the msf tool block
+    assert text.index("MSF-HIGH") < text.index("NUCLEI-CRIT")
+
+
+def test_html_findings_ordered_by_tool(tmp_path):
+    reports, _ = _tree(tmp_path)
+    out = HtmlRenderer().render(_multi_tool_report(), _config(), reports)
+    html = out.read_text(encoding="utf-8")
+    # Only the findings table matters; the tool-by-tool tables come earlier
+    # and list findings per tool by construction.
+    table = html[html.index("<h2>Vulnerability Findings</h2>") :]
+    assert table.index("MSF-HIGH") < table.index("NUCLEI-CRIT") < table.index("NUCLEI-LOW")
+
+
+def test_dashboard_findings_ordered_by_tool(tmp_path):
+    reports, _ = _tree(tmp_path)
+    out = DashboardRenderer().render(_multi_tool_report(), _config(), reports)
+    html = out.read_text(encoding="utf-8")
+    # Finding cards are the only elements carrying data-source.
+    assert html.index('data-source="msf_scan"') < html.index('data-source="nvd"')
+    assert html.index('data-source="nvd"') < html.index('data-source="nuclei"')
+
+
+def test_finding_sort_key_orders_by_tool_then_severity():
+    from wireghost.reports.ordering import tool_sort_key
+
+    titles = [f.title for f in sorted(_multi_tool_report().findings, key=tool_sort_key)]
+    assert titles == ["MSF-HIGH", "NVD-MED", "NUCLEI-CRIT", "NUCLEI-LOW"]
