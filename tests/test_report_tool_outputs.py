@@ -270,7 +270,13 @@ def _shot_report() -> ScanReport:
         ip=IP,
         web_titles={"https://10.0.0.1/": "Intranet Portal"},
         screenshots=[
-            Screenshot(url="https://10.0.0.1/", filename="shot.png", title="Intranet Portal", status_code=200)
+            # The portal stores the path relative to the scan dir, not a bare name.
+            Screenshot(
+                url="https://10.0.0.1/",
+                filename=f"ips/{IP}/web/screenshots/shot.png",
+                title="Intranet Portal",
+                status_code=200,
+            )
         ],
     )
     return ScanReport(target=f"{IP}/32", hosts=[host], findings=[])

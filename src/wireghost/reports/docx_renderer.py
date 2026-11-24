@@ -672,7 +672,14 @@ class DocxRenderer:
         if shots:
             doc.add_heading("Web Service Screenshots", level=2)
             for ip, shot in shots:
-                png = reports_dir.parent / "ips" / ip / "web" / "screenshots" / shot.filename
+                png = (
+                    reports_dir.parent
+                    / "ips"
+                    / ip
+                    / "web"
+                    / "screenshots"
+                    / Path(shot.filename).name
+                )
                 caption = f"{shot.url}"
                 if shot.title:
                     caption += f" — {shot.title}"
@@ -723,7 +730,14 @@ class DocxRenderer:
         for h in hosts_with_ss:
             doc.add_heading(h.ip, level=2)
             for sc in h.screenshots:
-                png = reports_dir.parent / "ips" / h.ip / "web" / "screenshots" / sc.filename
+                png = (
+                    reports_dir.parent
+                    / "ips"
+                    / h.ip
+                    / "web"
+                    / "screenshots"
+                    / Path(sc.filename).name
+                )
                 if not png.is_file():
                     continue
                 caption = sc.url
@@ -821,7 +835,7 @@ class DocxRenderer:
                     if host and getattr(host, "screenshots", None):
                         ss_dir = reports_dir.parent / "ips" / finding.host / "web" / "screenshots"
                         for sc in host.screenshots:
-                            png = ss_dir / sc.filename
+                            png = ss_dir / Path(sc.filename).name
                             if not png.is_file():
                                 continue
                             caption = sc.url

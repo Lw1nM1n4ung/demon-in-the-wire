@@ -24,7 +24,8 @@ log = logging.getLogger("wireghost")
 
 def _screenshot_b64(reports_dir: Path, host_ip: str, filename: str) -> str:
     """Read a screenshot PNG and return a base64 data URI, or empty string."""
-    png = reports_dir.parent / "ips" / host_ip / "web" / "screenshots" / filename
+    # The DB stores either a bare filename or ips/<host>/web/screenshots/<file>.
+    png = reports_dir.parent / "ips" / host_ip / "web" / "screenshots" / Path(filename).name
     if not png.is_file():
         return ""
     try:
