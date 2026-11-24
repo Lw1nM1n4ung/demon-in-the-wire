@@ -97,3 +97,22 @@ def test_xlsx_has_tool_sheets_with_chunked_full_raw(tmp_path):
     text = "".join(row[5] for row in chunks)
     assert text == raw
     assert all(len(row[5]) <= 32_000 for row in chunks)
+
+
+def test_engine_renders_every_requested_format(tmp_path):
+    """The engine is what the worker calls; it swallows per-format errors, so
+    assert all four bundles actually come back."""
+    from wireghost.config import ScanConfig
+    from wireghost.reports.engine import ReportEngine
+
+    reports, _ = _tree(tmp_path)
+    config = ScanConfig.load(
+        target=f"{IP}/32",
+        report_formats=["html", "dashboard", "docx", "xlsx"],
+        output_dir=str(tmp_path),
+    )
+    paths = ReportEngine(config, reports).generate(_report())
+    assert len(paths) == 4
+    assert {p.suffix for p in paths} == {".html", ".docx", ".xlsx"}
+    for path in paths:
+        assert path.stat().st_size > 0
