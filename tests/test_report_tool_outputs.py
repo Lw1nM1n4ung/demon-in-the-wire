@@ -15,6 +15,7 @@ from wireghost.models.severity import Severity
 from wireghost.reports.dashboard import DashboardRenderer
 from wireghost.reports.docx_renderer import DocxRenderer
 from wireghost.reports.html_renderer import HtmlRenderer
+from wireghost.reports.tool_output import collect_tool_outputs
 from wireghost.reports.xlsx_renderer import XlsxRenderer
 
 IP = "10.0.0.1"
@@ -143,3 +144,53 @@ def test_xlsx_survives_control_chars_in_finding_text(tmp_path):
     report.findings[0].raw_output = DIRTY
     out = XlsxRenderer().render(report, _config(), reports)
     assert out.exists()
+
+
+def test_severity_enum_survives_sanitize():
+    """Severity is a str Enum; sanitizing must not degrade it to a plain str."""
+    report = _report()
+    assert report.findings[0].severity is Severity.LOW
+    assert report.severity_stats() == {Severity.LOW: 1}
+    report.sanitize()
+    assert report.findings[0].severity is Severity.LOW
+    assert report.severity_stats() == {Severity.LOW: 1}
+
+
+def test_scan_window_accepts_aware_timestamps(tmp_path):
+    """The portal stores tz-aware datetimes; file mtimes are naive."""
+    from datetime import datetime, timedelta, timezone
+
+    reports, _ = _tree(tmp_path)
+    (tmp_path / "ips" / IP / "vuln" / "nuclei.json").write_text("x", encoding="utf-8")
+    report = _report()
+    report.scan_start = datetime.now(timezone.utc) - timedelta(minutes=5)
+    report.scan_end = None
+    outputs = {t["source"]: t for t in collect_tool_outputs(report, reports)}
+    assert len(outputs["nuclei"]["files"]) == 1
+
+
+def test_dashboard_renders_with_aware_timestamps(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    reports, _ = _tree(tmp_path)
+    report = _report()
+    report.scan_start = datetime.now(timezone.utc) - timedelta(minutes=5)
+    report.scan_end = datetime.now(timezone.utc)
+    out = DashboardRenderer().render(report, _config(), reports)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_finding_accepts_string_severity_from_db():
+    """Report regeneration rebuilds findings from DB strings."""
+    f = Finding(
+        source="nuclei",
+        host=IP,
+        port="22",
+        protocol="tcp",
+        severity="high",
+        title="t",
+        description="d",
+    )
+    assert f.severity is Severity.HIGH
+    report = ScanReport(target=f"{IP}/32", hosts=[Host(ip=IP)], findings=[f])
+    assert report.severity_stats() == {Severity.HIGH: 1}

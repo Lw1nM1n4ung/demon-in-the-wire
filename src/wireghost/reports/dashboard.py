@@ -252,7 +252,7 @@ def _build_scan_json(
         "hosts_count": len(report.hosts),
         "open_ports": report.total_open_ports,
         "total_findings": len(report.findings),
-        "severity_stats": {sev.value: count for sev, count in stats.items()},
+        "severity_stats": {getattr(sev, "value", sev): count for sev, count in stats.items()},
         "source_counts": source_counts,
         "findings": [
             {

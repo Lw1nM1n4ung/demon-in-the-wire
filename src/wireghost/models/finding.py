@@ -50,3 +50,13 @@ class Finding:
     cvss: str = ""  # CVSS score/metrics
     cwe: str = ""  # CWE ID
     cve: str = ""  # CVE ID
+
+    def __post_init__(self) -> None:
+        # Callers that rebuild findings from the database (report
+        # regeneration) pass severity as a plain string, which broke every
+        # ``severity.value`` consumer.  Normalise once, here.
+        if not isinstance(self.severity, Severity):
+            try:
+                self.severity = Severity(str(self.severity).lower())
+            except ValueError:
+                self.severity = Severity.UNKNOWN

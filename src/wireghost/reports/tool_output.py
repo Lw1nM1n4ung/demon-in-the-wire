@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -171,20 +171,31 @@ def _read_text(path: Path) -> str:
 _WINDOW_SLACK = timedelta(seconds=120)
 
 
+def _as_aware(value: datetime) -> datetime:
+    """Normalise to tz-aware UTC.
+
+    The portal stores tz-aware datetimes while the pipeline uses naive
+    ``datetime.now()``; mixing the two raises TypeError on comparison.
+    """
+    if value.tzinfo is None:
+        return value.astimezone()  # interpret naive as local time
+    return value
+
+
 def _scan_window(report: ScanReport) -> tuple[datetime, datetime] | None:
     """Return the (start, end) window this report covers, if known."""
     start = getattr(report, "scan_start", None)
     if start is None:
         return None
-    end = getattr(report, "scan_end", None) or datetime.now()
-    return start - _WINDOW_SLACK, end + _WINDOW_SLACK
+    end = getattr(report, "scan_end", None) or datetime.now(timezone.utc)
+    return _as_aware(start) - _WINDOW_SLACK, _as_aware(end) + _WINDOW_SLACK
 
 
 def _belongs_to_scan(path: Path, window: tuple[datetime, datetime] | None) -> bool:
     if window is None:
         return True
     try:
-        mtime = datetime.fromtimestamp(path.stat().st_mtime)
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
     except OSError:
         return False
     return window[0] <= mtime <= window[1]
