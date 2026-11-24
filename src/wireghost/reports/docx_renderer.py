@@ -800,8 +800,9 @@ class DocxRenderer:
                 )
                 sev_color = _SEVERITY_RGB.get(finding.severity, _BLACK)
 
-                # Multi-run heading with colored severity label
-                h = doc.add_heading("", level=2)
+                # Multi-run heading with colored severity label; Heading 3 keeps
+                # findings visually subordinate to their tool block.
+                h = doc.add_heading("", level=3)
                 h.clear()
                 run_num = h.add_run(f"{sec}.{idx}. [")
                 run_num.font.color.rgb = _GREEN
