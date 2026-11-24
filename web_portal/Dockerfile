@@ -58,8 +58,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium perl libnet-ssleay-perl libio-socket-ssl-perl \
     libjson-perl libxml-writer-perl libxml-libxml-perl \
     sslscan snmp nfs-common ldap-utils curl unzip \
+    samba-common-bin smbclient \
     ruby ruby-dev build-essential libcurl4 \
     && rm -rf /var/lib/apt/lists/*
+
+# enum4linux — Debian has no package; the classic perl script is what
+# parsers/enum4linux.py expects (enum4linux-ng emits a different format).
+RUN curl -fsSL -o /usr/local/bin/enum4linux \
+        https://raw.githubusercontent.com/CiscoCXSecurity/enum4linux/master/enum4linux.pl \
+    && chmod +x /usr/local/bin/enum4linux \
+    && perl -c /usr/local/bin/enum4linux >/dev/null 2>&1
 
 # searchsploit (exploitdb) — shallow clone to keep image size reasonable.
 RUN for i in 1 2 3 4 5; do \

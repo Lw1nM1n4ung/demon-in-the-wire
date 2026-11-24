@@ -53,7 +53,8 @@ async def run_nikto(
             str(out_file),
             "-Format",
             "json",
-            "-no404",
+            # NB: no -no404 — Nikto 2.6.1 removed it and prints its usage
+            # instead of scanning, which silently produced zero findings.
             "-Tuning",
             "1234589ab",
         ]

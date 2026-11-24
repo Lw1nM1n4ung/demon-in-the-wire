@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import shutil
@@ -25,11 +24,7 @@ def _safe_filename(url: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", url)[:80]
 
 
-async def crawl_host(
-    host: Host,
-    config: ScanConfig,
-    tree: OutputTree
-) -> list[Finding]:
+async def crawl_host(host: Host, config: ScanConfig, tree: OutputTree) -> list[Finding]:
     """Spider all web endpoints on *host* with katana.
 
     Discovered URLs are appended to host.web_endpoints so nuclei
@@ -58,7 +53,10 @@ async def crawl_host(
                 "-d",
                 "3",
                 "-jc",
+                # katana's -kf takes a value; passing -ef straight after it made
+                # katana read "-ef" as the value and abort, so crawl found nothing.
                 "-kf",
+                "all",
                 "-ef",
                 "css,png,jpg,gif,svg,woff,woff2,ico,ttf,eot",
                 "-silent",
