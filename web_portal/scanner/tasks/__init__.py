@@ -576,7 +576,10 @@ def run_scan(self, scan_id):
         # ── Generate reports ──
         from wireghost.reports.engine import ReportEngine
 
-        engine = ReportEngine(config, output_dir)
+        # The pipeline already rendered into <output_dir>/reports; render the
+        # same way here instead of emitting a second tree at the scan root,
+        # which left stale duplicates that looked like missing formats.
+        engine = ReportEngine(config, output_dir / "reports")
         with _report_render_lock():
             report_paths = engine.generate(report)
 
@@ -946,7 +949,7 @@ def generate_report(self, scan_id, formats=None):
     # Delete old reports for this scan
     Report.objects.filter(scan=scan).delete()
 
-    engine = ReportEngine(config, output_dir)
+    engine = ReportEngine(config, reports_dir)
     with _report_render_lock():
         report_paths = engine.generate(report)
 
