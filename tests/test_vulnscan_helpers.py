@@ -92,9 +92,17 @@ class TestBuildNucleiTargets:
 
 
 class TestCollectTemplateDirs:
-    def test_no_templates_returns_empty(self):
+    def test_no_templates_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(vulnscan, "BUNDLED_NUCLEI_TEMPLATES", tmp_path / "missing")
         cfg = _FakeConfig(nuclei_templates="")
         assert _collect_template_dirs(cfg) == []
+
+    def test_bundled_dir_used_when_no_explicit_templates(self, tmp_path, monkeypatch):
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        monkeypatch.setattr(vulnscan, "BUNDLED_NUCLEI_TEMPLATES", bundled)
+        cfg = _FakeConfig(nuclei_templates="")
+        assert _collect_template_dirs(cfg) == [bundled]
 
     def test_custom_dir_only(self, tmp_path: Path):
         custom = tmp_path / "custom_templates"

@@ -28,6 +28,11 @@ log = logging.getLogger("wireghost")
 _HTTP_SERVICES = frozenset({"http", "http-alt", "http-proxy"})
 _HTTPS_SERVICES = frozenset({"https", "ssl", "ssl/http", "ssl/https", "https-alt"})
 
+# Workers extract the bundled template archives here at container start.  When
+# a scan does not specify an explicit template directory, prefer this bundle
+# over nuclei's built-in default subset.
+BUNDLED_NUCLEI_TEMPLATES = Path("/opt/nuclei-external-templates")
+
 
 def _build_nuclei_targets(host: Host) -> list[str]:
     """Build the nuclei target list for *host* — every open TCP port.
@@ -71,14 +76,18 @@ def _build_nuclei_targets(host: Host) -> list[str]:
 
 def _collect_template_dirs(config: ScanConfig) -> list[Path]:
     """Return the list of template directories nuclei should scan."""
-    dirs: list[Path] = []
     if config.nuclei_templates:
-        dirs.append(Path(config.nuclei_templates))
+        dirs: list[Path] = [Path(config.nuclei_templates)]
         if config.nuclei_default_templates:
             default_dir = Path.home() / "nuclei-templates"
             if default_dir.is_dir():
                 dirs.append(default_dir)
-    return dirs
+        return dirs
+    # No explicit template dir: use the worker's extracted bundle (full set)
+    # instead of nuclei's built-in default subset.
+    if BUNDLED_NUCLEI_TEMPLATES.is_dir():
+        return [BUNDLED_NUCLEI_TEMPLATES]
+    return []
 
 
 def _glob_templates(dirs: list[Path]) -> list[str]:
