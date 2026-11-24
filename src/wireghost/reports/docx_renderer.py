@@ -864,14 +864,21 @@ class DocxRenderer:
                 doc.add_heading("Vulnerability Summary", level=3)
                 desc = finding.description or finding.raw_output or finding.title
                 # A single paragraph has to stay within Word's limits.
+                truncated_note = ""
                 if len(desc) > _DOCX_RAW_PER_FILE:
-                    doc.add_paragraph(desc[:_DOCX_RAW_PER_FILE])
-                    doc.add_paragraph(
+                    truncated_note = (
                         f"[truncated: {len(desc) - _DOCX_RAW_PER_FILE:,} characters "
                         "omitted from this finding's description]"
                     )
-                else:
-                    doc.add_paragraph(desc)
+                    desc = desc[:_DOCX_RAW_PER_FILE]
+                lines = [ln for ln in desc.splitlines() if ln.strip()] or [desc]
+                doc.add_paragraph(lines[0])
+                for line in lines[1:]:
+                    extra = doc.add_paragraph()
+                    run = extra.add_run(line)
+                    run.font.size = Pt(9)
+                if truncated_note:
+                    doc.add_paragraph(truncated_note)
 
                 if finding.source == "nuclei_external":
                     fp_para = doc.add_paragraph()

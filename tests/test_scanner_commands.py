@@ -75,3 +75,32 @@ async def test_katana_kf_flag_receives_a_value(tmp_path, monkeypatch):
     cmd = captured["cmd"]
     assert "-kf" in cmd
     assert cmd[cmd.index("-kf") + 1] == "all", "katana -kf requires a value"
+
+
+def test_katana_finding_dedupes_query_variants_and_sets_port():
+    from wireghost.pipeline.web_crawl import _crawl_finding
+
+    host = Host(ip="10.0.0.1")
+    urls = {
+        "http://10.0.0.1:8080/app.js",
+        "http://10.0.0.1:8080/app.js?v=1790057310715",
+        "http://10.0.0.1:8080/admin",
+    }
+    finding = _crawl_finding(host, "http://10.0.0.1:8080/", urls)
+    assert finding is not None
+    # query-string duplicate collapsed, so 2 not 3
+    assert "2 endpoint(s)" in finding.title
+    assert finding.description.count("\n") == 1
+    assert finding.port == "8080"
+
+
+def test_katana_finding_caps_reported_urls():
+    from wireghost.pipeline.web_crawl import _MAX_REPORTED_URLS, _crawl_finding
+
+    host = Host(ip="10.0.0.1")
+    urls = {f"http://10.0.0.1:8080/p{i}" for i in range(_MAX_REPORTED_URLS + 10)}
+    finding = _crawl_finding(host, "http://10.0.0.1:8080/", urls)
+    lines = finding.description.splitlines()
+    assert len(lines) == _MAX_REPORTED_URLS + 1
+    assert "and 10 more" in lines[-1]
+    assert f"{_MAX_REPORTED_URLS + 10} endpoint(s)" in finding.title

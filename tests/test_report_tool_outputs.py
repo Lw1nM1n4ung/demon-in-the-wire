@@ -371,3 +371,26 @@ def test_finding_sort_key_orders_by_tool_then_severity():
 
     titles = [f.title for f in sorted(_multi_tool_report().findings, key=tool_sort_key)]
     assert titles == ["MSF-HIGH", "NVD-MED", "NUCLEI-CRIT", "NUCLEI-LOW"]
+
+
+def test_docx_splits_multiline_description_into_lines(tmp_path):
+    """katana findings are newline-separated URL lists; Word must show lines."""
+    reports, _ = _tree(tmp_path)
+    f = Finding(
+        source="katana",
+        host=IP,
+        port="8080",
+        protocol="tcp",
+        severity=Severity.INFO,
+        title="Web crawl discovered 3 endpoint(s)",
+        description="http://10.0.0.1/a.js\nhttp://10.0.0.1/b\nhttp://10.0.0.1/c",
+    )
+    report = ScanReport(target=f"{IP}/32", hosts=[Host(ip=IP)], findings=[f])
+    out = DocxRenderer().render(report, _config(), reports)
+    doc = Document(str(out))
+    texts = [p.text for p in doc.paragraphs]
+    assert "http://10.0.0.1/a.js" in texts
+    assert "http://10.0.0.1/b" in texts
+    assert "http://10.0.0.1/c" in texts
+    # and not one blob with embedded newlines
+    assert not any(t == f.description for t in texts)
