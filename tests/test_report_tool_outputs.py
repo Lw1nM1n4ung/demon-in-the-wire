@@ -116,3 +116,30 @@ def test_engine_renders_every_requested_format(tmp_path):
     assert {p.suffix for p in paths} == {".html", ".docx", ".xlsx"}
     for path in paths:
         assert path.stat().st_size > 0
+
+
+DIRTY = "[+] \x1b[32mGREEN\x1b[0m\x00\x07 text"
+
+
+def test_docx_survives_control_chars_in_finding_text(tmp_path):
+    """nxc/enum4linux findings carry ANSI escapes and NULs; Word rejects them."""
+    reports, _ = _tree(tmp_path)
+    report = _report()
+    report.findings[0].description = DIRTY
+    report.findings[0].raw_output = DIRTY
+    report.findings[0].title = "t" + DIRTY
+    out = DocxRenderer().render(report, _config(), reports)
+    doc = Document(str(out))
+    joined = "\n".join(p.text for p in doc.paragraphs)
+    for ch in ("\x00", "\x07", "\x1b"):
+        assert ch not in joined
+    assert "GREEN" in joined
+
+
+def test_xlsx_survives_control_chars_in_finding_text(tmp_path):
+    reports, _ = _tree(tmp_path)
+    report = _report()
+    report.findings[0].description = DIRTY
+    report.findings[0].raw_output = DIRTY
+    out = XlsxRenderer().render(report, _config(), reports)
+    assert out.exists()

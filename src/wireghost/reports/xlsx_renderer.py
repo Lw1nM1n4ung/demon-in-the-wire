@@ -23,6 +23,7 @@ class XlsxRenderer:
         config: ScanConfig,
         reports_dir: Path,
     ) -> Path:
+        report.sanitize()
         wb = Workbook()
 
         # --- Sheet 1: summary ------------------------------------------

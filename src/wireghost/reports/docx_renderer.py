@@ -206,6 +206,9 @@ class DocxRenderer:
         config: ScanConfig,
         reports_dir: Path,
     ) -> Path:
+        # Findings/hosts can be appended to after construction, so re-clean
+        # before writing: Word rejects NUL/control characters outright.
+        report.sanitize()
         self._reset_doc_pr_counter()
         doc = Document()
         _apply_styles(doc)

@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from wireghost.utils.text import xml_safe
+
 if TYPE_CHECKING:
     from wireghost.models.report import ScanReport
-
-# Characters XML 1.0 cannot store: everything below 0x20 except tab/LF/CR.
-_XML_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
-# CSI escape sequences such as the colours emitted by enum4linux/netexec.
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 # Every tool the pipeline can run.  Tools without dedicated raw files still
 # appear in the report (their evidence lives in Finding.raw_output/description).
@@ -165,9 +161,8 @@ def _read_text(path: Path) -> str:
         return ""
     # Excel/Word store text as XML, which cannot represent most control
     # characters.  enum4linux, netexec and Metasploit emit ANSI colour codes
-    # and the odd NUL, and one bad byte would abort the whole bundle — drop
-    # the escapes and any remaining illegal character instead.
-    return _XML_ILLEGAL.sub("", _ANSI_ESCAPE.sub("", raw))
+    # and the odd NUL, and one bad byte would abort the whole bundle.
+    return xml_safe(raw)
 
 
 # Output directories are keyed by target, so scanning the same subnet twice
