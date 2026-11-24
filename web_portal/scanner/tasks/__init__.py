@@ -3,6 +3,9 @@
 import json
 import logging
 import asyncio
+import time
+import uuid
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -12,6 +15,48 @@ from django.utils import timezone
 from scanner.policy_tools import normalize_policy_tools
 
 logger = logging.getLogger(__name__)
+
+# Rendering a report bundle holds every raw tool file in memory: the raw tree
+# for a /24 with per-host nuclei output is ~100 MB, and Jinja/XML escaping
+# roughly doubles that.  Four scans finishing at once would otherwise render
+# four bundles concurrently and exceed the worker's 2 GB memory limit, so
+# rendering is serialised across worker processes with a cache-backed lock.
+_REPORT_LOCK_KEY = "wireghost:report-render-lock"
+_REPORT_LOCK_TTL = 1800
+_REPORT_LOCK_WAIT = 2400
+
+
+@contextmanager
+def _report_render_lock():
+    """Serialise report rendering across Celery child processes."""
+    from django.core.cache import cache
+
+    token = uuid.uuid4().hex
+    deadline = time.monotonic() + _REPORT_LOCK_WAIT
+    waited = False
+    while not cache.add(_REPORT_LOCK_KEY, token, timeout=_REPORT_LOCK_TTL):
+        if not waited:
+            logger.info("Report rendering is busy — waiting for the lock")
+            waited = True
+        if time.monotonic() >= deadline:
+            # Never drop a report because the lock is stuck; risking one
+            # concurrent render beats losing the bundle entirely.
+            logger.warning(
+                "Report render lock not acquired after %ss — proceeding anyway",
+                _REPORT_LOCK_WAIT,
+            )
+            break
+        time.sleep(2)
+
+    try:
+        yield
+    finally:
+        try:
+            if cache.get(_REPORT_LOCK_KEY) == token:
+                cache.delete(_REPORT_LOCK_KEY)
+        except Exception:
+            logger.exception("Failed to release the report render lock")
+
 
 # Register AD recon task with Celery autodiscover
 from .ad_recon import ad_recon_task  # noqa: F401
@@ -532,7 +577,8 @@ def run_scan(self, scan_id):
         from wireghost.reports.engine import ReportEngine
 
         engine = ReportEngine(config, output_dir)
-        report_paths = engine.generate(report)
+        with _report_render_lock():
+            report_paths = engine.generate(report)
 
         for path in report_paths:
             fmt = path.suffix.lstrip(".")
@@ -901,7 +947,8 @@ def generate_report(self, scan_id, formats=None):
     Report.objects.filter(scan=scan).delete()
 
     engine = ReportEngine(config, output_dir)
-    report_paths = engine.generate(report)
+    with _report_render_lock():
+        report_paths = engine.generate(report)
 
     for path in report_paths:
         fmt = path.suffix.lstrip(".")
