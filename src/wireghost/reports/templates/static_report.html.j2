@@ -226,7 +226,70 @@
     {% else %}
     <p>No open ports.</p>
     {% endif %}
+    {% if host.web_endpoints %}
+    <p><strong>Web endpoints:</strong></p>
+    <ul>
+      {% for ep in host.web_endpoints %}
+      <li><a href="{{ ep }}">{{ ep }}</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
     {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Web Services -->
+  {% set services = [] %}
+  {% for host in hosts %}
+    {% for url, title in host.web_titles.items() %}
+      {% if url %}{% if services.append({"url": url, "title": title, "ip": host.ip}) %}{% endif %}{% endif %}
+    {% endfor %}
+  {% endfor %}
+  {% if services %}
+  <div class="section">
+    <h2>Web Services</h2>
+    <table>
+      <thead>
+        <tr><th>URL</th><th>Page Title</th><th>Host</th></tr>
+      </thead>
+      <tbody>
+        {% for s in services %}
+        <tr>
+          <td><a href="{{ s.url }}">{{ s.url }}</a></td>
+          <td>{{ s.title }}</td>
+          <td>{{ s.ip }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Detected Technologies -->
+  {% set tech_rows = [] %}
+  {% for host in hosts %}
+    {% for t in host.technologies %}
+      {% if tech_rows.append({"name": t.name, "version": t.version, "url": t.url, "ip": host.ip}) %}{% endif %}
+    {% endfor %}
+  {% endfor %}
+  {% if tech_rows %}
+  <div class="section">
+    <h2>Detected Technologies</h2>
+    <table>
+      <thead>
+        <tr><th>Technology</th><th>Version</th><th>Endpoint</th><th>Host</th></tr>
+      </thead>
+      <tbody>
+        {% for t in tech_rows %}
+        <tr>
+          <td>{{ t.name }}</td>
+          <td>{{ t.version }}</td>
+          <td>{{ t.url }}</td>
+          <td>{{ t.ip }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
   {% endif %}
 

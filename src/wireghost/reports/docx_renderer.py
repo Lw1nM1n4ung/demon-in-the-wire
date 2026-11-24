@@ -236,6 +236,7 @@ class DocxRenderer:
         self._open_ports(doc, report)
         self._tool_by_tool(doc, report, reports_dir)
         doc.add_page_break()
+        self._web_services(doc, report)
         self._web_screenshots(doc, report, reports_dir)
         self._identified_issues(doc, report, reports_dir)
 
@@ -627,6 +628,54 @@ class DocxRenderer:
                         f"characters omitted — full text: {raw['path']}]"
                     )
             doc.add_paragraph()
+
+    def _web_services(self, doc: Document, report: ScanReport) -> None:
+        services: list[tuple[str, str, str]] = []
+        techs: dict[str, dict[str, set]] = {}
+        for host in report.hosts:
+            for url, title in (host.web_titles or {}).items():
+                if url:
+                    services.append((host.ip, url, title or ""))
+            for tech in host.technologies or []:
+                label = tech.name + (f" {tech.version}" if tech.version else "")
+                techs.setdefault(label, {"endpoints": set(), "hosts": set()})
+                techs[label]["hosts"].add(host.ip)
+                if tech.url:
+                    techs[label]["endpoints"].add(tech.url)
+
+        if not services and not techs:
+            return
+
+        sec = self._next_section()
+        doc.add_heading(f"{sec}. Web Services", level=1)
+        doc.add_paragraph(
+            "HTTP endpoints discovered on the in-scope hosts, with the page title "
+            "returned at the time of the assessment."
+        )
+
+        if services:
+            table = doc.add_table(rows=1, cols=3)
+            table.style = "Light Grid Accent 1"
+            header = table.rows[0].cells
+            for idx, label in enumerate(("URL", "Page Title", "Host")):
+                header[idx].text = label
+            for ip, url, title in services:
+                row = table.add_row().cells
+                row[0].text = url
+                row[1].text = title
+                row[2].text = ip
+        else:
+            doc.add_paragraph("No HTTP endpoints were discovered.")
+
+        if techs:
+            doc.add_heading("Detected Technologies", level=2)
+            for label in sorted(techs):
+                hosts = ", ".join(sorted(techs[label]["hosts"], key=_ip_key))
+                endpoints = ", ".join(sorted(techs[label]["endpoints"]))
+                line = f"{label} — hosts: {hosts}"
+                if endpoints:
+                    line += f" — endpoints: {endpoints}"
+                doc.add_paragraph(line)
 
     def _web_screenshots(
         self,

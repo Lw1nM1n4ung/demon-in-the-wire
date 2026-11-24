@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 
 from wireghost.models.finding import Finding
 from wireghost.models.report import ScanReport
-from wireghost.models.scan import Host, Port, Service
+from wireghost.models.scan import Host, Port, Service, WebTech
 from wireghost.models.severity import Severity
 from wireghost.reports.dashboard import DashboardRenderer
 from wireghost.reports.docx_renderer import DocxRenderer
@@ -220,3 +220,39 @@ def test_docx_raw_text_is_budgeted_to_stay_openable(tmp_path):
     text = "\n".join(p.text for p in Document(str(out)).paragraphs)
     assert "truncated" in text
     assert "Full text" in text or "full text" in text
+
+
+def _web_report() -> ScanReport:
+    host = Host(
+        ip=IP,
+        ports=[Port(number=443, service=Service(name="https"))],
+        web_endpoints=["https://10.0.0.1/"],
+        web_titles={"https://10.0.0.1/": "Intranet Portal"},
+        technologies=[WebTech(name="nginx", version="1.24", url="https://10.0.0.1/")],
+    )
+    return ScanReport(target=f"{IP}/32", hosts=[host], findings=[])
+
+
+def test_html_summary_includes_web_services_and_technologies(tmp_path):
+    reports, _ = _tree(tmp_path)
+    out = HtmlRenderer().render(_web_report(), _config(), reports)
+    html = out.read_text(encoding="utf-8")
+    assert "Web Services" in html
+    assert "Intranet Portal" in html
+    assert "https://10.0.0.1/" in html
+    assert "Detected Technologies" in html
+    assert "nginx" in html
+
+
+def test_docx_includes_web_services_and_technologies(tmp_path):
+    reports, _ = _tree(tmp_path)
+    out = DocxRenderer().render(_web_report(), _config(), reports)
+    text = "\n".join(p.text for p in Document(str(out)).paragraphs)
+    table_text = "\n".join(
+        cell.text for t in Document(str(out)).tables for row in t.rows for cell in row.cells
+    )
+    joined = text + "\n" + table_text
+    assert "Web Services" in joined
+    assert "Intranet Portal" in joined
+    assert "Detected Technologies" in joined
+    assert "nginx" in joined
