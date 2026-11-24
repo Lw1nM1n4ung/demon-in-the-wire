@@ -204,7 +204,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2048M
+          # 8 GB: a scan runs one nuclei process per host (~650 MB each) and
+          # report rendering holds the whole raw tree in memory (~500 MB peak
+          # for a /24 with per-host nuclei JSON).  2 GB killed both.
+          memory: 8192M
           cpus: "2.0"
 
   beat:
