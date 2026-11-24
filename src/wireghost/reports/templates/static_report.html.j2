@@ -99,6 +99,65 @@
     </div>
   </div>
 
+  <!-- Tool-by-tool raw output -->
+  {% if tool_outputs %}
+  <div class="section">
+    <h2>Tool-by-Tool Results</h2>
+    <p style="font-size:0.85rem;color:#555;">Execution status, commands and full raw output for every scanner in this assessment.</p>
+    <table>
+      <thead>
+        <tr><th>Tool</th><th>Status</th><th>Findings</th><th>C</th><th>H</th><th>M</th><th>L</th><th>I</th><th>Hosts</th><th>Files</th></tr>
+      </thead>
+      <tbody>
+        {% for t in tool_outputs %}
+        <tr>
+          <td>{{ t.label }}</td>
+          <td>{{ t.status }}</td>
+          <td>{{ t.finding_count }}</td>
+          <td>{{ t.severity_counts.critical }}</td>
+          <td>{{ t.severity_counts.high }}</td>
+          <td>{{ t.severity_counts.medium }}</td>
+          <td>{{ t.severity_counts.low }}</td>
+          <td>{{ t.severity_counts.info }}</td>
+          <td style="font-size:0.7rem;">{{ t.hosts|join(', ') }}</td>
+          <td>{{ t.files|length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% for t in tool_outputs %}
+    <details style="margin-top:1.2rem;border:1px solid #ddd;border-radius:6px;padding:0.6rem 0.8rem;">
+      <summary style="cursor:pointer;font-weight:600;">{{ t.label }} &mdash; {{ t.finding_count }} finding(s) &middot; {{ t.files|length }} file(s)</summary>
+      <p style="font-size:0.8rem;"><strong>Command:</strong> <code>{{ t.command }}</code></p>
+      {% if t.findings %}
+      <table style="margin-top:0.5rem;">
+        <thead><tr><th>Severity</th><th>Host</th><th>Port</th><th>Title</th></tr></thead>
+        <tbody>
+          {% for f in t.findings %}
+          <tr>
+            <td><span class="badge badge-{{ f.severity.value }}">{{ f.severity.value }}</span></td>
+            <td>{{ f.host }}</td>
+            <td>{{ f.port }}</td>
+            <td>{{ f.title }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% for file in t.files %}
+      <h4 style="margin:0.9rem 0 0.3rem 0;font-size:0.8rem;">{{ file.host }} &mdash; {{ file.name }} ({{ file.size }} bytes)</h4>
+      {% if file.binary %}
+      <p style="font-size:0.75rem;color:#555;">Binary file: {{ file.path }}</p>
+      {% else %}
+      <pre style="background:#f6f8fa;border:1px solid #e1e4e8;padding:0.6rem;font-size:0.72rem;white-space:pre-wrap;word-break:break-all;max-height:1200px;overflow:auto;">{{ file.text }}</pre>
+      {% endif %}
+      {% endfor %}
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <!-- Findings table -->
   {% if findings %}
   <div class="section">

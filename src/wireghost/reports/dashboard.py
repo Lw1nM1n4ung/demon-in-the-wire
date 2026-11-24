@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from wireghost.models.severity import SEVERITY_ORDER, Severity
+from wireghost.reports.tool_output import collect_tool_outputs
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
@@ -115,12 +116,8 @@ class DashboardRenderer:
                             "protocol": p.protocol,
                             "service": {
                                 "name": p.service.name if p.service else "",
-                                "product": p.service.product
-                                if p.service
-                                else "",
-                                "version": p.service.version
-                                if p.service
-                                else "",
+                                "product": p.service.product if p.service else "",
+                                "version": p.service.version if p.service else "",
                             },
                         }
                         for p in h.open_ports
@@ -142,10 +139,7 @@ class DashboardRenderer:
             )
 
         # Prepare technology dicts for template
-        tech_dicts = [
-            {"name": t.name, "version": t.version}
-            for t in technologies
-        ]
+        tech_dicts = [{"name": t.name, "version": t.version} for t in technologies]
 
         # Separate known exploits (searchsploit findings)
         exploits = [f for f in findings_dicts if f["source"] == "searchsploit"]
@@ -155,9 +149,7 @@ class DashboardRenderer:
 
         html = template.render(
             title=config.report_title,
-            date=(report.scan_start or datetime.now()).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
+            date=(report.scan_start or datetime.now()).strftime("%Y-%m-%d %H:%M:%S"),
             target=report.target,
             hosts_count=len(report.hosts),
             open_ports=report.total_open_ports,
@@ -179,6 +171,7 @@ class DashboardRenderer:
             subnets=sorted(subnet_hosts.keys()),
             subnet_hosts=subnet_hosts,
             subnet_hosts_data=subnet_hosts_data,
+            tool_outputs=collect_tool_outputs(report, reports_dir),
         )
 
         out = reports_dir / "dashboard.html"
@@ -259,9 +252,7 @@ def _build_scan_json(
         "hosts_count": len(report.hosts),
         "open_ports": report.total_open_ports,
         "total_findings": len(report.findings),
-        "severity_stats": {
-            sev.value: count for sev, count in stats.items()
-        },
+        "severity_stats": {sev.value: count for sev, count in stats.items()},
         "source_counts": source_counts,
         "findings": [
             {

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from jinja2 import Environment, FileSystemLoader
 
 from wireghost.models.severity import SEVERITY_ORDER, Severity
+from wireghost.reports.tool_output import collect_tool_outputs
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
@@ -47,15 +48,11 @@ class HtmlRenderer:
             loader=FileSystemLoader(str(_TEMPLATE_DIR)),
             autoescape=True,
         )
-        env.filters["screenshot_b64"] = lambda fname, ip: _screenshot_b64(
-            reports_dir, ip, fname
-        )
+        env.filters["screenshot_b64"] = lambda fname, ip: _screenshot_b64(reports_dir, ip, fname)
         template = env.get_template("static_report.html.j2")
 
         stats = report.severity_stats()
-        crit_high = stats.get(Severity.CRITICAL, 0) + stats.get(
-            Severity.HIGH, 0
-        )
+        crit_high = stats.get(Severity.CRITICAL, 0) + stats.get(Severity.HIGH, 0)
 
         # Sort findings by severity order (critical first)
         sorted_findings = sorted(
@@ -67,9 +64,7 @@ class HtmlRenderer:
 
         html = template.render(
             title=config.report_title,
-            date=(report.scan_start or datetime.now()).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
+            date=(report.scan_start or datetime.now()).strftime("%Y-%m-%d %H:%M:%S"),
             target=report.target,
             crit_high=crit_high,
             hosts_count=len(report.hosts),
@@ -80,6 +75,7 @@ class HtmlRenderer:
             medium=stats.get(Severity.MEDIUM, 0),
             findings=sorted_findings,
             hosts=report.hosts,
+            tool_outputs=collect_tool_outputs(report, reports_dir),
             recommendations=recommendations,
         )
 
@@ -93,14 +89,10 @@ def _build_recommendations(
     stats: dict[Severity, int],
 ) -> list[str]:
     recs: list[str] = []
-    crit_high = stats.get(Severity.CRITICAL, 0) + stats.get(
-        Severity.HIGH, 0
-    )
+    crit_high = stats.get(Severity.CRITICAL, 0) + stats.get(Severity.HIGH, 0)
 
     if crit_high > 0:
-        recs.append(
-            f"IMMEDIATE ACTION: Address {crit_high} critical/high severity vulnerabilities"
-        )
+        recs.append(f"IMMEDIATE ACTION: Address {crit_high} critical/high severity vulnerabilities")
 
     ports_seen = {f.port for f in report.findings}
     if ports_seen & {"80", "443", "8080", "8443"}:

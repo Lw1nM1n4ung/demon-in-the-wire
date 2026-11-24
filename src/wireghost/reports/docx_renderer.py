@@ -15,6 +15,7 @@ from docx.shared import Emu, Inches, Pt, RGBColor
 from lxml import etree
 
 from wireghost.models.severity import SEVERITY_COLORS, Severity
+from wireghost.reports.tool_output import collect_tool_outputs
 
 if TYPE_CHECKING:
     from wireghost.config import ScanConfig
@@ -42,9 +43,14 @@ def _next_doc_pr_id() -> int:
 
 
 def _make_anchor_image(
-    part, image_path: str, width: int, height: int,
-    pos_h_from: str, pos_h_offset: int,
-    pos_v_from: str, pos_v_offset: int,
+    part,
+    image_path: str,
+    width: int,
+    height: int,
+    pos_h_from: str,
+    pos_h_offset: int,
+    pos_v_from: str,
+    pos_v_offset: int,
 ) -> etree._Element:
     """Create a wp:anchor element for a floating image, matching reference doc format."""
     # Add image relationship
@@ -65,45 +71,49 @@ def _make_anchor_image(
         ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
         '  <wp:simplePos x="0" y="0"/>'
         '  <wp:positionH relativeFrom="{pos_h_from}">'
-        '    <wp:posOffset>{pos_h_offset}</wp:posOffset>'
-        '  </wp:positionH>'
+        "    <wp:posOffset>{pos_h_offset}</wp:posOffset>"
+        "  </wp:positionH>"
         '  <wp:positionV relativeFrom="{pos_v_from}">'
-        '    <wp:posOffset>{pos_v_offset}</wp:posOffset>'
-        '  </wp:positionV>'
+        "    <wp:posOffset>{pos_v_offset}</wp:posOffset>"
+        "  </wp:positionV>"
         '  <wp:extent cx="{cx}" cy="{cy}"/>'
-        '  <wp:wrapNone/>'
+        "  <wp:wrapNone/>"
         '  <wp:docPr id="{doc_pr_id}" name="Picture"/>'
-        '  <a:graphic>'
+        "  <a:graphic>"
         '    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-        '      <pic:pic>'
-        '        <pic:nvPicPr>'
+        "      <pic:pic>"
+        "        <pic:nvPicPr>"
         '          <pic:cNvPr id="0" name="Picture"/>'
-        '          <pic:cNvPicPr/>'
-        '        </pic:nvPicPr>'
-        '        <pic:blipFill>'
+        "          <pic:cNvPicPr/>"
+        "        </pic:nvPicPr>"
+        "        <pic:blipFill>"
         '          <a:blip r:embed="{rel_id}"/>'
-        '          <a:stretch><a:fillRect/></a:stretch>'
-        '        </pic:blipFill>'
-        '        <pic:spPr>'
-        '          <a:xfrm>'
+        "          <a:stretch><a:fillRect/></a:stretch>"
+        "        </pic:blipFill>"
+        "        <pic:spPr>"
+        "          <a:xfrm>"
         '            <a:off x="0" y="0"/>'
         '            <a:ext cx="{cx}" cy="{cy}"/>'
-        '          </a:xfrm>'
+        "          </a:xfrm>"
         '          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-        '        </pic:spPr>'
-        '      </pic:pic>'
-        '    </a:graphicData>'
-        '  </a:graphic>'
-        '</wp:anchor>'
+        "        </pic:spPr>"
+        "      </pic:pic>"
+        "    </a:graphicData>"
+        "  </a:graphic>"
+        "</wp:anchor>"
     ).format(
-        cx=width, cy=height,
-        pos_h_from=pos_h_from, pos_h_offset=pos_h_offset,
-        pos_v_from=pos_v_from, pos_v_offset=pos_v_offset,
+        cx=width,
+        cy=height,
+        pos_h_from=pos_h_from,
+        pos_h_offset=pos_h_offset,
+        pos_v_from=pos_v_from,
+        pos_v_offset=pos_v_offset,
         rel_id=rel_id,
         doc_pr_id=doc_pr_id,
     )
 
     return etree.fromstring(anchor_xml)
+
 
 # Brand color from reference document
 _GREEN = RGBColor(0x00, 0x6D, 0x38)
@@ -215,6 +225,7 @@ class DocxRenderer:
         self._live_hosts(doc, report)
         doc.add_page_break()
         self._open_ports(doc, report)
+        self._tool_by_tool(doc, report, reports_dir)
         doc.add_page_break()
         self._web_screenshots(doc, report, reports_dir)
         self._identified_issues(doc, report, reports_dir)
@@ -260,7 +271,9 @@ class DocxRenderer:
 
     @staticmethod
     def _add_header_logos(
-        doc: Document, logo: Path | None, header_logo: Path | None,
+        doc: Document,
+        logo: Path | None,
+        header_logo: Path | None,
     ) -> None:
         """Add floating logos to page header matching reference positioning."""
         if not logo and not header_logo:
@@ -274,10 +287,14 @@ class DocxRenderer:
         # LEFT: main logo (logo.png, 0.92x0.52in) at margin left
         if logo:
             anchor = _make_anchor_image(
-                header.part, str(logo),
-                width=Emu(838200), height=Emu(472440),      # 0.92 x 0.52 in
-                pos_h_from="margin", pos_h_offset=-695960,   # left side
-                pos_v_from="paragraph", pos_v_offset=-291465,
+                header.part,
+                str(logo),
+                width=Emu(838200),
+                height=Emu(472440),  # 0.92 x 0.52 in
+                pos_h_from="margin",
+                pos_h_offset=-695960,  # left side
+                pos_v_from="paragraph",
+                pos_v_offset=-291465,
             )
             run = hp.add_run()
             run._element.append(anchor)
@@ -285,10 +302,14 @@ class DocxRenderer:
         # RIGHT: secondary logo (logo_header.png, 1.03x0.58in) at column right
         if header_logo:
             anchor = _make_anchor_image(
-                header.part, str(header_logo),
-                width=Emu(945515), height=Emu(531495),     # 1.03 x 0.58 in
-                pos_h_from="column", pos_h_offset=5763260,  # right side
-                pos_v_from="paragraph", pos_v_offset=-296545,
+                header.part,
+                str(header_logo),
+                width=Emu(945515),
+                height=Emu(531495),  # 1.03 x 0.58 in
+                pos_h_from="column",
+                pos_h_offset=5763260,  # right side
+                pos_v_from="paragraph",
+                pos_v_offset=-296545,
             )
             run = hp.add_run()
             run._element.append(anchor)
@@ -365,17 +386,24 @@ class DocxRenderer:
         path.write_bytes(buf.getvalue())
 
     def _cover_page(
-        self, doc: Document, config: ScanConfig, report: ScanReport,
+        self,
+        doc: Document,
+        config: ScanConfig,
+        report: ScanReport,
         logo: Path | None = None,
     ) -> None:
         # Cover logo (floating, ~2.5 x 1.41 inches, centered on margin)
         if logo:
             logo_para = doc.add_paragraph()
             anchor = _make_anchor_image(
-                doc.part, str(logo),
-                width=Emu(2286000), height=Emu(1288415),  # 2.50 x 1.41 in
-                pos_h_from="margin", pos_h_offset=1840230,  # centered (exact from reference)
-                pos_v_from="margin", pos_v_offset=0,
+                doc.part,
+                str(logo),
+                width=Emu(2286000),
+                height=Emu(1288415),  # 2.50 x 1.41 in
+                pos_h_from="margin",
+                pos_h_offset=1840230,  # centered (exact from reference)
+                pos_v_from="margin",
+                pos_v_offset=0,
             )
             run = logo_para.add_run()
             run._element.append(anchor)
@@ -422,9 +450,7 @@ class DocxRenderer:
 
         doc.add_page_break()
 
-    def _executive_summary(
-        self, doc: Document, config: ScanConfig, report: ScanReport
-    ) -> None:
+    def _executive_summary(self, doc: Document, config: ScanConfig, report: ScanReport) -> None:
         self._next_section()  # section 1 (unnumbered)
         doc.add_heading("Executive Summary", level=1)
         doc.add_paragraph(
@@ -473,9 +499,7 @@ class DocxRenderer:
     def _target_subnets(self, doc: Document, report: ScanReport) -> None:
         self._next_section()  # section 2 (unnumbered)
         doc.add_heading("Target Subnets", level=1)
-        doc.add_paragraph(
-            "Vulnerability Assessment was conducted on the following targets."
-        )
+        doc.add_paragraph("Vulnerability Assessment was conducted on the following targets.")
 
         subnets = _group_hosts_by_subnet(report.hosts)
         table = doc.add_table(rows=1, cols=2)
@@ -537,23 +561,59 @@ class DocxRenderer:
             table.rows[0].cells[1].text = "Ports"
 
             for h in sorted(hosts, key=lambda x: _ip_key(x.ip)):
-                ports_str = ",".join(
-                    f"{p.number}/{p.protocol}" for p in h.open_ports
-                )
+                ports_str = ",".join(f"{p.number}/{p.protocol}" for p in h.open_ports)
                 row = table.add_row().cells
                 row[0].text = h.ip
                 row[1].text = ports_str or ""
 
             sub_num += 1
 
+    def _tool_by_tool(self, doc: Document, report: ScanReport, reports_dir: Path) -> None:
+        sec = self._next_section()
+        doc.add_heading(f"{sec}. Tool-by-Tool Results", level=1)
+        doc.add_paragraph(
+            "Execution status, commands and full raw output for every scanner "
+            "used in this assessment."
+        )
+
+        for tool in collect_tool_outputs(report, reports_dir):
+            doc.add_heading(tool["label"], level=2)
+            counts = tool["severity_counts"]
+            doc.add_paragraph(
+                f"Status: {tool['status']} | Findings: {tool['finding_count']} "
+                f"(C:{counts['critical']} H:{counts['high']} M:{counts['medium']} "
+                f"L:{counts['low']} I:{counts['info']})"
+            )
+            cmd_para = doc.add_paragraph()
+            cmd_run = cmd_para.add_run("Command: " + tool["command"])
+            cmd_run.font.name = "Courier New"
+            cmd_run.font.size = Pt(8)
+
+            for raw in tool["files"]:
+                doc.add_heading(f"{raw['host']} — {raw['name']} ({raw['size']} bytes)", level=3)
+                if raw["binary"]:
+                    doc.add_paragraph(f"Binary file: {raw['path']}")
+                    continue
+                text = raw["text"]
+                for start in range(0, len(text), 20_000):
+                    para = doc.add_paragraph()
+                    run = para.add_run(text[start : start + 20_000])
+                    run.font.name = "Courier New"
+                    run.font.size = Pt(6)
+            doc.add_paragraph()
+
     def _web_screenshots(
-        self, doc: Document, report: ScanReport, reports_dir: Path,
+        self,
+        doc: Document,
+        report: ScanReport,
+        reports_dir: Path,
     ) -> None:
         # Only show screenshots for hosts that have NO findings — hosts with both
         # get screenshots embedded inline within _identified_issues instead.
         hosts_with_findings = {f.host for f in report.findings}
         hosts_with_ss = [
-            h for h in report.hosts
+            h
+            for h in report.hosts
             if getattr(h, "screenshots", None) and h.ip not in hosts_with_findings
         ]
         if not hosts_with_ss:
@@ -561,21 +621,12 @@ class DocxRenderer:
 
         sec = self._next_section()
         doc.add_heading(f"{sec}. Web Screenshots", level=1)
-        doc.add_paragraph(
-            "Screenshots of discovered web services captured during the assessment."
-        )
+        doc.add_paragraph("Screenshots of discovered web services captured during the assessment.")
 
         for h in hosts_with_ss:
             doc.add_heading(h.ip, level=2)
             for sc in h.screenshots:
-                png = (
-                    reports_dir.parent
-                    / "ips"
-                    / h.ip
-                    / "web"
-                    / "screenshots"
-                    / sc.filename
-                )
+                png = reports_dir.parent / "ips" / h.ip / "web" / "screenshots" / sc.filename
                 if not png.is_file():
                     continue
                 caption = sc.url
@@ -588,7 +639,10 @@ class DocxRenderer:
                     log.debug("Could not embed screenshot %s", png)
 
     def _identified_issues(
-        self, doc: Document, report: ScanReport, reports_dir: Path,
+        self,
+        doc: Document,
+        report: ScanReport,
+        reports_dir: Path,
     ) -> None:
         if not report.findings:
             return
@@ -617,7 +671,11 @@ class DocxRenderer:
             )
 
             for idx, finding in enumerate(subnet_findings, 1):
-                sev_label = finding.severity.name.upper() if hasattr(finding.severity, 'name') else str(finding.severity)
+                sev_label = (
+                    finding.severity.name.upper()
+                    if hasattr(finding.severity, "name")
+                    else str(finding.severity)
+                )
                 sev_color = _SEVERITY_RGB.get(finding.severity, _BLACK)
 
                 # Multi-run heading with colored severity label
