@@ -126,7 +126,16 @@ async def run_nuclei(
 
     template_dirs = _collect_template_dirs(config)
     cmd = list(base_cmd)
-    cmd.extend(["-o", str(vuln_dir / "nuclei.json")])
+    out_file = vuln_dir / "nuclei.json"
+    # nuclei appends to -o, and the tree is reused across scans of the same
+    # target, so a stale file makes a failed run look like it produced hits
+    # (and re-runs accumulate duplicates).  Always start from empty.
+    if out_file.exists():
+        try:
+            out_file.unlink()
+        except OSError:
+            log.warning("Could not remove stale nuclei output for %s", host.ip)
+    cmd.extend(["-o", str(out_file)])
     for d in template_dirs:
         cmd.extend(["-t", str(d)])
 
@@ -138,7 +147,23 @@ async def run_nuclei(
     if result.returncode != 0:
         log.warning("Nuclei failed for %s (rc=%d)", host.ip, result.returncode)
 
-    findings = parse_nuclei_json(vuln_dir / "nuclei.json")
+    # Only trust output this run actually wrote.
+    if not out_file.exists():
+        log.warning("Nuclei produced no output for %s — treating as no findings", host.ip)
+        return []
+
+    findings = parse_nuclei_json(out_file)
+    # nuclei can emit the same match more than once; dedupe before reporting.
+    deduped: list[Finding] = []
+    seen: set[tuple[str, str, str]] = set()
+    for finding in findings:
+        key = (finding.template_id, finding.matched_at, finding.title)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(finding)
+    findings = deduped
+
     if config.nuclei_templates:
         for f in findings:
             f.source = "nuclei_external"
