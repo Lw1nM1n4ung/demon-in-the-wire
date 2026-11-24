@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,18 @@ TOOL_SPECS: list[dict] = [
         "label": "Nmap NSE (vuln scripts)",
         "command": "nmap --script=vuln -p <ports> -oX <xml> <ip>",
         "globs": ["vuln/nmap_vuln.xml"],
+    },
+    {
+        "source": "naabu",
+        "label": "naabu (port scan fallback)",
+        "command": "naabu -host <ip> -p <port_range> -json -o naabu_scan.json",
+        "globs": ["naabu_scan.json"],
+    },
+    {
+        "source": "masscan",
+        "label": "masscan (port scan fallback)",
+        "command": "masscan <ip> -p<port_range> -oX masscan_scan.xml",
+        "globs": ["masscan_scan.xml"],
     },
     {
         "source": "nuclei",
@@ -157,6 +170,31 @@ def _read_text(path: Path) -> str:
     return _XML_ILLEGAL.sub("", _ANSI_ESCAPE.sub("", raw))
 
 
+# Output directories are keyed by target, so scanning the same subnet twice
+# reuses one tree.  Allow a little slack for clock skew and for files written
+# a moment before the recorded start.
+_WINDOW_SLACK = timedelta(seconds=120)
+
+
+def _scan_window(report: ScanReport) -> tuple[datetime, datetime] | None:
+    """Return the (start, end) window this report covers, if known."""
+    start = getattr(report, "scan_start", None)
+    if start is None:
+        return None
+    end = getattr(report, "scan_end", None) or datetime.now()
+    return start - _WINDOW_SLACK, end + _WINDOW_SLACK
+
+
+def _belongs_to_scan(path: Path, window: tuple[datetime, datetime] | None) -> bool:
+    if window is None:
+        return True
+    try:
+        mtime = datetime.fromtimestamp(path.stat().st_mtime)
+    except OSError:
+        return False
+    return window[0] <= mtime <= window[1]
+
+
 def collect_tool_outputs(report: ScanReport, reports_dir: Path) -> list[dict]:
     """Return per-tool findings + every raw output file (full text).
 
@@ -169,6 +207,7 @@ def collect_tool_outputs(report: ScanReport, reports_dir: Path) -> list[dict]:
         return cached[1]
 
     ips_root = Path(reports_dir).parent / "ips"
+    window = _scan_window(report)
     findings_by_source: dict[str, list] = defaultdict(list)
     for finding in report.findings:
         findings_by_source[_norm_source(finding.source)].append(finding)
@@ -192,6 +231,10 @@ def collect_tool_outputs(report: ScanReport, reports_dir: Path) -> list[dict]:
                 continue
             for pattern in spec.get("globs", []):
                 for path in sorted(host_dir.glob(pattern)):
+                    # A tree can hold artifacts from an earlier scan of the
+                    # same target; only this run's files count.
+                    if not _belongs_to_scan(path, window):
+                        continue
                     try:
                         size = path.stat().st_size
                     except OSError:

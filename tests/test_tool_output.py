@@ -100,3 +100,63 @@ def test_every_finding_source_has_a_tool_entry():
     covered = {spec["source"] for spec in TOOL_SPECS}
     missing = declared - covered - {"nuclei_external", "nettacker"}
     assert not missing, f"tools with findings but no report entry: {sorted(missing)}"
+
+
+def _age(path, seconds):
+    import os
+    import time
+
+    stamp = time.time() - seconds
+    os.utime(path, (stamp, stamp))
+
+
+def test_artifacts_from_an_earlier_scan_are_ignored(tmp_path):
+    """Output dirs are keyed by target, so a re-scan inherits the old tree."""
+    from datetime import datetime
+
+    reports, ips = _tree(tmp_path)
+    old = ips / "vuln" / "nuclei.json"
+    old.write_text("stale findings", encoding="utf-8")
+    _age(old, 6 * 3600)
+    old_nmap = ips / "nmap_xml" / "portscan.xml"
+    old_nmap.write_text("<nmaprun/>", encoding="utf-8")
+    _age(old_nmap, 6 * 3600)
+
+    report = _report()
+    report.scan_start = datetime.now()
+    outputs = {t["source"]: t for t in collect_tool_outputs(report, reports)}
+    # Stale artifacts must not be embedded...
+    assert outputs["nuclei"]["files"] == []
+    assert outputs["nmap"]["files"] == []
+    # ...and a tool that only has stale files counts as not having run.
+    assert outputs["nmap"]["status"] == "no output"
+
+
+def test_artifacts_inside_the_scan_window_are_kept(tmp_path):
+    from datetime import datetime, timedelta
+
+    reports, ips = _tree(tmp_path)
+    fresh = ips / "vuln" / "nuclei.json"
+    fresh.write_text("this run", encoding="utf-8")
+    _age(fresh, 30)
+
+    report = _report()
+    report.scan_start = datetime.now() - timedelta(minutes=10)
+    report.scan_end = datetime.now()
+    outputs = {t["source"]: t for t in collect_tool_outputs(report, reports)}
+    assert len(outputs["nuclei"]["files"]) == 1
+    assert outputs["nuclei"]["status"] == "ran"
+
+
+def test_files_touched_after_the_scan_ended_are_ignored(tmp_path):
+    from datetime import datetime, timedelta
+
+    reports, ips = _tree(tmp_path)
+    late = ips / "vuln" / "nuclei.json"
+    late.write_text("written later", encoding="utf-8")
+
+    report = _report()
+    report.scan_start = datetime.now() - timedelta(hours=2)
+    report.scan_end = datetime.now() - timedelta(hours=1)
+    outputs = {t["source"]: t for t in collect_tool_outputs(report, reports)}
+    assert outputs["nuclei"]["files"] == []
