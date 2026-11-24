@@ -194,3 +194,29 @@ def test_finding_accepts_string_severity_from_db():
     assert f.severity is Severity.HIGH
     report = ScanReport(target=f"{IP}/32", hosts=[Host(ip=IP)], findings=[f])
     assert report.severity_stats() == {Severity.HIGH: 1}
+
+
+def test_docx_raw_text_is_budgeted_to_stay_openable(tmp_path):
+    """Word refuses ~100 MB document.xml; the DOCX must stay small."""
+    from wireghost.reports import docx_renderer
+
+    reports, _ = _tree(tmp_path)
+    big = "A" * 5_000_000
+    (tmp_path / "ips" / IP / "vuln" / "nuclei.json").write_text(big, encoding="utf-8")
+
+    original = docx_renderer._DOCX_RAW_BUDGET
+    docx_renderer._DOCX_RAW_BUDGET = 200_000
+    try:
+        out = DocxRenderer().render(_report(), _config(), reports)
+    finally:
+        docx_renderer._DOCX_RAW_BUDGET = original
+
+    import zipfile
+
+    with zipfile.ZipFile(out) as zf:
+        size = zf.getinfo("word/document.xml").file_size
+    assert size < 2_000_000, f"document.xml too large for Word: {size}"
+
+    text = "\n".join(p.text for p in Document(str(out)).paragraphs)
+    assert "truncated" in text
+    assert "Full text" in text or "full text" in text

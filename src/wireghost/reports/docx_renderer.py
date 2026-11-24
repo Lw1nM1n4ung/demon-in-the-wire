@@ -25,6 +25,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("wireghost")
 
+# Word will not open documents whose document.xml runs to ~100 MB (a /24 with
+# per-host nuclei JSON produces that).  Keep the Word file openable by quoting
+# raw text up to a budget; XLSX and HTML carry the complete text.
+_DOCX_RAW_BUDGET = 2_000_000
+_DOCX_RAW_PER_FILE = 200_000
+
 _SEVERITY_RGB: dict[Severity, RGBColor] = {
     sev: RGBColor(*rgb) for sev, rgb in SEVERITY_COLORS.items()
 }
@@ -575,10 +581,13 @@ class DocxRenderer:
         sec = self._next_section()
         doc.add_heading(f"{sec}. Tool-by-Tool Results", level=1)
         doc.add_paragraph(
-            "Execution status, commands and full raw output for every scanner "
-            "used in this assessment."
+            "Execution status, commands and raw output for every scanner used in "
+            "this assessment. Raw text is quoted up to a per-document budget so "
+            "the file stays openable in Word; the complete output is in the "
+            "spreadsheet's 'Tool Raw Output' sheet and the HTML report."
         )
 
+        budget = _DOCX_RAW_BUDGET
         for tool in collect_tool_outputs(report, reports_dir):
             doc.add_heading(tool["label"], level=2)
             counts = tool["severity_counts"]
@@ -597,12 +606,26 @@ class DocxRenderer:
                 if raw["binary"]:
                     doc.add_paragraph(f"Binary file: {raw['path']}")
                     continue
+
                 text = raw["text"]
-                for start in range(0, len(text), 20_000):
+                if budget <= 0:
+                    doc.add_paragraph(
+                        f"Raw output omitted from this document (size budget reached). "
+                        f"Full text: {raw['path']}"
+                    )
+                    continue
+                quoted = text[: min(_DOCX_RAW_PER_FILE, budget)]
+                budget -= len(quoted)
+                for start in range(0, len(quoted), 20_000):
                     para = doc.add_paragraph()
-                    run = para.add_run(text[start : start + 20_000])
+                    run = para.add_run(quoted[start : start + 20_000])
                     run.font.name = "Courier New"
                     run.font.size = Pt(6)
+                if len(quoted) < len(text):
+                    doc.add_paragraph(
+                        f"[truncated: {len(text) - len(quoted):,} of {len(text):,} "
+                        f"characters omitted — full text: {raw['path']}]"
+                    )
             doc.add_paragraph()
 
     def _web_screenshots(
@@ -743,7 +766,15 @@ class DocxRenderer:
                 # Vulnerability Summary
                 doc.add_heading("Vulnerability Summary", level=3)
                 desc = finding.description or finding.raw_output or finding.title
-                doc.add_paragraph(desc)
+                # A single paragraph has to stay within Word's limits.
+                if len(desc) > _DOCX_RAW_PER_FILE:
+                    doc.add_paragraph(desc[:_DOCX_RAW_PER_FILE])
+                    doc.add_paragraph(
+                        f"[truncated: {len(desc) - _DOCX_RAW_PER_FILE:,} characters "
+                        "omitted from this finding's description]"
+                    )
+                else:
+                    doc.add_paragraph(desc)
 
                 if finding.source == "nuclei_external":
                     fp_para = doc.add_paragraph()
